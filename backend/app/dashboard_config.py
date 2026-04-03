@@ -23,7 +23,8 @@ DEFAULT_DASHBOARD_CONFIG = {
     "backtest_config": {
         "split_ratio": 0.7,
         "initial_capital": 10_000,
-        "benchmark": "equal_weight_buy_and_hold",
+        "max_investment_ratio": 0.85,
+        "benchmark": "equal_weight_buy_and_hold_with_cash",
     },
     "strategy_definitions": [
         build_portfolio_strategy_definition(

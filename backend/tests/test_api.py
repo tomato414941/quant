@@ -81,6 +81,7 @@ def test_dashboard_endpoint(monkeypatch) -> None:
     assert payload["study"]["id"] == "etf_portfolio_models_5y"
     assert payload["study"]["datasetSpec"]["source"] == "test"
     assert payload["study"]["executionModel"]["commissionPct"] == 0.1
+    assert payload["study"]["backtestConfig"]["maxInvestmentPct"] == 85.0
     assert len(payload["study"]["strategyDefinitions"]) == 2
     assert len(payload["study"]["portfolioModels"]) == 3
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0

@@ -88,6 +88,7 @@ type StudyResult = {
   backtestConfig: {
     splitRatioPct: number
     initialCapital: number
+    maxInvestmentPct: number
     benchmark: string
   }
   strategyDefinitions: PortfolioStrategyDefinition[]
@@ -122,11 +123,11 @@ function formatNumber(value: number): string {
 }
 
 function formatWeights(weights: PortfolioRun['weights']): string {
-  return weights
-    .filter((row) => row.weightPct > 0)
-    .slice(0, 3)
-    .map((row) => `${row.asset} ${row.weightPct.toFixed(1)}%`)
-    .join(' / ')
+  const positiveWeights = weights.filter((row) => row.weightPct > 0)
+  const cashRow = positiveWeights.find((row) => row.asset === 'CASH')
+  const assetRows = positiveWeights.filter((row) => row.asset !== 'CASH').slice(0, 3)
+  const rows = cashRow ? [...assetRows, cashRow] : assetRows
+  return rows.map((row) => `${row.asset} ${row.weightPct.toFixed(1)}%`).join(' / ')
 }
 
 function formatRunLabel(run: PortfolioRun): string {
@@ -250,7 +251,7 @@ function App() {
                     </div>
                     <div className="metric">
                       <span className="metric-label">ベンチマーク</span>
-                      <strong className="metric-value metric-value-text">等金額買い持ち</strong>
+                      <strong className="metric-value metric-value-text">等金額買い持ち + CASH</strong>
                     </div>
                   </div>
                 </article>
@@ -275,7 +276,13 @@ function App() {
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">等金額買い持ち</span>
+                      <span className="metric-label">最大投資比率</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.backtestConfig.maxInvestmentPct.toFixed(1)}%
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">等金額買い持ち + CASH</span>
                       <strong className="metric-value">
                         {formatPercent(benchmarkSummary?.totalReturnPct ?? 0)}
                       </strong>
@@ -320,7 +327,7 @@ function App() {
                       stroke="#7d8f6f"
                       strokeWidth={2.2}
                       dot={false}
-                      name="等金額買い持ち"
+                      name="等金額買い持ち + CASH"
                     />
                     {dashboard.runs.map((run, index) => (
                       <Line

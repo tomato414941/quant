@@ -116,6 +116,7 @@ def compare_portfolio_runs(
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
+    max_investment_ratio: float = 1.0,
 ) -> list[dict]:
     if not strategy_definitions:
         raise ValueError("At least one portfolio strategy is required.")
@@ -125,6 +126,8 @@ def compare_portfolio_runs(
         raise ValueError("Initial capital must be positive.")
     if transaction_cost < 0 or transaction_cost >= 1:
         raise ValueError("Transaction cost must be between 0 and 1.")
+    if max_investment_ratio <= 0 or max_investment_ratio > 1:
+        raise ValueError("Max investment ratio must be between 0 and 1.")
 
     returns = closes.pct_change().dropna()
     if len(returns) < 6:
@@ -133,7 +136,7 @@ def compare_portfolio_runs(
     split_index = compute_split_index(len(returns), split_ratio)
     train_returns = returns.iloc[:split_index]
     test_returns = returns.iloc[split_index:]
-    benchmark_weights = np.repeat(1 / len(returns.columns), len(returns.columns))
+    benchmark_weights = np.repeat(max_investment_ratio / len(returns.columns), len(returns.columns))
     benchmark_returns = pd.Series(
         returns.to_numpy(dtype="float64") @ benchmark_weights,
         index=returns.index,
@@ -146,6 +149,7 @@ def compare_portfolio_runs(
         strategy_train_returns = train_returns[selected_assets]
         for model_definition in model_definitions:
             weights = fit_portfolio_model(strategy_train_returns, model_definition)
+            weights = weights * max_investment_ratio
             expanded_weights = expand_weights(
                 universe_columns=returns.columns,
                 selected_columns=strategy_train_returns.columns,
@@ -178,7 +182,7 @@ def compare_portfolio_runs(
                     "key": f"{strategy_definition.key}__{model_definition.key}",
                     "strategy": serialize_portfolio_strategy_definition(strategy_definition),
                     "portfolioModel": serialize_portfolio_model_definition(model_definition),
-                    "weights": serialize_weights(returns.columns, expanded_weights),
+                    "weights": serialize_weights(returns.columns, expanded_weights, max_investment_ratio),
                     "selectedAssets": selected_assets,
                     "summary": full_backtest["summary"]["portfolio"],
                     "benchmark": full_backtest["summary"]["benchmark"],
@@ -200,6 +204,7 @@ def compare_portfolio_models(
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
+    max_investment_ratio: float = 1.0,
 ) -> list[dict]:
     return compare_portfolio_runs(
         closes=closes,
@@ -208,6 +213,7 @@ def compare_portfolio_models(
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         transaction_cost=transaction_cost,
+        max_investment_ratio=max_investment_ratio,
     )
 
 
@@ -344,11 +350,14 @@ def summarize_segment_from_returns(returns: pd.DataFrame, summary: dict) -> dict
     }
 
 
-def serialize_weights(columns: pd.Index, weights: np.ndarray) -> list[dict]:
+def serialize_weights(columns: pd.Index, weights: np.ndarray, max_investment_ratio: float) -> list[dict]:
     weight_map = [
         {"asset": str(asset), "weightPct": round(float(weight) * 100, 2)}
         for asset, weight in zip(columns, weights, strict=True)
     ]
+    cash_weight_pct = round((1 - max_investment_ratio) * 100, 2)
+    if cash_weight_pct > 0:
+        weight_map.append({"asset": "CASH", "weightPct": cash_weight_pct})
     weight_map.sort(key=lambda item: item["weightPct"], reverse=True)
     return weight_map
 

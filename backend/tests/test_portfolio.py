@@ -41,6 +41,7 @@ def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
+        max_investment_ratio=0.8,
     )
 
     assert [row["key"] for row in payload] == [
@@ -51,5 +52,5 @@ def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
         "momentum_top3__risk_budgeting",
         "momentum_top3__minimum_variance",
     ]
-    assert payload[0]["weights"][0]["asset"] in {"SPY", "QQQ", "IWM", "TLT", "GLD"}
+    assert any(row["asset"] == "CASH" and row["weightPct"] == 20.0 for row in payload[0]["weights"])
     assert len(payload[0]["series"]) == 6

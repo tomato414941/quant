@@ -55,6 +55,7 @@ def dashboard() -> dict:
             initial_capital=config["backtest_config"]["initial_capital"],
             split_ratio=config["backtest_config"]["split_ratio"],
             transaction_cost=config["execution_model"]["commission_pct"] / 100,
+            max_investment_ratio=config["backtest_config"]["max_investment_ratio"],
         )
 
         return {
@@ -278,6 +279,7 @@ def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
         "backtestConfig": {
             "splitRatioPct": round(config["backtest_config"]["split_ratio"] * 100, 1),
             "initialCapital": round(config["backtest_config"]["initial_capital"], 2),
+            "maxInvestmentPct": round(config["backtest_config"]["max_investment_ratio"] * 100, 1),
             "benchmark": config["backtest_config"]["benchmark"],
         },
         "portfolioModels": [

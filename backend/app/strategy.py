@@ -6,6 +6,11 @@ from dataclasses import dataclass
 
 
 TRADING_DAYS_PER_YEAR = 252
+SUPPORTED_STRATEGIES = {"mean_reversion", "momentum"}
+STRATEGY_LABELS = {
+    "mean_reversion": "逆張り",
+    "momentum": "上昇継続",
+}
 
 
 @dataclass
@@ -20,24 +25,18 @@ def run_backtest(
     initial_capital: float,
     holding_days: int = 1,
     transaction_cost: float = 0.0,
+    strategy: str = "mean_reversion",
 ) -> dict:
-    if len(prices) < 3:
-        raise ValueError("At least 3 prices are required.")
-    if threshold <= 0 or threshold >= 1:
-        raise ValueError("Threshold must be between 0 and 1.")
-    if initial_capital <= 0:
-        raise ValueError("Initial capital must be positive.")
-    if holding_days <= 0 or holding_days > 30:
-        raise ValueError("Holding days must be between 1 and 30.")
-    if transaction_cost < 0 or transaction_cost >= 1:
-        raise ValueError("Transaction cost must be between 0 and 1.")
+    validate_backtest_inputs(
+        prices=prices,
+        threshold=threshold,
+        initial_capital=initial_capital,
+        holding_days=holding_days,
+        transaction_cost=transaction_cost,
+        strategy=strategy,
+    )
 
-    returns = [0.0]
-    for index in range(1, len(prices)):
-        previous_close = prices[index - 1].close
-        current_close = prices[index].close
-        returns.append((current_close / previous_close) - 1)
-
+    returns = build_returns(prices)
     strategy_equity = initial_capital
     benchmark_equity = initial_capital
     strategy_returns: list[float] = []
@@ -51,7 +50,12 @@ def run_backtest(
     for index, point in enumerate(prices):
         previous_day_return = returns[index - 1] if index >= 1 else 0.0
         current_day_return = returns[index]
-        signal = previous_day_return <= -threshold and holding_remaining == 0
+        signal = should_enter_trade(
+            strategy=strategy,
+            previous_day_return=previous_day_return,
+            threshold=threshold,
+            holding_remaining=holding_remaining,
+        )
         if signal:
             holding_remaining = holding_days
             current_trade_growth = 1.0
@@ -89,30 +93,65 @@ def run_backtest(
                 trade_returns.append(current_trade_growth - 1)
 
     summary = {
-        "strategy": {
-            "totalReturnPct": round(percent_return(strategy_equity, initial_capital), 2),
-            "cagrPct": round(cagr(strategy_equity, initial_capital, len(prices)), 2),
-            "sharpeRatio": round(sharpe_ratio(strategy_returns), 2),
-            "maxDrawdownPct": round(max_drawdown(series, "strategyEquity"), 2),
-            "tradeCount": trade_count,
-            "winRatePct": round(win_rate(trade_returns), 2),
-        },
-        "benchmark": {
-            "totalReturnPct": round(percent_return(benchmark_equity, initial_capital), 2),
-            "cagrPct": round(cagr(benchmark_equity, initial_capital, len(prices)), 2),
-            "sharpeRatio": round(sharpe_ratio(benchmark_returns), 2),
-            "maxDrawdownPct": round(max_drawdown(series, "benchmarkEquity"), 2),
-        },
+        "strategy": summarize_metrics(strategy_equity, initial_capital, len(prices), strategy_returns, series, "strategyEquity"),
+        "benchmark": summarize_metrics(benchmark_equity, initial_capital, len(prices), benchmark_returns, series, "benchmarkEquity"),
         "config": {
+            "strategyId": strategy,
+            "strategyLabel": STRATEGY_LABELS[strategy],
             "thresholdPct": round(threshold * 100, 2),
             "initialCapital": round(initial_capital, 2),
             "holdingDays": holding_days,
             "transactionCostPct": round(transaction_cost * 100, 3),
-            "holdingRule": f"Buy for {holding_days} day(s) after a drop larger than threshold.",
         },
     }
+    summary["strategy"]["tradeCount"] = trade_count
+    summary["strategy"]["winRatePct"] = round(win_rate(trade_returns), 2)
 
     return {"summary": summary, "series": series}
+
+
+def run_split_backtest(
+    prices: list[PricePoint],
+    threshold: float,
+    initial_capital: float,
+    holding_days: int = 1,
+    transaction_cost: float = 0.0,
+    strategy: str = "mean_reversion",
+    split_ratio: float = 0.7,
+) -> dict:
+    validate_split_ratio(split_ratio)
+    split_index = int(len(prices) * split_ratio)
+    split_index = min(max(split_index, 3), len(prices) - 3)
+
+    training_prices = prices[:split_index]
+    testing_prices = prices[split_index:]
+    if len(training_prices) < 3 or len(testing_prices) < 3:
+        raise ValueError("Split ratio leaves too little data for train/test analysis.")
+
+    training_result = run_backtest(
+        prices=training_prices,
+        threshold=threshold,
+        initial_capital=initial_capital,
+        holding_days=holding_days,
+        transaction_cost=transaction_cost,
+        strategy=strategy,
+    )
+    testing_result = run_backtest(
+        prices=testing_prices,
+        threshold=threshold,
+        initial_capital=initial_capital,
+        holding_days=holding_days,
+        transaction_cost=transaction_cost,
+        strategy=strategy,
+    )
+
+    return {
+        "config": {
+            "splitRatioPct": round(split_ratio * 100, 1),
+        },
+        "train": summarize_segment(training_prices, training_result["summary"]),
+        "test": summarize_segment(testing_prices, testing_result["summary"]),
+    }
 
 
 def run_grid_search(
@@ -121,15 +160,16 @@ def run_grid_search(
     holding_days_options: list[int],
     initial_capital: float,
     transaction_cost: float = 0.0,
+    strategy: str = "mean_reversion",
 ) -> dict:
     if not thresholds:
         raise ValueError("At least one threshold is required.")
     if not holding_days_options:
         raise ValueError("At least one holding-day value is required.")
+    if strategy not in SUPPORTED_STRATEGIES:
+        raise ValueError("Unsupported strategy.")
 
     results: list[dict] = []
-    benchmark_summary: dict | None = None
-
     for threshold in thresholds:
         for holding_days in holding_days_options:
             backtest = run_backtest(
@@ -138,9 +178,9 @@ def run_grid_search(
                 initial_capital=initial_capital,
                 holding_days=holding_days,
                 transaction_cost=transaction_cost,
+                strategy=strategy,
             )
             summary = backtest["summary"]
-            benchmark_summary = summary["benchmark"]
             strategy_summary = summary["strategy"]
             results.append(
                 {
@@ -169,6 +209,8 @@ def run_grid_search(
 
     return {
         "config": {
+            "strategyId": strategy,
+            "strategyLabel": STRATEGY_LABELS[strategy],
             "thresholdValuesPct": [round(value * 100, 2) for value in thresholds],
             "holdingDaysValues": holding_days_options,
             "initialCapital": round(initial_capital, 2),
@@ -184,6 +226,7 @@ def compare_tickers(
     holding_days: int,
     initial_capital: float,
     transaction_cost: float,
+    strategy: str,
 ) -> dict:
     comparisons: list[dict] = []
     for dataset in datasets:
@@ -193,6 +236,7 @@ def compare_tickers(
             initial_capital=initial_capital,
             holding_days=holding_days,
             transaction_cost=transaction_cost,
+            strategy=strategy,
         )
         summary = backtest["summary"]
         comparisons.append(
@@ -214,12 +258,131 @@ def compare_tickers(
 
     return {
         "config": {
+            "strategyId": strategy,
+            "strategyLabel": STRATEGY_LABELS[strategy],
             "thresholdPct": round(threshold * 100, 2),
             "holdingDays": holding_days,
             "initialCapital": round(initial_capital, 2),
             "transactionCostPct": round(transaction_cost * 100, 3),
         },
         "results": comparisons,
+    }
+
+
+def compare_periods(
+    datasets: list[dict],
+    threshold: float,
+    holding_days: int,
+    initial_capital: float,
+    transaction_cost: float,
+    strategy: str,
+) -> dict:
+    comparisons: list[dict] = []
+    for dataset in datasets:
+        backtest = run_backtest(
+            prices=dataset["prices"],
+            threshold=threshold,
+            initial_capital=initial_capital,
+            holding_days=holding_days,
+            transaction_cost=transaction_cost,
+            strategy=strategy,
+        )
+        summary = backtest["summary"]
+        comparisons.append(
+            {
+                "period": dataset["period"],
+                "strategy": summary["strategy"],
+                "benchmark": summary["benchmark"],
+            }
+        )
+
+    return {
+        "config": {
+            "strategyId": strategy,
+            "strategyLabel": STRATEGY_LABELS[strategy],
+            "thresholdPct": round(threshold * 100, 2),
+            "holdingDays": holding_days,
+            "initialCapital": round(initial_capital, 2),
+            "transactionCostPct": round(transaction_cost * 100, 3),
+        },
+        "results": comparisons,
+    }
+
+
+def validate_backtest_inputs(
+    prices: list[PricePoint],
+    threshold: float,
+    initial_capital: float,
+    holding_days: int,
+    transaction_cost: float,
+    strategy: str,
+) -> None:
+    if len(prices) < 3:
+        raise ValueError("At least 3 prices are required.")
+    if threshold <= 0 or threshold >= 1:
+        raise ValueError("Threshold must be between 0 and 1.")
+    if initial_capital <= 0:
+        raise ValueError("Initial capital must be positive.")
+    if holding_days <= 0 or holding_days > 30:
+        raise ValueError("Holding days must be between 1 and 30.")
+    if transaction_cost < 0 or transaction_cost >= 1:
+        raise ValueError("Transaction cost must be between 0 and 1.")
+    if strategy not in SUPPORTED_STRATEGIES:
+        raise ValueError("Unsupported strategy.")
+
+
+def validate_split_ratio(split_ratio: float) -> None:
+    if split_ratio <= 0.5 or split_ratio >= 0.95:
+        raise ValueError("Split ratio must be between 0.5 and 0.95.")
+
+
+def build_returns(prices: list[PricePoint]) -> list[float]:
+    returns = [0.0]
+    for index in range(1, len(prices)):
+        previous_close = prices[index - 1].close
+        current_close = prices[index].close
+        returns.append((current_close / previous_close) - 1)
+    return returns
+
+
+def should_enter_trade(
+    strategy: str,
+    previous_day_return: float,
+    threshold: float,
+    holding_remaining: int,
+) -> bool:
+    if holding_remaining != 0:
+        return False
+    if strategy == "mean_reversion":
+        return previous_day_return <= -threshold
+    if strategy == "momentum":
+        return previous_day_return >= threshold
+    raise ValueError("Unsupported strategy.")
+
+
+def summarize_segment(prices: list[PricePoint], summary: dict) -> dict:
+    return {
+        "startDate": prices[0].date,
+        "endDate": prices[-1].date,
+        "dayCount": len(prices),
+        "strategy": summary["strategy"],
+        "benchmark": summary["benchmark"],
+    }
+
+
+def summarize_metrics(
+    final_value: float,
+    initial_value: float,
+    periods: int,
+    returns: list[float],
+    series: list[dict],
+    equity_key: str,
+) -> dict:
+    return {
+        "totalReturnPct": round(percent_return(final_value, initial_value), 2),
+        "cagrPct": round(cagr(final_value, initial_value, periods), 2),
+        "sharpeRatio": round(sharpe_ratio(returns), 2),
+        "maxDrawdownPct": round(max_drawdown(series, equity_key), 2),
     }
 
 
@@ -258,4 +421,4 @@ def win_rate(trade_returns: list[float]) -> float:
     if not trade_returns:
         return 0.0
     wins = sum(1 for value in trade_returns if value > 0)
-    return (wins / len(trade_returns)) * 100
+    return wins / len(trade_returns) * 100

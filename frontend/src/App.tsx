@@ -10,6 +10,8 @@ import {
 } from 'recharts'
 import './App.css'
 
+type StrategyKey = 'mean_reversion' | 'momentum'
+
 type SummaryMetrics = {
   totalReturnPct: number
   cagrPct: number
@@ -21,8 +23,25 @@ type SummaryMetrics = {
 
 type DatasetInfo = {
   ticker: string
-  period: string
+  period?: string
   source: string
+}
+
+type StrategyConfig = {
+  strategyId: StrategyKey
+  strategyLabel: string
+  thresholdPct: number
+  initialCapital: number
+  holdingDays: number
+  transactionCostPct: number
+}
+
+type SplitSegment = {
+  startDate: string
+  endDate: string
+  dayCount: number
+  strategy: SummaryMetrics
+  benchmark: SummaryMetrics
 }
 
 type BacktestResult = {
@@ -30,12 +49,14 @@ type BacktestResult = {
   summary: {
     strategy: SummaryMetrics
     benchmark: SummaryMetrics
+    config: StrategyConfig
+  }
+  splitAnalysis: {
     config: {
-      thresholdPct: number
-      initialCapital: number
-      holdingDays: number
-      transactionCostPct: number
+      splitRatioPct: number
     }
+    train: SplitSegment
+    test: SplitSegment
   }
   series: Array<{
     date: string
@@ -64,6 +85,8 @@ type GridSearchRow = {
 type GridSearchResult = {
   dataset: DatasetInfo
   config: {
+    strategyId: StrategyKey
+    strategyLabel: string
     thresholdValuesPct: number[]
     holdingDaysValues: number[]
     initialCapital: number
@@ -73,14 +96,19 @@ type GridSearchResult = {
 }
 
 type TickerCompareResult = {
-  config: {
-    thresholdPct: number
-    holdingDays: number
-    initialCapital: number
-    transactionCostPct: number
-  }
+  config: StrategyConfig
   results: Array<{
     ticker: string
+    period: string
+    strategy: SummaryMetrics
+    benchmark: SummaryMetrics
+  }>
+}
+
+type PeriodCompareResult = {
+  dataset: DatasetInfo
+  config: StrategyConfig
+  results: Array<{
     period: string
     strategy: SummaryMetrics
     benchmark: SummaryMetrics
@@ -110,7 +138,7 @@ function isValidPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0
 }
 
-function isValidTicker(value: string): boolean {
+function isNonEmpty(value: string): boolean {
   return value.trim().length > 0
 }
 
@@ -118,12 +146,30 @@ function isValidTransactionCost(value: number): boolean {
   return value >= 0 && value < 100
 }
 
+function isValidSplitRatio(value: number): boolean {
+  return value > 50 && value < 95
+}
+
+function thresholdLabel(strategy: StrategyKey): string {
+  return strategy === 'mean_reversion' ? '下落閾値' : '上昇閾値'
+}
+
+function ruleDescription(config: StrategyConfig): string {
+  if (config.strategyId === 'mean_reversion') {
+    return `前日が ${config.thresholdPct.toFixed(2)}% 以上下落したら ${config.holdingDays} 日保有`
+  }
+  return `前日が ${config.thresholdPct.toFixed(2)}% 以上上昇したら ${config.holdingDays} 日保有`
+}
+
 function App() {
   const [ticker, setTicker] = useState('SPY')
   const [comparisonTickers, setComparisonTickers] = useState('SPY,QQQ,IWM,TLT,GLD,BTC-USD')
   const [period, setPeriod] = useState('2y')
+  const [periodComparePeriods, setPeriodComparePeriods] = useState('6mo,1y,2y,3y,5y')
+  const [strategy, setStrategy] = useState<StrategyKey>('mean_reversion')
   const [threshold, setThreshold] = useState(3)
   const [holdingDays, setHoldingDays] = useState(1)
+  const [splitRatio, setSplitRatio] = useState(70)
   const [initialCapital, setInitialCapital] = useState(10000)
   const [transactionCost, setTransactionCost] = useState(0.1)
   const [thresholdGrid, setThresholdGrid] = useState('1.5,2,3,4,5')
@@ -131,9 +177,11 @@ function App() {
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [gridSearch, setGridSearch] = useState<GridSearchResult | null>(null)
   const [tickerCompare, setTickerCompare] = useState<TickerCompareResult | null>(null)
+  const [periodCompare, setPeriodCompare] = useState<PeriodCompareResult | null>(null)
   const [singleLoading, setSingleLoading] = useState(false)
   const [gridLoading, setGridLoading] = useState(false)
   const [compareLoading, setCompareLoading] = useState(false)
+  const [periodLoading, setPeriodLoading] = useState(false)
   const [status, setStatus] = useState<StatusState>({
     tone: 'success',
     text: '実データの結果を自動で読み込みます。',
@@ -142,28 +190,42 @@ function App() {
   const deferredTicker = useDeferredValue(ticker)
   const deferredComparisonTickers = useDeferredValue(comparisonTickers)
   const deferredPeriod = useDeferredValue(period)
+  const deferredPeriodComparePeriods = useDeferredValue(periodComparePeriods)
+  const deferredStrategy = useDeferredValue(strategy)
   const deferredThreshold = useDeferredValue(threshold)
   const deferredHoldingDays = useDeferredValue(holdingDays)
+  const deferredSplitRatio = useDeferredValue(splitRatio)
   const deferredInitialCapital = useDeferredValue(initialCapital)
   const deferredTransactionCost = useDeferredValue(transactionCost)
   const deferredThresholdGrid = useDeferredValue(thresholdGrid)
   const deferredHoldingDaysGrid = useDeferredValue(holdingDaysGrid)
 
-  const refreshSingleBacktest = useEffectEvent(async () => {
-    if (!isValidTicker(deferredTicker)) {
+  const validateCoreInputs = useEffectEvent(() => {
+    if (!isNonEmpty(deferredTicker)) {
       setStatus({ tone: 'error', text: '銘柄コードを入力してください。' })
-      return
+      return false
     }
     if (!isValidPositiveInteger(deferredHoldingDays)) {
       setStatus({ tone: 'error', text: '保有日数は 1 以上の整数で入力してください。' })
-      return
+      return false
     }
     if (!isValidPositiveInteger(deferredInitialCapital)) {
       setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
-      return
+      return false
     }
     if (!isValidTransactionCost(deferredTransactionCost)) {
       setStatus({ tone: 'error', text: '片道コストは 0 以上 100 未満で入力してください。' })
+      return false
+    }
+    if (!isValidSplitRatio(deferredSplitRatio)) {
+      setStatus({ tone: 'error', text: '学習期間の比率は 50% 超 95% 未満で入力してください。' })
+      return false
+    }
+    return true
+  })
+
+  const refreshSingleBacktest = useEffectEvent(async () => {
+    if (!validateCoreInputs()) {
       return
     }
 
@@ -172,9 +234,11 @@ function App() {
       const params = new URLSearchParams({
         ticker: deferredTicker.trim().toUpperCase(),
         period: deferredPeriod,
+        strategy: deferredStrategy,
         threshold: (deferredThreshold / 100).toString(),
         initial_capital: deferredInitialCapital.toString(),
         holding_days: deferredHoldingDays.toString(),
+        split_ratio: (deferredSplitRatio / 100).toString(),
         transaction_cost: (deferredTransactionCost / 100).toString(),
       })
       const response = await fetch(`${API_BASE_URL}/api/backtest?${params.toString()}`)
@@ -186,7 +250,7 @@ function App() {
       startTransition(() => setResult(payload))
       setStatus({
         tone: 'success',
-        text: `${payload.dataset.ticker} の単発結果を表示しています。`,
+        text: `${payload.dataset.ticker} の ${payload.summary.config.strategyLabel} 結果を表示しています。`,
       })
     } catch (caughtError) {
       setStatus({
@@ -199,16 +263,7 @@ function App() {
   })
 
   const refreshGridSearch = useEffectEvent(async () => {
-    if (!isValidTicker(deferredTicker)) {
-      setStatus({ tone: 'error', text: '銘柄コードを入力してください。' })
-      return
-    }
-    if (!isValidPositiveInteger(deferredInitialCapital)) {
-      setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
-      return
-    }
-    if (!isValidTransactionCost(deferredTransactionCost)) {
-      setStatus({ tone: 'error', text: '片道コストは 0 以上 100 未満で入力してください。' })
+    if (!validateCoreInputs()) {
       return
     }
 
@@ -217,6 +272,7 @@ function App() {
       const params = new URLSearchParams({
         ticker: deferredTicker.trim().toUpperCase(),
         period: deferredPeriod,
+        strategy: deferredStrategy,
         threshold_values: deferredThresholdGrid,
         holding_days_values: deferredHoldingDaysGrid,
         initial_capital: deferredInitialCapital.toString(),
@@ -240,16 +296,11 @@ function App() {
   })
 
   const refreshTickerCompare = useEffectEvent(async () => {
-    if (!isValidTicker(deferredComparisonTickers)) {
+    if (!validateCoreInputs()) {
+      return
+    }
+    if (!isNonEmpty(deferredComparisonTickers)) {
       setStatus({ tone: 'error', text: '比較する銘柄を 1 つ以上入力してください。' })
-      return
-    }
-    if (!isValidPositiveInteger(deferredInitialCapital)) {
-      setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
-      return
-    }
-    if (!isValidTransactionCost(deferredTransactionCost)) {
-      setStatus({ tone: 'error', text: '片道コストは 0 以上 100 未満で入力してください。' })
       return
     }
 
@@ -258,6 +309,7 @@ function App() {
       const params = new URLSearchParams({
         tickers: deferredComparisonTickers,
         period: deferredPeriod,
+        strategy: deferredStrategy,
         threshold: (deferredThreshold / 100).toString(),
         initial_capital: deferredInitialCapital.toString(),
         holding_days: deferredHoldingDays.toString(),
@@ -280,11 +332,74 @@ function App() {
     }
   })
 
+  const refreshPeriodCompare = useEffectEvent(async () => {
+    if (!validateCoreInputs()) {
+      return
+    }
+    if (!isNonEmpty(deferredPeriodComparePeriods)) {
+      setStatus({ tone: 'error', text: '比較する期間を 1 つ以上入力してください。' })
+      return
+    }
+
+    setPeriodLoading(true)
+    try {
+      const params = new URLSearchParams({
+        ticker: deferredTicker.trim().toUpperCase(),
+        periods: deferredPeriodComparePeriods,
+        strategy: deferredStrategy,
+        threshold: (deferredThreshold / 100).toString(),
+        initial_capital: deferredInitialCapital.toString(),
+        holding_days: deferredHoldingDays.toString(),
+        transaction_cost: (deferredTransactionCost / 100).toString(),
+      })
+      const response = await fetch(`${API_BASE_URL}/api/period-compare?${params.toString()}`)
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.detail ?? '複数期間比較の取得に失敗しました。')
+      }
+
+      startTransition(() => setPeriodCompare(payload))
+    } catch (caughtError) {
+      setStatus({
+        tone: 'error',
+        text: caughtError instanceof Error ? caughtError.message : '不明なエラーが発生しました。',
+      })
+    } finally {
+      setPeriodLoading(false)
+    }
+  })
+
   useEffect(() => {
     void refreshSingleBacktest()
   }, [
     deferredTicker,
     deferredPeriod,
+    deferredStrategy,
+    deferredThreshold,
+    deferredHoldingDays,
+    deferredSplitRatio,
+    deferredInitialCapital,
+    deferredTransactionCost,
+  ])
+
+  useEffect(() => {
+    void refreshGridSearch()
+  }, [
+    deferredTicker,
+    deferredPeriod,
+    deferredStrategy,
+    deferredThresholdGrid,
+    deferredHoldingDaysGrid,
+    deferredInitialCapital,
+    deferredTransactionCost,
+  ])
+
+  useEffect(() => {
+    void refreshTickerCompare()
+  }, [
+    deferredComparisonTickers,
+    deferredPeriod,
+    deferredStrategy,
     deferredThreshold,
     deferredHoldingDays,
     deferredInitialCapital,
@@ -292,12 +407,16 @@ function App() {
   ])
 
   useEffect(() => {
-    void refreshGridSearch()
-  }, [deferredTicker, deferredPeriod, deferredThresholdGrid, deferredHoldingDaysGrid, deferredInitialCapital, deferredTransactionCost])
-
-  useEffect(() => {
-    void refreshTickerCompare()
-  }, [deferredComparisonTickers, deferredPeriod, deferredThreshold, deferredHoldingDays, deferredInitialCapital, deferredTransactionCost])
+    void refreshPeriodCompare()
+  }, [
+    deferredTicker,
+    deferredPeriodComparePeriods,
+    deferredStrategy,
+    deferredThreshold,
+    deferredHoldingDays,
+    deferredInitialCapital,
+    deferredTransactionCost,
+  ])
 
   return (
     <main className="app-shell">
@@ -306,8 +425,8 @@ function App() {
           <p className="eyebrow">ミニマルクオンツ</p>
           <h1>1つのルールから始める、最小のクオンツ検証。</h1>
           <p className="hero-copy">
-            実データだけを使う最小構成のクオンツ検証です。銘柄コードを入れると価格系列を取得し、
-            明示的なルールでバックテストして結果をそのまま確認できます。
+            実データだけを使い、同じルールを単発・学習/検証・複数期間・複数銘柄で並べて見ます。
+            利益が出ても、その利益がどこまで安定しているかを最短で確認できます。
           </p>
         </section>
 
@@ -318,7 +437,7 @@ function App() {
                 <h2>結果</h2>
                 <p>
                   {result
-                    ? `${result.dataset.ticker} / ${result.dataset.period} / 前日下落が ${result.summary.config.thresholdPct.toFixed(2)}% 以上なら ${result.summary.config.holdingDays} 日保有。`
+                    ? `${result.dataset.ticker} / ${result.dataset.period} / ${result.summary.config.strategyLabel} / ${ruleDescription(result.summary.config)}`
                     : 'まだ結果がありません。'}
                 </p>
               </div>
@@ -421,7 +540,7 @@ function App() {
                         stroke="#b45b2a"
                         strokeWidth={2.5}
                         dot={false}
-                        name="戦略"
+                        name={result.summary.config.strategyLabel}
                       />
                       <Line
                         type="monotone"
@@ -434,8 +553,53 @@ function App() {
                     </LineChart>
                   </ResponsiveContainer>
                   <p className="chart-note">
-                    戦略の資産推移を買い持ちと直接比較して、このルールに意味があるかを見ます。
+                    単発の資産推移です。まずは全期間でルールの形を見るためのチャートです。
                   </p>
+                </div>
+
+                <div className="content-block">
+                  <div className="table-header">
+                    <div>
+                      <h3>学習 / 検証分割</h3>
+                      <p>
+                        全期間のうち前半 {result.splitAnalysis.config.splitRatioPct.toFixed(1)}% を学習、後半を検証として並べています。
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="table-scroll">
+                    <table className="results-table">
+                      <thead>
+                        <tr>
+                          <th>区間</th>
+                          <th>期間</th>
+                          <th>戦略</th>
+                          <th>Sharpe</th>
+                          <th>最大DD</th>
+                          <th>勝率</th>
+                          <th>回数</th>
+                          <th>買い持ち</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label: '学習', value: result.splitAnalysis.train },
+                          { label: '検証', value: result.splitAnalysis.test },
+                        ].map((row) => (
+                          <tr key={row.label}>
+                            <td>{row.label}</td>
+                            <td>{`${row.value.startDate} - ${row.value.endDate}`}</td>
+                            <td>{formatPercent(row.value.strategy.totalReturnPct)}</td>
+                            <td>{row.value.strategy.sharpeRatio.toFixed(2)}</td>
+                            <td>{formatPercent(-row.value.strategy.maxDrawdownPct)}</td>
+                            <td>{formatPercent(row.value.strategy.winRatePct ?? 0)}</td>
+                            <td>{row.value.strategy.tradeCount ?? 0}</td>
+                            <td>{formatPercent(row.value.benchmark.totalReturnPct)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 <div className="content-block">
@@ -444,7 +608,7 @@ function App() {
                       <h3>条件比較</h3>
                       <p>
                         {gridSearch
-                          ? `${gridSearch.dataset.ticker} / ${gridSearch.dataset.period} の実データで、閾値 ${gridSearch.config.thresholdValuesPct.join(', ')}% と保有日数 ${gridSearch.config.holdingDaysValues.join(', ')} 日を比較しています。`
+                          ? `${gridSearch.config.strategyLabel} を ${gridSearch.dataset.ticker} / ${gridSearch.dataset.period} に当て、閾値 ${gridSearch.config.thresholdValuesPct.join(', ')}% と保有日数 ${gridSearch.config.holdingDaysValues.join(', ')} 日を比較しています。`
                           : '条件比較を読み込んでいます。'}
                       </p>
                       <p className="footnote">
@@ -492,10 +656,59 @@ function App() {
                 <div className="content-block">
                   <div className="table-header">
                     <div>
+                      <h3>複数期間比較</h3>
+                      <p>
+                        {periodCompare
+                          ? `${periodCompare.dataset.ticker} で ${periodCompare.config.strategyLabel} を期間別に見ています。`
+                          : '複数期間比較を読み込んでいます。'}
+                      </p>
+                      <p className="footnote">
+                        {periodLoading ? '複数期間比較を更新中…' : '期間一覧を変えると自動で更新されます。'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {periodCompare && periodCompare.results.length > 0 ? (
+                    <div className="table-scroll">
+                      <table className="results-table">
+                        <thead>
+                          <tr>
+                            <th>期間</th>
+                            <th>戦略</th>
+                            <th>Sharpe</th>
+                            <th>最大DD</th>
+                            <th>勝率</th>
+                            <th>回数</th>
+                            <th>買い持ち</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {periodCompare.results.map((row) => (
+                            <tr key={row.period}>
+                              <td>{row.period}</td>
+                              <td>{formatPercent(row.strategy.totalReturnPct)}</td>
+                              <td>{row.strategy.sharpeRatio.toFixed(2)}</td>
+                              <td>{formatPercent(-row.strategy.maxDrawdownPct)}</td>
+                              <td>{formatPercent(row.strategy.winRatePct ?? 0)}</td>
+                              <td>{row.strategy.tradeCount ?? 0}</td>
+                              <td>{formatPercent(row.benchmark.totalReturnPct)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state">複数期間比較を読み込めませんでした。</div>
+                  )}
+                </div>
+
+                <div className="content-block">
+                  <div className="table-header">
+                    <div>
                       <h3>複数銘柄比較</h3>
                       <p>
                         {tickerCompare
-                          ? `同じルールを ${tickerCompare.results.length} 銘柄に当てています。片道コスト ${tickerCompare.config.transactionCostPct.toFixed(3)}%。`
+                          ? `同じ ${tickerCompare.config.strategyLabel} を ${tickerCompare.results.length} 銘柄に当てています。片道コスト ${tickerCompare.config.transactionCostPct.toFixed(3)}%。`
                           : '複数銘柄比較を読み込んでいます。'}
                       </p>
                       <p className="footnote">
@@ -553,7 +766,22 @@ function App() {
 
             <div className="control-grid">
               <div className="field">
-                <label htmlFor="ticker">銘柄コード</label>
+                <label htmlFor="strategy">ルール</label>
+                <select
+                  id="strategy"
+                  value={strategy}
+                  onChange={(event) => setStrategy(event.target.value as StrategyKey)}
+                >
+                  <option value="mean_reversion">逆張り</option>
+                  <option value="momentum">上昇継続</option>
+                </select>
+                <p className="footnote">
+                  逆張りは大きく下がった翌日に買い、上昇継続は大きく上がった翌日に買います。
+                </p>
+              </div>
+
+              <div className="field">
+                <label htmlFor="ticker">主銘柄</label>
                 <input
                   id="ticker"
                   type="text"
@@ -575,11 +803,12 @@ function App() {
               </div>
 
               <div className="field">
-                <label htmlFor="period">取得期間</label>
+                <label htmlFor="period">主期間</label>
                 <select id="period" value={period} onChange={(event) => setPeriod(event.target.value)}>
                   <option value="6mo">6か月</option>
                   <option value="1y">1年</option>
                   <option value="2y">2年</option>
+                  <option value="3y">3年</option>
                   <option value="5y">5年</option>
                   <option value="10y">10年</option>
                   <option value="max">全期間</option>
@@ -587,8 +816,19 @@ function App() {
               </div>
 
               <div className="field">
+                <label htmlFor="period-compare-periods">比較する期間一覧</label>
+                <input
+                  id="period-compare-periods"
+                  type="text"
+                  value={periodComparePeriods}
+                  onChange={(event) => setPeriodComparePeriods(event.target.value)}
+                />
+                <p className="footnote">例: 6mo,1y,2y,3y,5y</p>
+              </div>
+
+              <div className="field">
                 <div className="range-header">
-                  <label htmlFor="threshold">下落閾値</label>
+                  <label htmlFor="threshold">{thresholdLabel(strategy)}</label>
                   <span className="range-value">{threshold.toFixed(1)}%</span>
                 </div>
                 <input
@@ -612,6 +852,22 @@ function App() {
                   step="1"
                   value={holdingDays}
                   onChange={(event) => setHoldingDays(Number(event.target.value))}
+                />
+              </div>
+
+              <div className="field">
+                <div className="range-header">
+                  <label htmlFor="split-ratio">学習期間の比率</label>
+                  <span className="range-value">{splitRatio.toFixed(0)}%</span>
+                </div>
+                <input
+                  id="split-ratio"
+                  type="range"
+                  min="55"
+                  max="90"
+                  step="5"
+                  value={splitRatio}
+                  onChange={(event) => setSplitRatio(Number(event.target.value))}
                 />
               </div>
 

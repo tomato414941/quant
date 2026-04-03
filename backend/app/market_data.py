@@ -5,7 +5,7 @@ import yfinance as yf
 from app.strategy import PricePoint
 
 
-SUPPORTED_PERIODS = {"6mo", "1y", "2y", "5y", "10y", "max"}
+SUPPORTED_PERIODS = {"6mo", "1y", "2y", "3y", "5y", "10y", "max"}
 
 
 def fetch_market_prices(ticker: str, period: str) -> tuple[list[PricePoint], dict[str, str]]:

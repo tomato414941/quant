@@ -16,6 +16,7 @@ type SummaryMetrics = {
   cagrPct: number
   sharpeRatio: number
   maxDrawdownPct: number
+  turnoverPct: number
 }
 
 type PortfolioStrategyDefinition = {
@@ -77,13 +78,18 @@ type StudyResult = {
   datasetSpec: {
     tickers: string[]
     period: string
+    sanityPeriods: string[]
     frequency: string
     source: string
+    alignedStartDate: string
+    alignedEndDate: string
+    rowCount: number
   }
   executionModel: {
     entry: string
     commissionPct: number
     slippagePct: number
+    rebalanceFrequency: string
   }
   backtestConfig: {
     splitRatioPct: number
@@ -99,6 +105,19 @@ type DashboardResult = {
   study: StudyResult
   runs: PortfolioRun[]
   comparisonSeries: ComparisonRow[]
+  sanityChecks: Array<{
+    period: string
+    datasetSpec: {
+      tickers: string[]
+      period: string
+      frequency: string
+      source: string
+      alignedStartDate: string
+      alignedEndDate: string
+      rowCount: number
+    }
+    runs: PortfolioRun[]
+  }>
 }
 
 type StatusState = {
@@ -154,7 +173,7 @@ function App() {
       startTransition(() => setDashboard(payload))
       setStatus({
         tone: 'success',
-        text: `${payload.study.strategyDefinitions.length} 戦略 x ${payload.study.portfolioModels.length} ポートフォリオ構築法を比較しています。`,
+        text: `${payload.study.datasetSpec.period} を主期間に、${payload.study.executionModel.rebalanceFrequency} リバランスで比較しています。`,
       })
     } catch (caughtError) {
       setStatus({
@@ -180,8 +199,9 @@ function App() {
           <p className="eyebrow">ミニマルクオンツ</p>
           <h1>戦略と配分法を、同じ時系列で比べる。</h1>
           <p className="hero-copy">
-            この画面は、同じETFユニバースに対して `戦略 x ポートフォリオ構築法` の組み合わせを比較する実験です。
-            戦略は候補資産を選び、`skfolio` の配分法がその中で重みを決めます。
+            この画面は、10y を主期間にした `戦略 x ポートフォリオ構築法` の比較実験です。直近 3y は
+            sanity check として別に並べ、長期で強いかと最近も壊れていないかを分けて見ます。暗号資産を
+            含むため、実際の共通期間は開始日が後ろに寄ります。配分は学習後に月次で更新し、turnover も見ます。
           </p>
         </section>
 
@@ -214,9 +234,27 @@ function App() {
                       </strong>
                     </div>
                     <div className="metric">
+                      <span className="metric-label">補助確認</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.datasetSpec.sanityPeriods.join(', ')}
+                      </strong>
+                    </div>
+                    <div className="metric">
                       <span className="metric-label">戦略数</span>
                       <strong className="metric-value metric-value-text">
                         {dashboard.study.strategyDefinitions.length}
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">共通期間</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.datasetSpec.alignedStartDate} - {dashboard.study.datasetSpec.alignedEndDate}
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">共通行数</span>
+                      <strong className="metric-value metric-value-text">
+                        {formatNumber(dashboard.study.datasetSpec.rowCount)}
                       </strong>
                     </div>
                     <div className="metric">
@@ -247,6 +285,12 @@ function App() {
                       <span className="metric-label">スリッページ</span>
                       <strong className="metric-value metric-value-text">
                         {dashboard.study.executionModel.slippagePct.toFixed(3)}%
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">リバランス</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.executionModel.rebalanceFrequency}
                       </strong>
                     </div>
                     <div className="metric">
@@ -345,7 +389,7 @@ function App() {
                 <p className="chart-note">
                   {loading
                     ? '比較実験を更新中…'
-                    : '各線は 戦略 x 配分法 の組み合わせです。縦線より後ろが検証期間です。'}
+                    : `${dashboard.study.datasetSpec.period} の各線は 戦略 x 配分法 の組み合わせです。縦線より後ろが検証期間で、以後は ${dashboard.study.executionModel.rebalanceFrequency} で重みを更新します。`}
                 </p>
               </div>
 
@@ -363,10 +407,11 @@ function App() {
                         <th>戦略</th>
                         <th>配分法</th>
                         <th>候補資産</th>
-                        <th>代表ウェイト</th>
+                        <th>直近ウェイト</th>
                         <th>総リターン</th>
                         <th>Sharpe</th>
                         <th>最大DD</th>
+                        <th>Turnover</th>
                         <th>検証</th>
                       </tr>
                     </thead>
@@ -380,6 +425,7 @@ function App() {
                           <td>{formatPercent(run.summary.totalReturnPct)}</td>
                           <td>{run.summary.sharpeRatio.toFixed(2)}</td>
                           <td>{formatPercent(-run.summary.maxDrawdownPct)}</td>
+                          <td>{formatPercent(run.summary.turnoverPct)}</td>
                           <td>{formatPercent(run.splitAnalysis.test.portfolio.totalReturnPct)}</td>
                         </tr>
                       ))}
@@ -387,6 +433,53 @@ function App() {
                   </table>
                 </div>
               </div>
+
+              {dashboard.sanityChecks.map((sanityCheck) => (
+                <div className="content-block" key={sanityCheck.period}>
+                  <div className="table-header">
+                    <div>
+                      <h3>直近 {sanityCheck.period} の sanity check</h3>
+                      <p>
+                        主期間の結論が最近の相場でも大きく崩れていないかを見るための補助比較です。
+                        共通期間は {sanityCheck.datasetSpec.alignedStartDate} - {sanityCheck.datasetSpec.alignedEndDate}
+                        です。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="table-scroll">
+                    <table className="results-table">
+                      <thead>
+                        <tr>
+                          <th>戦略</th>
+                          <th>配分法</th>
+                          <th>候補資産</th>
+                          <th>直近ウェイト</th>
+                          <th>総リターン</th>
+                          <th>Sharpe</th>
+                          <th>最大DD</th>
+                          <th>Turnover</th>
+                          <th>検証</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sanityCheck.runs.map((run) => (
+                          <tr key={`${sanityCheck.period}-${run.key}`}>
+                            <td>{run.strategy.label}</td>
+                            <td>{run.portfolioModel.label}</td>
+                            <td>{run.selectedAssets.join(', ')}</td>
+                            <td>{formatWeights(run.weights)}</td>
+                            <td>{formatPercent(run.summary.totalReturnPct)}</td>
+                            <td>{run.summary.sharpeRatio.toFixed(2)}</td>
+                            <td>{formatPercent(-run.summary.maxDrawdownPct)}</td>
+                            <td>{formatPercent(run.summary.turnoverPct)}</td>
+                            <td>{formatPercent(run.splitAnalysis.test.portfolio.totalReturnPct)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
             </>
           ) : (
             <div className="empty-state">戦略とポートフォリオ比較実験を読み込んでいます。</div>

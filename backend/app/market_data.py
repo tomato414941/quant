@@ -77,7 +77,14 @@ def fetch_market_universe(
     if len(closes) < 3:
         raise ValueError("At least 3 aligned rows are required for a portfolio backtest.")
 
-    return closes, {"tickers": unique_tickers, "period": period, "source": source}
+    return closes, {
+        "tickers": unique_tickers,
+        "period": period,
+        "source": source,
+        "aligned_start_date": str(closes.index[0]),
+        "aligned_end_date": str(closes.index[-1]),
+        "row_count": len(closes),
+    }
 
 
 def format_market_date(raw_value) -> str:

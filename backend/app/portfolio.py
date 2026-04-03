@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from skfolio.optimization import MeanRisk, RiskBudgeting
+from skfolio.optimization import HierarchicalRiskParity, MeanRisk, RiskBudgeting
 
 from app.strategy import (
     cagr,
@@ -15,12 +15,19 @@ from app.strategy import (
 )
 
 
-SUPPORTED_PORTFOLIO_MODELS = {"equal_weight", "risk_budgeting", "minimum_variance"}
+SUPPORTED_PORTFOLIO_MODELS = {
+    "equal_weight",
+    "risk_budgeting",
+    "minimum_variance",
+    "hierarchical_risk_parity",
+}
 PORTFOLIO_MODEL_LABELS = {
     "equal_weight": "等金額配分",
     "risk_budgeting": "リスク予算配分",
     "minimum_variance": "最小分散",
+    "hierarchical_risk_parity": "HRP",
 }
+SUPPORTED_REBALANCE_FREQUENCIES = {"hold", "monthly", "quarterly", "annual"}
 SUPPORTED_PORTFOLIO_STRATEGIES = {"full_universe", "momentum_top3"}
 PORTFOLIO_STRATEGY_LABELS = {
     "full_universe": "全資産",
@@ -81,6 +88,7 @@ def build_portfolio_model_definition(
         "equal_weight": "全資産を同じ比率で持つ",
         "risk_budgeting": "各資産のリスク寄与が近づくように配分する",
         "minimum_variance": "分散が最小になるように配分する",
+        "hierarchical_risk_parity": "相関クラスタを使って階層的にリスクを分散する",
     }
 
     return PortfolioModelDefinition(
@@ -117,6 +125,7 @@ def compare_portfolio_runs(
     split_ratio: float,
     transaction_cost: float,
     max_investment_ratio: float = 1.0,
+    rebalance_frequency: str = "hold",
 ) -> list[dict]:
     if not strategy_definitions:
         raise ValueError("At least one portfolio strategy is required.")
@@ -128,6 +137,8 @@ def compare_portfolio_runs(
         raise ValueError("Transaction cost must be between 0 and 1.")
     if max_investment_ratio <= 0 or max_investment_ratio > 1:
         raise ValueError("Max investment ratio must be between 0 and 1.")
+    if rebalance_frequency not in SUPPORTED_REBALANCE_FREQUENCIES:
+        raise ValueError("Unsupported rebalance frequency.")
 
     returns = closes.pct_change().dropna()
     if len(returns) < 6:
@@ -145,36 +156,27 @@ def compare_portfolio_runs(
 
     runs: list[dict] = []
     for strategy_definition in strategy_definitions:
-        selected_assets = select_assets(train_returns, strategy_definition)
-        strategy_train_returns = train_returns[selected_assets]
         for model_definition in model_definitions:
-            weights = fit_portfolio_model(strategy_train_returns, model_definition)
-            weights = weights * max_investment_ratio
-            expanded_weights = expand_weights(
+            initial_selected_assets, initial_weights = compute_portfolio_allocation(
+                history_returns=train_returns,
+                strategy_definition=strategy_definition,
+                model_definition=model_definition,
                 universe_columns=returns.columns,
-                selected_columns=strategy_train_returns.columns,
-                selected_weights=weights,
+                max_investment_ratio=max_investment_ratio,
             )
-            full_backtest = run_portfolio_backtest(
+            backtest = run_portfolio_backtest(
                 returns=returns,
-                weights=expanded_weights,
+                split_index=split_index,
+                split_ratio=split_ratio,
+                strategy_definition=strategy_definition,
+                model_definition=model_definition,
+                initial_weights=initial_weights,
+                initial_selected_assets=initial_selected_assets,
+                max_investment_ratio=max_investment_ratio,
                 initial_capital=initial_capital,
                 benchmark_returns=benchmark_returns,
                 transaction_cost=transaction_cost,
-            )
-            train_backtest = run_portfolio_backtest(
-                returns=train_returns,
-                weights=expanded_weights,
-                initial_capital=initial_capital,
-                benchmark_returns=benchmark_returns.loc[train_returns.index],
-                transaction_cost=transaction_cost,
-            )
-            test_backtest = run_portfolio_backtest(
-                returns=test_returns,
-                weights=expanded_weights,
-                initial_capital=initial_capital,
-                benchmark_returns=benchmark_returns.loc[test_returns.index],
-                transaction_cost=transaction_cost,
+                rebalance_frequency=rebalance_frequency,
             )
 
             runs.append(
@@ -182,16 +184,12 @@ def compare_portfolio_runs(
                     "key": f"{strategy_definition.key}__{model_definition.key}",
                     "strategy": serialize_portfolio_strategy_definition(strategy_definition),
                     "portfolioModel": serialize_portfolio_model_definition(model_definition),
-                    "weights": serialize_weights(returns.columns, expanded_weights, max_investment_ratio),
-                    "selectedAssets": selected_assets,
-                    "summary": full_backtest["summary"]["portfolio"],
-                    "benchmark": full_backtest["summary"]["benchmark"],
-                    "splitAnalysis": {
-                        "config": {"splitRatioPct": round(split_ratio * 100, 1)},
-                        "train": summarize_segment_from_returns(train_returns, train_backtest["summary"]),
-                        "test": summarize_segment_from_returns(test_returns, test_backtest["summary"]),
-                    },
-                    "series": full_backtest["series"],
+                    "weights": serialize_weights(returns.columns, backtest["latestWeights"], max_investment_ratio),
+                    "selectedAssets": backtest["latestSelectedAssets"],
+                    "summary": backtest["summary"]["portfolio"],
+                    "benchmark": backtest["summary"]["benchmark"],
+                    "splitAnalysis": backtest["splitAnalysis"],
+                    "series": backtest["series"],
                 }
             )
 
@@ -205,6 +203,7 @@ def compare_portfolio_models(
     split_ratio: float,
     transaction_cost: float,
     max_investment_ratio: float = 1.0,
+    rebalance_frequency: str = "hold",
 ) -> list[dict]:
     return compare_portfolio_runs(
         closes=closes,
@@ -214,6 +213,7 @@ def compare_portfolio_models(
         split_ratio=split_ratio,
         transaction_cost=transaction_cost,
         max_investment_ratio=max_investment_ratio,
+        rebalance_frequency=rebalance_frequency,
     )
 
 
@@ -239,6 +239,33 @@ def expand_weights(
     return np.asarray([weight_map.get(str(asset), 0.0) for asset in universe_columns], dtype="float64")
 
 
+def compute_portfolio_allocation(
+    history_returns: pd.DataFrame,
+    strategy_definition: PortfolioStrategyDefinition,
+    model_definition: PortfolioModelDefinition,
+    universe_columns: pd.Index,
+    max_investment_ratio: float,
+) -> tuple[list[str], np.ndarray]:
+    selected_assets = select_assets(history_returns, strategy_definition)
+    strategy_returns = filter_positive_variance_assets(history_returns[selected_assets])
+    selected_assets = list(strategy_returns.columns)
+    weights = fit_portfolio_model(strategy_returns, model_definition) * max_investment_ratio
+    expanded_weights = expand_weights(
+        universe_columns=universe_columns,
+        selected_columns=strategy_returns.columns,
+        selected_weights=weights,
+    )
+    return selected_assets, expanded_weights
+
+
+def filter_positive_variance_assets(returns: pd.DataFrame) -> pd.DataFrame:
+    positive_variance = returns.var(axis=0) > 1e-12
+    filtered = returns.loc[:, positive_variance]
+    if filtered.empty:
+        raise ValueError("At least one asset with positive variance is required.")
+    return filtered
+
+
 def fit_portfolio_model(
     returns: pd.DataFrame,
     model_definition: PortfolioModelDefinition,
@@ -257,6 +284,10 @@ def fit_portfolio_model(
         estimator = MeanRisk()
         estimator.fit(returns)
         weights = estimator.weights_
+    elif model_definition.model_type == "hierarchical_risk_parity":
+        estimator = HierarchicalRiskParity()
+        estimator.fit(returns)
+        weights = estimator.weights_
     else:
         raise ValueError("Unsupported portfolio model.")
 
@@ -269,27 +300,75 @@ def fit_portfolio_model(
 
 def run_portfolio_backtest(
     returns: pd.DataFrame,
-    weights: np.ndarray,
+    split_index: int,
+    split_ratio: float,
+    strategy_definition: PortfolioStrategyDefinition,
+    model_definition: PortfolioModelDefinition,
+    initial_weights: np.ndarray,
+    initial_selected_assets: list[str],
+    max_investment_ratio: float,
     initial_capital: float,
     benchmark_returns: pd.Series,
     transaction_cost: float,
+    rebalance_frequency: str,
 ) -> dict:
     portfolio_equity = initial_capital
     benchmark_equity = initial_capital
     portfolio_returns: list[float] = []
     benchmark_return_values: list[float] = []
     series: list[dict] = []
+    train_dates: list[str] = []
+    test_dates: list[str] = []
+    train_portfolio_returns: list[float] = []
+    test_portfolio_returns: list[float] = []
+    train_benchmark_returns: list[float] = []
+    test_benchmark_returns: list[float] = []
+    train_turnover = 0.0
+    test_turnover = 0.0
+    current_weights = initial_weights.copy()
+    current_selected_assets = list(initial_selected_assets)
+    latest_weights = initial_weights.copy()
+    latest_selected_assets = list(initial_selected_assets)
 
     for index, (date, row) in enumerate(returns.iterrows()):
-        portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), weights))
+        trade_turnover = 0.0
         if index == 0:
-            portfolio_return -= transaction_cost * float(np.abs(weights).sum())
+            trade_turnover = float(np.abs(current_weights).sum())
+        elif index > split_index and should_rebalance(
+            previous_date=returns.index[index - 1],
+            current_date=date,
+            rebalance_frequency=rebalance_frequency,
+        ):
+            current_selected_assets, rebalanced_weights = compute_portfolio_allocation(
+                history_returns=returns.iloc[:index],
+                strategy_definition=strategy_definition,
+                model_definition=model_definition,
+                universe_columns=returns.columns,
+                max_investment_ratio=max_investment_ratio,
+            )
+            trade_turnover = float(np.abs(rebalanced_weights - current_weights).sum())
+            current_weights = rebalanced_weights
+            latest_weights = rebalanced_weights.copy()
+            latest_selected_assets = list(current_selected_assets)
+
+        portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), current_weights))
+        portfolio_return -= transaction_cost * trade_turnover
         benchmark_return = float(benchmark_returns.loc[date])
 
         portfolio_equity *= 1 + portfolio_return
         benchmark_equity *= 1 + benchmark_return
         portfolio_returns.append(portfolio_return)
         benchmark_return_values.append(benchmark_return)
+        segment_dates = train_dates if index < split_index else test_dates
+        segment_portfolio_returns = train_portfolio_returns if index < split_index else test_portfolio_returns
+        segment_benchmark_returns = train_benchmark_returns if index < split_index else test_benchmark_returns
+        segment_dates.append(str(date))
+        segment_portfolio_returns.append(portfolio_return)
+        segment_benchmark_returns.append(benchmark_return)
+        if index < split_index:
+            train_turnover += trade_turnover
+        else:
+            test_turnover += trade_turnover
         series.append(
             {
                 "date": str(date),
@@ -307,6 +386,7 @@ def run_portfolio_backtest(
             returns=portfolio_returns,
             series=series,
             equity_key="portfolioEquity",
+            turnover=round((train_turnover + test_turnover) * 100, 2),
         ),
         "benchmark": summarize_portfolio_metrics(
             final_value=benchmark_equity,
@@ -315,9 +395,30 @@ def run_portfolio_backtest(
             returns=benchmark_return_values,
             series=series,
             equity_key="benchmarkEquity",
+            turnover=0.0,
         ),
     }
-    return {"summary": summary, "series": series}
+    return {
+        "summary": summary,
+        "series": series,
+        "latestWeights": latest_weights,
+        "latestSelectedAssets": latest_selected_assets,
+        "splitAnalysis": {
+            "config": {"splitRatioPct": round(split_ratio * 100, 1)},
+            "train": summarize_segment_from_returns(
+                dates=train_dates,
+                portfolio_returns=train_portfolio_returns,
+                benchmark_returns=train_benchmark_returns,
+                turnover=train_turnover,
+            ),
+            "test": summarize_segment_from_returns(
+                dates=test_dates,
+                portfolio_returns=test_portfolio_returns,
+                benchmark_returns=test_benchmark_returns,
+                turnover=test_turnover,
+            ),
+        },
+    }
 
 
 def summarize_portfolio_metrics(
@@ -327,26 +428,39 @@ def summarize_portfolio_metrics(
     returns: list[float],
     series: list[dict],
     equity_key: str,
+    turnover: float,
 ) -> dict:
     return {
         "totalReturnPct": round(percent_return(final_value, initial_value), 2),
         "cagrPct": round(cagr(final_value, initial_value, periods), 2),
         "sharpeRatio": round(sharpe_ratio(returns), 2),
         "maxDrawdownPct": round(max_drawdown(series, equity_key), 2),
+        "turnoverPct": round(turnover, 2),
     }
 
 
-def summarize_segment_from_returns(returns: pd.DataFrame, summary: dict) -> dict:
-    prices = [
-        {"date": str(index)}
-        for index in returns.index
-    ]
+def summarize_segment_from_returns(
+    dates: list[str],
+    portfolio_returns: list[float],
+    benchmark_returns: list[float],
+    turnover: float,
+) -> dict:
     return {
-        "startDate": prices[0]["date"],
-        "endDate": prices[-1]["date"],
-        "dayCount": len(prices),
-        "portfolio": summary["portfolio"],
-        "benchmark": summary["benchmark"],
+        "startDate": dates[0],
+        "endDate": dates[-1],
+        "dayCount": len(dates),
+        "portfolio": summarize_metrics_from_daily_returns(
+            dates=dates,
+            daily_returns=portfolio_returns,
+            equity_key="portfolioEquity",
+            turnover=turnover,
+        ),
+        "benchmark": summarize_metrics_from_daily_returns(
+            dates=dates,
+            daily_returns=benchmark_returns,
+            equity_key="benchmarkEquity",
+            turnover=0.0,
+        ),
     }
 
 
@@ -367,3 +481,40 @@ def compute_split_index(length: int, split_ratio: float) -> int:
     split_index = int(length * split_ratio)
     split_index = min(max(split_index, 3), length - 3)
     return split_index
+
+
+def summarize_metrics_from_daily_returns(
+    dates: list[str],
+    daily_returns: list[float],
+    equity_key: str,
+    turnover: float,
+) -> dict:
+    equity = 100.0
+    series = []
+    for date, daily_return in zip(dates, daily_returns, strict=True):
+        equity *= 1 + daily_return
+        series.append({"date": date, equity_key: round(equity, 2)})
+    return summarize_portfolio_metrics(
+        final_value=equity,
+        initial_value=100.0,
+        periods=len(daily_returns),
+        returns=daily_returns,
+        series=series,
+        equity_key=equity_key,
+        turnover=round(turnover * 100, 2),
+    )
+
+
+def should_rebalance(previous_date, current_date, rebalance_frequency: str) -> bool:
+    if rebalance_frequency == "hold":
+        return False
+
+    previous_timestamp = pd.Timestamp(previous_date)
+    current_timestamp = pd.Timestamp(current_date)
+    if rebalance_frequency == "monthly":
+        return previous_timestamp.month != current_timestamp.month or previous_timestamp.year != current_timestamp.year
+    if rebalance_frequency == "quarterly":
+        return previous_timestamp.quarter != current_timestamp.quarter or previous_timestamp.year != current_timestamp.year
+    if rebalance_frequency == "annual":
+        return previous_timestamp.year != current_timestamp.year
+    raise ValueError("Unsupported rebalance frequency.")

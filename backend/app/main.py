@@ -48,20 +48,34 @@ def dashboard() -> dict:
             tickers=config["dataset_spec"]["tickers"],
             period=config["dataset_spec"]["period"],
         )
-        runs = compare_portfolio_runs(
-            closes=closes,
-            strategy_definitions=config["strategy_definitions"],
-            model_definitions=config["portfolio_models"],
-            initial_capital=config["backtest_config"]["initial_capital"],
-            split_ratio=config["backtest_config"]["split_ratio"],
-            transaction_cost=config["execution_model"]["commission_pct"] / 100,
-            max_investment_ratio=config["backtest_config"]["max_investment_ratio"],
-        )
+        runs = build_portfolio_runs(config, closes)
+        sanity_checks = []
+        for period in config["dataset_spec"].get("sanity_periods", []):
+            sanity_closes, sanity_metadata = fetch_market_universe(
+                tickers=config["dataset_spec"]["tickers"],
+                period=period,
+            )
+            sanity_checks.append(
+                {
+                    "period": period,
+                    "datasetSpec": {
+                        "tickers": config["dataset_spec"]["tickers"],
+                        "period": period,
+                        "frequency": config["dataset_spec"]["frequency"],
+                        "source": sanity_metadata["source"],
+                        "alignedStartDate": sanity_metadata["aligned_start_date"],
+                        "alignedEndDate": sanity_metadata["aligned_end_date"],
+                        "rowCount": sanity_metadata["row_count"],
+                    },
+                    "runs": build_portfolio_runs(config, sanity_closes),
+                }
+            )
 
         return {
             "study": serialize_study(config, metadata),
             "runs": runs,
             "comparisonSeries": build_comparison_series(runs),
+            "sanityChecks": sanity_checks,
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -268,13 +282,18 @@ def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
         "datasetSpec": {
             "tickers": config["dataset_spec"]["tickers"],
             "period": config["dataset_spec"]["period"],
+            "sanityPeriods": config["dataset_spec"].get("sanity_periods", []),
             "frequency": config["dataset_spec"]["frequency"],
             "source": dataset_metadata["source"],
+            "alignedStartDate": dataset_metadata["aligned_start_date"],
+            "alignedEndDate": dataset_metadata["aligned_end_date"],
+            "rowCount": dataset_metadata["row_count"],
         },
         "executionModel": {
             "entry": config["execution_model"]["entry"],
             "commissionPct": round(config["execution_model"]["commission_pct"], 3),
             "slippagePct": round(config["execution_model"]["slippage_pct"], 3),
+            "rebalanceFrequency": config["execution_model"].get("rebalance_frequency", "hold"),
         },
         "backtestConfig": {
             "splitRatioPct": round(config["backtest_config"]["split_ratio"] * 100, 1),
@@ -291,6 +310,19 @@ def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
             for strategy_definition in config["strategy_definitions"]
         ],
     }
+
+
+def build_portfolio_runs(config: dict, closes) -> list[dict]:
+    return compare_portfolio_runs(
+        closes=closes,
+        strategy_definitions=config["strategy_definitions"],
+        model_definitions=config["portfolio_models"],
+        initial_capital=config["backtest_config"]["initial_capital"],
+        split_ratio=config["backtest_config"]["split_ratio"],
+        transaction_cost=config["execution_model"]["commission_pct"] / 100,
+        max_investment_ratio=config["backtest_config"]["max_investment_ratio"],
+        rebalance_frequency=config["execution_model"].get("rebalance_frequency", "hold"),
+    )
 
 
 def build_comparison_series(runs: list[dict]) -> list[dict]:

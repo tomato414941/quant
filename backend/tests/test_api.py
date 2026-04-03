@@ -55,12 +55,13 @@ def test_dashboard_endpoint(monkeypatch) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["config"]["ticker"] == "SPY"
-    assert payload["config"]["strategyId"] == "mean_reversion"
-    assert payload["single"]["dataset"]["source"] == "test"
-    assert payload["gridSearch"]["dataset"]["ticker"] == "SPY"
-    assert len(payload["tickerCompare"]["results"]) == 6
-    assert [row["period"] for row in payload["periodCompare"]["results"]] == ["6mo", "1y", "2y", "3y", "5y"]
+    assert payload["study"]["id"] == "short_term_reaction_spy_2y"
+    assert payload["study"]["datasetSpec"]["ticker"] == "SPY"
+    assert payload["study"]["datasetSpec"]["source"] == "test"
+    assert payload["study"]["executionModel"]["commissionPct"] == 0.1
+    assert len(payload["study"]["strategyDefinitions"]) == 3
+    assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
+    assert payload["comparisonSeries"][0]["date"] == "2025-01-01"
 
 
 def test_market_backtest_endpoint(monkeypatch) -> None:
@@ -83,6 +84,7 @@ def test_market_backtest_endpoint(monkeypatch) -> None:
     payload = response.json()
     assert payload["summary"]["config"]["initialCapital"] == 5000
     assert payload["summary"]["config"]["holdingDays"] == 2
+    assert payload["summary"]["config"]["strategyDefinition"]["engine"] == "mean_reversion"
     assert payload["splitAnalysis"]["train"]["dayCount"] == 3
     assert payload["dataset"]["ticker"] == "SPY"
 
@@ -129,6 +131,7 @@ def test_ticker_compare_endpoint(monkeypatch) -> None:
     payload = response.json()
     assert payload["config"]["transactionCostPct"] == 0.1
     assert payload["config"]["strategyId"] == "momentum"
+    assert payload["config"]["strategyDefinition"]["engine"] == "momentum"
     assert len(payload["results"]) == 2
 
 
@@ -151,3 +154,4 @@ def test_period_compare_endpoint(monkeypatch) -> None:
     payload = response.json()
     assert payload["dataset"]["ticker"] == "SPY"
     assert [row["period"] for row in payload["results"]] == ["6mo", "1y"]
+    assert payload["config"]["strategyDefinition"]["engine"] == "mean_reversion"

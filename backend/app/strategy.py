@@ -11,6 +11,10 @@ STRATEGY_LABELS = {
     "mean_reversion": "逆張り",
     "momentum": "上昇継続",
 }
+DEFAULT_HYPOTHESES = {
+    "mean_reversion": "大きく動いた翌日に短期反発が出る",
+    "momentum": "大きく動いた翌日に短期継続が出る",
+}
 
 
 @dataclass
@@ -19,21 +23,59 @@ class PricePoint:
     close: float
 
 
+@dataclass(frozen=True)
+class StrategyDefinition:
+    key: str
+    engine: str
+    label: str
+    hypothesis: str
+    threshold: float
+    holding_days: int
+
+
+def build_strategy_definition(
+    engine: str,
+    threshold: float,
+    holding_days: int,
+    *,
+    key: str | None = None,
+    label: str | None = None,
+    hypothesis: str | None = None,
+) -> StrategyDefinition:
+    validate_strategy_inputs(engine=engine, threshold=threshold, holding_days=holding_days)
+    threshold_pct = round(threshold * 100, 2)
+    return StrategyDefinition(
+        key=key or f"{engine}_{str(threshold_pct).replace('.', '_')}_{holding_days}d",
+        engine=engine,
+        label=label or f"{STRATEGY_LABELS[engine]} {threshold_pct:.1f}% / {holding_days}日",
+        hypothesis=hypothesis or DEFAULT_HYPOTHESES[engine],
+        threshold=threshold,
+        holding_days=holding_days,
+    )
+
+
+def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
+    return {
+        "key": strategy_definition.key,
+        "engine": strategy_definition.engine,
+        "label": strategy_definition.label,
+        "hypothesis": strategy_definition.hypothesis,
+        "thresholdPct": round(strategy_definition.threshold * 100, 2),
+        "holdingDays": strategy_definition.holding_days,
+    }
+
+
 def run_backtest(
     prices: list[PricePoint],
-    threshold: float,
+    strategy_definition: StrategyDefinition,
     initial_capital: float,
-    holding_days: int = 1,
     transaction_cost: float = 0.0,
-    strategy: str = "mean_reversion",
 ) -> dict:
     validate_backtest_inputs(
         prices=prices,
-        threshold=threshold,
         initial_capital=initial_capital,
-        holding_days=holding_days,
         transaction_cost=transaction_cost,
-        strategy=strategy,
+        strategy_definition=strategy_definition,
     )
 
     returns = build_returns(prices)
@@ -51,13 +93,12 @@ def run_backtest(
         previous_day_return = returns[index - 1] if index >= 1 else 0.0
         current_day_return = returns[index]
         signal = should_enter_trade(
-            strategy=strategy,
+            strategy_definition=strategy_definition,
             previous_day_return=previous_day_return,
-            threshold=threshold,
             holding_remaining=holding_remaining,
         )
         if signal:
-            holding_remaining = holding_days
+            holding_remaining = strategy_definition.holding_days
             current_trade_growth = 1.0
             trade_count += 1
 
@@ -96,11 +137,12 @@ def run_backtest(
         "strategy": summarize_metrics(strategy_equity, initial_capital, len(prices), strategy_returns, series, "strategyEquity"),
         "benchmark": summarize_metrics(benchmark_equity, initial_capital, len(prices), benchmark_returns, series, "benchmarkEquity"),
         "config": {
-            "strategyId": strategy,
-            "strategyLabel": STRATEGY_LABELS[strategy],
-            "thresholdPct": round(threshold * 100, 2),
+            "strategyDefinition": serialize_strategy_definition(strategy_definition),
+            "strategyId": strategy_definition.engine,
+            "strategyLabel": strategy_definition.label,
+            "thresholdPct": round(strategy_definition.threshold * 100, 2),
             "initialCapital": round(initial_capital, 2),
-            "holdingDays": holding_days,
+            "holdingDays": strategy_definition.holding_days,
             "transactionCostPct": round(transaction_cost * 100, 3),
         },
     }
@@ -112,11 +154,9 @@ def run_backtest(
 
 def run_split_backtest(
     prices: list[PricePoint],
-    threshold: float,
+    strategy_definition: StrategyDefinition,
     initial_capital: float,
-    holding_days: int = 1,
     transaction_cost: float = 0.0,
-    strategy: str = "mean_reversion",
     split_ratio: float = 0.7,
 ) -> dict:
     validate_split_ratio(split_ratio)
@@ -130,19 +170,15 @@ def run_split_backtest(
 
     training_result = run_backtest(
         prices=training_prices,
-        threshold=threshold,
+        strategy_definition=strategy_definition,
         initial_capital=initial_capital,
-        holding_days=holding_days,
         transaction_cost=transaction_cost,
-        strategy=strategy,
     )
     testing_result = run_backtest(
         prices=testing_prices,
-        threshold=threshold,
+        strategy_definition=strategy_definition,
         initial_capital=initial_capital,
-        holding_days=holding_days,
         transaction_cost=transaction_cost,
-        strategy=strategy,
     )
 
     return {
@@ -174,11 +210,13 @@ def run_grid_search(
         for holding_days in holding_days_options:
             backtest = run_backtest(
                 prices=prices,
-                threshold=threshold,
+                strategy_definition=build_strategy_definition(
+                    engine=strategy,
+                    threshold=threshold,
+                    holding_days=holding_days,
+                ),
                 initial_capital=initial_capital,
-                holding_days=holding_days,
                 transaction_cost=transaction_cost,
-                strategy=strategy,
             )
             summary = backtest["summary"]
             strategy_summary = summary["strategy"]
@@ -222,21 +260,17 @@ def run_grid_search(
 
 def compare_tickers(
     datasets: list[dict],
-    threshold: float,
-    holding_days: int,
+    strategy_definition: StrategyDefinition,
     initial_capital: float,
     transaction_cost: float,
-    strategy: str,
 ) -> dict:
     comparisons: list[dict] = []
     for dataset in datasets:
         backtest = run_backtest(
             prices=dataset["prices"],
-            threshold=threshold,
+            strategy_definition=strategy_definition,
             initial_capital=initial_capital,
-            holding_days=holding_days,
             transaction_cost=transaction_cost,
-            strategy=strategy,
         )
         summary = backtest["summary"]
         comparisons.append(
@@ -258,10 +292,11 @@ def compare_tickers(
 
     return {
         "config": {
-            "strategyId": strategy,
-            "strategyLabel": STRATEGY_LABELS[strategy],
-            "thresholdPct": round(threshold * 100, 2),
-            "holdingDays": holding_days,
+            "strategyDefinition": serialize_strategy_definition(strategy_definition),
+            "strategyId": strategy_definition.engine,
+            "strategyLabel": strategy_definition.label,
+            "thresholdPct": round(strategy_definition.threshold * 100, 2),
+            "holdingDays": strategy_definition.holding_days,
             "initialCapital": round(initial_capital, 2),
             "transactionCostPct": round(transaction_cost * 100, 3),
         },
@@ -271,21 +306,17 @@ def compare_tickers(
 
 def compare_periods(
     datasets: list[dict],
-    threshold: float,
-    holding_days: int,
+    strategy_definition: StrategyDefinition,
     initial_capital: float,
     transaction_cost: float,
-    strategy: str,
 ) -> dict:
     comparisons: list[dict] = []
     for dataset in datasets:
         backtest = run_backtest(
             prices=dataset["prices"],
-            threshold=threshold,
+            strategy_definition=strategy_definition,
             initial_capital=initial_capital,
-            holding_days=holding_days,
             transaction_cost=transaction_cost,
-            strategy=strategy,
         )
         summary = backtest["summary"]
         comparisons.append(
@@ -298,10 +329,11 @@ def compare_periods(
 
     return {
         "config": {
-            "strategyId": strategy,
-            "strategyLabel": STRATEGY_LABELS[strategy],
-            "thresholdPct": round(threshold * 100, 2),
-            "holdingDays": holding_days,
+            "strategyDefinition": serialize_strategy_definition(strategy_definition),
+            "strategyId": strategy_definition.engine,
+            "strategyLabel": strategy_definition.label,
+            "thresholdPct": round(strategy_definition.threshold * 100, 2),
+            "holdingDays": strategy_definition.holding_days,
             "initialCapital": round(initial_capital, 2),
             "transactionCostPct": round(transaction_cost * 100, 3),
         },
@@ -309,25 +341,68 @@ def compare_periods(
     }
 
 
+def compare_strategies(
+    prices: list[PricePoint],
+    strategy_definitions: list[StrategyDefinition],
+    initial_capital: float,
+    transaction_cost: float,
+    split_ratio: float,
+) -> list[dict]:
+    if not strategy_definitions:
+        raise ValueError("At least one strategy definition is required.")
+
+    comparisons: list[dict] = []
+    for strategy_definition in strategy_definitions:
+        backtest = run_backtest(
+            prices=prices,
+            strategy_definition=strategy_definition,
+            initial_capital=initial_capital,
+            transaction_cost=transaction_cost,
+        )
+        comparisons.append(
+            {
+                "definition": serialize_strategy_definition(strategy_definition),
+                "summary": backtest["summary"]["strategy"],
+                "benchmark": backtest["summary"]["benchmark"],
+                "splitAnalysis": run_split_backtest(
+                    prices=prices,
+                    strategy_definition=strategy_definition,
+                    initial_capital=initial_capital,
+                    transaction_cost=transaction_cost,
+                    split_ratio=split_ratio,
+                ),
+                "series": backtest["series"],
+            }
+        )
+
+    return comparisons
+
+
 def validate_backtest_inputs(
     prices: list[PricePoint],
-    threshold: float,
     initial_capital: float,
-    holding_days: int,
     transaction_cost: float,
-    strategy: str,
+    strategy_definition: StrategyDefinition,
 ) -> None:
     if len(prices) < 3:
         raise ValueError("At least 3 prices are required.")
-    if threshold <= 0 or threshold >= 1:
-        raise ValueError("Threshold must be between 0 and 1.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
-    if holding_days <= 0 or holding_days > 30:
-        raise ValueError("Holding days must be between 1 and 30.")
     if transaction_cost < 0 or transaction_cost >= 1:
         raise ValueError("Transaction cost must be between 0 and 1.")
-    if strategy not in SUPPORTED_STRATEGIES:
+    validate_strategy_inputs(
+        engine=strategy_definition.engine,
+        threshold=strategy_definition.threshold,
+        holding_days=strategy_definition.holding_days,
+    )
+
+
+def validate_strategy_inputs(engine: str, threshold: float, holding_days: int) -> None:
+    if threshold <= 0 or threshold >= 1:
+        raise ValueError("Threshold must be between 0 and 1.")
+    if holding_days <= 0 or holding_days > 30:
+        raise ValueError("Holding days must be between 1 and 30.")
+    if engine not in SUPPORTED_STRATEGIES:
         raise ValueError("Unsupported strategy.")
 
 
@@ -346,17 +421,16 @@ def build_returns(prices: list[PricePoint]) -> list[float]:
 
 
 def should_enter_trade(
-    strategy: str,
+    strategy_definition: StrategyDefinition,
     previous_day_return: float,
-    threshold: float,
     holding_remaining: int,
 ) -> bool:
     if holding_remaining != 0:
         return False
-    if strategy == "mean_reversion":
-        return previous_day_return <= -threshold
-    if strategy == "momentum":
-        return previous_day_return >= threshold
+    if strategy_definition.engine == "mean_reversion":
+        return previous_day_return <= -strategy_definition.threshold
+    if strategy_definition.engine == "momentum":
+        return previous_day_return >= strategy_definition.threshold
     raise ValueError("Unsupported strategy.")
 
 

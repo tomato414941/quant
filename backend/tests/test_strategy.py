@@ -1,6 +1,8 @@
 from app.strategy import (
     PricePoint,
+    build_strategy_definition,
     compare_periods,
+    compare_strategies,
     compare_tickers,
     run_backtest,
     run_split_backtest,
@@ -14,12 +16,20 @@ def test_backtest_returns_series_and_summary() -> None:
         PricePoint(date="2025-01-03", close=97),
         PricePoint(date="2025-01-04", close=98),
     ]
-    result = run_backtest(prices, threshold=0.03, initial_capital=10_000)
+    result = run_backtest(
+        prices,
+        strategy_definition=build_strategy_definition(
+            engine="mean_reversion",
+            threshold=0.03,
+            holding_days=1,
+        ),
+        initial_capital=10_000,
+    )
 
     assert len(result["series"]) == 4
     assert result["summary"]["strategy"]["tradeCount"] > 0
     assert result["summary"]["config"]["strategyId"] == "mean_reversion"
-    assert result["summary"]["config"]["strategyLabel"] == "逆張り"
+    assert result["summary"]["config"]["strategyLabel"] == "逆張り 3.0% / 1日"
 
 
 def test_backtest_supports_momentum_strategy() -> None:
@@ -32,10 +42,12 @@ def test_backtest_supports_momentum_strategy() -> None:
 
     result = run_backtest(
         prices,
-        threshold=0.03,
+        strategy_definition=build_strategy_definition(
+            engine="momentum",
+            threshold=0.03,
+            holding_days=1,
+        ),
         initial_capital=10_000,
-        holding_days=1,
-        strategy="momentum",
     )
 
     assert result["summary"]["strategy"]["tradeCount"] == 1
@@ -50,7 +62,15 @@ def test_backtest_rejects_invalid_threshold() -> None:
     ]
 
     try:
-        run_backtest(prices, threshold=1.5, initial_capital=10_000)
+        run_backtest(
+            prices,
+            strategy_definition=build_strategy_definition(
+                engine="mean_reversion",
+                threshold=1.5,
+                holding_days=1,
+            ),
+            initial_capital=10_000,
+        )
     except ValueError as exc:
         assert "Threshold" in str(exc)
     else:
@@ -64,8 +84,24 @@ def test_backtest_applies_transaction_cost() -> None:
         PricePoint(date="2025-01-03", close=100),
     ]
 
-    without_cost = run_backtest(prices, threshold=0.03, initial_capital=10_000, transaction_cost=0.0)
-    with_cost = run_backtest(prices, threshold=0.03, initial_capital=10_000, transaction_cost=0.001)
+    strategy_definition = build_strategy_definition(
+        engine="mean_reversion",
+        threshold=0.03,
+        holding_days=1,
+    )
+
+    without_cost = run_backtest(
+        prices,
+        strategy_definition=strategy_definition,
+        initial_capital=10_000,
+        transaction_cost=0.0,
+    )
+    with_cost = run_backtest(
+        prices,
+        strategy_definition=strategy_definition,
+        initial_capital=10_000,
+        transaction_cost=0.001,
+    )
 
     assert with_cost["summary"]["strategy"]["totalReturnPct"] < without_cost["summary"]["strategy"]["totalReturnPct"]
 
@@ -78,10 +114,12 @@ def test_split_backtest_returns_train_and_test() -> None:
 
     result = run_split_backtest(
         prices=prices,
-        threshold=0.02,
+        strategy_definition=build_strategy_definition(
+            engine="momentum",
+            threshold=0.02,
+            holding_days=1,
+        ),
         initial_capital=10_000,
-        holding_days=1,
-        strategy="momentum",
         split_ratio=0.6,
     )
 
@@ -114,11 +152,13 @@ def test_compare_tickers_returns_sorted_results() -> None:
 
     payload = compare_tickers(
         datasets=datasets,
-        threshold=0.03,
-        holding_days=1,
+        strategy_definition=build_strategy_definition(
+            engine="mean_reversion",
+            threshold=0.03,
+            holding_days=1,
+        ),
         initial_capital=10_000,
         transaction_cost=0.0,
-        strategy="mean_reversion",
     )
 
     assert payload["results"][0]["ticker"] == "AAA"
@@ -148,12 +188,49 @@ def test_compare_periods_returns_all_requested_periods() -> None:
 
     payload = compare_periods(
         datasets=datasets,
-        threshold=0.03,
-        holding_days=1,
+        strategy_definition=build_strategy_definition(
+            engine="momentum",
+            threshold=0.03,
+            holding_days=1,
+        ),
         initial_capital=10_000,
         transaction_cost=0.0,
-        strategy="momentum",
     )
 
     assert [row["period"] for row in payload["results"]] == ["6mo", "1y"]
     assert payload["config"]["strategyId"] == "momentum"
+
+
+def test_compare_strategies_returns_all_definitions() -> None:
+    prices = [
+        PricePoint(date="2025-01-01", close=100),
+        PricePoint(date="2025-01-02", close=95),
+        PricePoint(date="2025-01-03", close=100),
+        PricePoint(date="2025-01-04", close=104),
+        PricePoint(date="2025-01-05", close=102),
+        PricePoint(date="2025-01-06", close=106),
+    ]
+
+    payload = compare_strategies(
+        prices=prices,
+        strategy_definitions=[
+            build_strategy_definition(
+                engine="mean_reversion",
+                threshold=0.03,
+                holding_days=1,
+                key="mr_3_1",
+            ),
+            build_strategy_definition(
+                engine="momentum",
+                threshold=0.03,
+                holding_days=1,
+                key="mo_3_1",
+            ),
+        ],
+        initial_capital=10_000,
+        transaction_cost=0.0,
+        split_ratio=0.6,
+    )
+
+    assert [row["definition"]["key"] for row in payload] == ["mr_3_1", "mo_3_1"]
+    assert all("series" in row for row in payload)

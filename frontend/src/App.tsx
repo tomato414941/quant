@@ -3,6 +3,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -19,19 +20,13 @@ type SummaryMetrics = {
   winRatePct?: number
 }
 
-type DatasetInfo = {
-  ticker: string
-  period?: string
-  source: string
-}
-
-type StrategyConfig = {
-  strategyId: string
-  strategyLabel: string
+type StrategyDefinition = {
+  key: string
+  engine: string
+  label: string
+  hypothesis: string
   thresholdPct: number
-  initialCapital: number
   holdingDays: number
-  transactionCostPct: number
 }
 
 type SplitSegment = {
@@ -42,13 +37,10 @@ type SplitSegment = {
   benchmark: SummaryMetrics
 }
 
-type BacktestResult = {
-  dataset: DatasetInfo
-  summary: {
-    strategy: SummaryMetrics
-    benchmark: SummaryMetrics
-    config: StrategyConfig
-  }
+type StrategyRun = {
+  definition: StrategyDefinition
+  summary: SummaryMetrics
+  benchmark: SummaryMetrics
   splitAnalysis: {
     config: {
       splitRatioPct: number
@@ -63,70 +55,38 @@ type BacktestResult = {
   }>
 }
 
-type GridSearchResult = {
-  dataset: DatasetInfo
-  config: {
-    strategyLabel: string
-    thresholdValuesPct: number[]
-    holdingDaysValues: number[]
-  }
-  results: Array<{
-    rank: number
-    thresholdPct: number
-    holdingDays: number
-    totalReturnPct: number
-    sharpeRatio: number
-    maxDrawdownPct: number
-    winRatePct: number
-    tradeCount: number
-  }>
-}
+type ComparisonRow = {
+  date: string
+  benchmarkEquity: number
+} & Record<string, number | string>
 
-type TickerCompareResult = {
-  config: {
-    strategyLabel: string
-    transactionCostPct: number
-  }
-  results: Array<{
+type StudyResult = {
+  id: string
+  title: string
+  question: string
+  datasetSpec: {
     ticker: string
     period: string
-    strategy: SummaryMetrics
-    benchmark: SummaryMetrics
-  }>
-}
-
-type PeriodCompareResult = {
-  dataset: DatasetInfo
-  config: {
-    strategyLabel: string
+    frequency: string
+    source: string
   }
-  results: Array<{
-    period: string
-    strategy: SummaryMetrics
-    benchmark: SummaryMetrics
-  }>
+  executionModel: {
+    entry: string
+    commissionPct: number
+    slippagePct: number
+  }
+  backtestConfig: {
+    splitRatioPct: number
+    initialCapital: number
+    benchmark: string
+  }
+  strategyDefinitions: StrategyDefinition[]
 }
 
 type DashboardResult = {
-  config: {
-    ticker: string
-    period: string
-    periodComparePeriods: string[]
-    comparisonTickers: string[]
-    strategyId: string
-    strategyLabel: string
-    thresholdPct: number
-    holdingDays: number
-    splitRatioPct: number
-    initialCapital: number
-    transactionCostPct: number
-    thresholdGridPct: number[]
-    holdingDaysGrid: number[]
-  }
-  single: BacktestResult
-  gridSearch: GridSearchResult
-  tickerCompare: TickerCompareResult
-  periodCompare: PeriodCompareResult
+  study: StudyResult
+  runs: StrategyRun[]
+  comparisonSeries: ComparisonRow[]
 }
 
 type StatusState = {
@@ -138,6 +98,8 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
   `${window.location.protocol}//${window.location.hostname}:8000`
 
+const STRATEGY_COLORS = ['#b45b2a', '#748a6c', '#2f6c74', '#9f734f', '#7a4d72']
+
 function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
@@ -148,11 +110,11 @@ function formatNumber(value: number): string {
   }).format(value)
 }
 
-function describeRule(config: DashboardResult['config']): string {
-  if (config.strategyId === 'mean_reversion') {
-    return `前日が ${config.thresholdPct.toFixed(2)}% 以上下落したら ${config.holdingDays} 日保有`
+function describeRule(definition: StrategyDefinition): string {
+  if (definition.engine === 'mean_reversion') {
+    return `前日が ${definition.thresholdPct.toFixed(2)}% 以上下落したら ${definition.holdingDays} 日保有`
   }
-  return `前日が ${config.thresholdPct.toFixed(2)}% 以上上昇したら ${config.holdingDays} 日保有`
+  return `前日が ${definition.thresholdPct.toFixed(2)}% 以上上昇したら ${definition.holdingDays} 日保有`
 }
 
 function App() {
@@ -160,7 +122,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<StatusState>({
     tone: 'success',
-    text: '固定プリセットの結果を読み込んでいます。',
+    text: '比較実験を読み込んでいます。',
   })
 
   const refreshDashboard = useEffectEvent(async () => {
@@ -169,13 +131,13 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/api/dashboard`)
       const payload = await response.json()
       if (!response.ok) {
-        throw new Error(payload.detail ?? 'ダッシュボードの取得に失敗しました。')
+        throw new Error(payload.detail ?? '比較実験の取得に失敗しました。')
       }
 
       startTransition(() => setDashboard(payload))
       setStatus({
         tone: 'success',
-        text: `${payload.config.ticker} / ${payload.config.period} の固定ダッシュボードを表示しています。`,
+        text: `${payload.study.datasetSpec.ticker} / ${payload.study.datasetSpec.period} で ${payload.runs.length} 本の戦略を同条件比較しています。`,
       })
     } catch (caughtError) {
       setStatus({
@@ -191,27 +153,26 @@ function App() {
     void refreshDashboard()
   }, [])
 
+  const splitDate = dashboard?.runs[0]?.splitAnalysis.test.startDate
+  const benchmarkSummary = dashboard?.runs[0]?.benchmark
+
   return (
     <main className="app-shell">
       <div className="page">
         <section className="hero panel">
           <p className="eyebrow">ミニマルクオンツ</p>
-          <h1>1つのルールから始める、最小のクオンツ検証。</h1>
+          <h1>比較実験を、時系列で見る。</h1>
           <p className="hero-copy">
-            UI は固定プリセットの結果を見るためだけにしています。調整用の入力は置かず、
-            採用中の条件で単発・学習/検証・複数期間・複数銘柄をそのまま比較します。
+            この画面の主語は戦略そのものではなく、同一条件で複数戦略を比較する 1 つの比較実験です。
+            何を検証しているか、どの条件で比べているか、結果がどうだったかを同じ構造で見せています。
           </p>
         </section>
 
         <section className="panel results">
           <div className="panel-title">
             <div>
-              <h2>結果</h2>
-              <p>
-                {dashboard
-                  ? `${dashboard.config.ticker} / ${dashboard.config.period} / ${dashboard.config.strategyLabel} / ${describeRule(dashboard.config)}`
-                  : 'まだ結果がありません。'}
-              </p>
+              <h2>{dashboard?.study.title ?? '比較実験'}</h2>
+              <p>{dashboard?.study.question ?? 'まだ結果がありません。'}</p>
             </div>
           </div>
 
@@ -221,94 +182,88 @@ function App() {
             <>
               <div className="cards cards-compact">
                 <article className="metric-card">
-                  <h3>採用条件</h3>
+                  <h3>データセット</h3>
                   <div className="metric-grid">
                     <div className="metric">
-                      <span className="metric-label">主銘柄</span>
+                      <span className="metric-label">銘柄</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.config.ticker}
+                        {dashboard.study.datasetSpec.ticker}
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">主期間</span>
+                      <span className="metric-label">期間</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.config.period}
+                        {dashboard.study.datasetSpec.period}
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">ルール</span>
+                      <span className="metric-label">頻度</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.config.strategyLabel}
+                        {dashboard.study.datasetSpec.frequency}
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">片道コスト</span>
+                      <span className="metric-label">データ元</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.config.transactionCostPct.toFixed(3)}%
-                      </strong>
-                    </div>
-                  </div>
-                  <p className="chart-note">
-                    初期資金 {formatNumber(dashboard.config.initialCapital)} 円、学習期間比率{' '}
-                    {dashboard.config.splitRatioPct.toFixed(1)}% です。
-                  </p>
-                </article>
-
-                <article className="metric-card">
-                  <h3>戦略</h3>
-                  <div className="metric-grid">
-                    <div className="metric">
-                      <span className="metric-label">総リターン</span>
-                      <strong className="metric-value">
-                        {formatPercent(dashboard.single.summary.strategy.totalReturnPct)}
-                      </strong>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">シャープレシオ</span>
-                      <strong className="metric-value">
-                        {dashboard.single.summary.strategy.sharpeRatio.toFixed(2)}
-                      </strong>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">最大ドローダウン</span>
-                      <strong className="metric-value">
-                        {formatPercent(-dashboard.single.summary.strategy.maxDrawdownPct)}
-                      </strong>
-                    </div>
-                    <div className="metric">
-                      <span className="metric-label">勝率</span>
-                      <strong className="metric-value">
-                        {formatPercent(dashboard.single.summary.strategy.winRatePct ?? 0)}
+                        {dashboard.study.datasetSpec.source}
                       </strong>
                     </div>
                   </div>
                 </article>
 
                 <article className="metric-card">
-                  <h3>ベンチマーク</h3>
+                  <h3>執行モデル</h3>
                   <div className="metric-grid">
                     <div className="metric">
-                      <span className="metric-label">総リターン</span>
-                      <strong className="metric-value">
-                        {formatPercent(dashboard.single.summary.benchmark.totalReturnPct)}
+                      <span className="metric-label">約定前提</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.executionModel.entry}
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">シャープレシオ</span>
-                      <strong className="metric-value">
-                        {dashboard.single.summary.benchmark.sharpeRatio.toFixed(2)}
+                      <span className="metric-label">手数料</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.executionModel.commissionPct.toFixed(3)}%
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">最大ドローダウン</span>
-                      <strong className="metric-value">
-                        {formatPercent(-dashboard.single.summary.benchmark.maxDrawdownPct)}
+                      <span className="metric-label">スリッページ</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.executionModel.slippagePct.toFixed(3)}%
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">CAGR</span>
+                      <span className="metric-label">ベンチマーク</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.backtestConfig.benchmark}
+                      </strong>
+                    </div>
+                  </div>
+                </article>
+
+                <article className="metric-card">
+                  <h3>検証設定</h3>
+                  <div className="metric-grid">
+                    <div className="metric">
+                      <span className="metric-label">戦略数</span>
+                      <strong className="metric-value metric-value-text">{dashboard.runs.length}</strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">初期資金</span>
+                      <strong className="metric-value metric-value-text">
+                        {formatNumber(dashboard.study.backtestConfig.initialCapital)}
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">学習比率</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.study.backtestConfig.splitRatioPct.toFixed(1)}%
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">買い持ち</span>
                       <strong className="metric-value">
-                        {formatPercent(dashboard.single.summary.benchmark.cagrPct)}
+                        {formatPercent(benchmarkSummary?.totalReturnPct ?? 0)}
                       </strong>
                     </div>
                   </div>
@@ -316,8 +271,8 @@ function App() {
               </div>
 
               <div className="content-block">
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={dashboard.single.series}>
+                <ResponsiveContainer width="100%" height={360}>
+                  <LineChart data={dashboard.comparisonSeries}>
                     <CartesianGrid stroke="rgba(88, 67, 51, 0.08)" vertical={false} />
                     <XAxis
                       dataKey="date"
@@ -332,190 +287,79 @@ function App() {
                         backgroundColor: 'rgba(255, 251, 245, 0.96)',
                       }}
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="strategyEquity"
-                      stroke="#b45b2a"
-                      strokeWidth={2.5}
-                      dot={false}
-                      name={dashboard.config.strategyLabel}
-                    />
+                    {splitDate ? (
+                      <ReferenceLine
+                        x={splitDate}
+                        stroke="#8c745f"
+                        strokeDasharray="5 5"
+                        label={{
+                          value: '検証開始',
+                          position: 'insideTopRight',
+                          fill: '#8c745f',
+                          fontSize: 12,
+                        }}
+                      />
+                    ) : null}
                     <Line
                       type="monotone"
                       dataKey="benchmarkEquity"
-                      stroke="#667d5d"
-                      strokeWidth={2.1}
+                      stroke="#7d8f6f"
+                      strokeWidth={2.2}
                       dot={false}
                       name="買い持ち"
                     />
+                    {dashboard.runs.map((run, index) => (
+                      <Line
+                        key={run.definition.key}
+                        type="monotone"
+                        dataKey={run.definition.key}
+                        stroke={STRATEGY_COLORS[index % STRATEGY_COLORS.length]}
+                        strokeWidth={2.5}
+                        dot={false}
+                        name={run.definition.label}
+                      />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
                 <p className="chart-note">
                   {loading
-                    ? 'ダッシュボードを更新中…'
-                    : `${dashboard.single.dataset.source} の実データです。UI では条件変更を受け付けません。`}
+                    ? '比較実験を更新中…'
+                    : '同じ比較実験の中で、買い持ちと各戦略の資産曲線を重ねています。縦線より後ろが検証期間です。'}
                 </p>
               </div>
 
               <div className="content-block">
                 <div className="table-header">
                   <div>
-                    <h3>学習 / 検証分割</h3>
-                    <p>
-                      前半 {dashboard.single.splitAnalysis.config.splitRatioPct.toFixed(1)}% を学習、
-                      後半を検証として固定表示しています。
-                    </p>
+                    <h3>戦略ラン</h3>
+                    <p>この比較実験の中で実行した各戦略ランのルール、仮説、結果です。</p>
                   </div>
                 </div>
                 <div className="table-scroll">
                   <table className="results-table">
                     <thead>
                       <tr>
-                        <th>区間</th>
-                        <th>期間</th>
                         <th>戦略</th>
-                        <th>Sharpe</th>
-                        <th>最大DD</th>
-                        <th>勝率</th>
-                        <th>回数</th>
-                        <th>買い持ち</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        { label: '学習', value: dashboard.single.splitAnalysis.train },
-                        { label: '検証', value: dashboard.single.splitAnalysis.test },
-                      ].map((row) => (
-                        <tr key={row.label}>
-                          <td>{row.label}</td>
-                          <td>{`${row.value.startDate} - ${row.value.endDate}`}</td>
-                          <td>{formatPercent(row.value.strategy.totalReturnPct)}</td>
-                          <td>{row.value.strategy.sharpeRatio.toFixed(2)}</td>
-                          <td>{formatPercent(-row.value.strategy.maxDrawdownPct)}</td>
-                          <td>{formatPercent(row.value.strategy.winRatePct ?? 0)}</td>
-                          <td>{row.value.strategy.tradeCount ?? 0}</td>
-                          <td>{formatPercent(row.value.benchmark.totalReturnPct)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="content-block">
-                <div className="table-header">
-                  <div>
-                    <h3>条件比較</h3>
-                    <p>
-                      閾値 {dashboard.config.thresholdGridPct.join(', ')}% と保有日数{' '}
-                      {dashboard.config.holdingDaysGrid.join(', ')} 日を固定で比較しています。
-                    </p>
-                  </div>
-                </div>
-                <div className="table-scroll">
-                  <table className="results-table">
-                    <thead>
-                      <tr>
-                        <th>順位</th>
-                        <th>閾値</th>
-                        <th>保有</th>
+                        <th>ルール</th>
+                        <th>仮説</th>
                         <th>総リターン</th>
                         <th>Sharpe</th>
                         <th>最大DD</th>
-                        <th>勝率</th>
                         <th>回数</th>
+                        <th>検証</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {dashboard.gridSearch.results.slice(0, 8).map((row) => (
-                        <tr key={`${row.thresholdPct}-${row.holdingDays}`}>
-                          <td>{row.rank}</td>
-                          <td>{row.thresholdPct.toFixed(2)}%</td>
-                          <td>{row.holdingDays}日</td>
-                          <td>{formatPercent(row.totalReturnPct)}</td>
-                          <td>{row.sharpeRatio.toFixed(2)}</td>
-                          <td>{formatPercent(-row.maxDrawdownPct)}</td>
-                          <td>{formatPercent(row.winRatePct)}</td>
-                          <td>{row.tradeCount}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="content-block">
-                <div className="table-header">
-                  <div>
-                    <h3>複数期間比較</h3>
-                    <p>
-                      {dashboard.periodCompare.dataset.ticker} を{' '}
-                      {dashboard.config.periodComparePeriods.join(', ')} で固定比較しています。
-                    </p>
-                  </div>
-                </div>
-                <div className="table-scroll">
-                  <table className="results-table">
-                    <thead>
-                      <tr>
-                        <th>期間</th>
-                        <th>戦略</th>
-                        <th>Sharpe</th>
-                        <th>最大DD</th>
-                        <th>勝率</th>
-                        <th>回数</th>
-                        <th>買い持ち</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dashboard.periodCompare.results.map((row) => (
-                        <tr key={row.period}>
-                          <td>{row.period}</td>
-                          <td>{formatPercent(row.strategy.totalReturnPct)}</td>
-                          <td>{row.strategy.sharpeRatio.toFixed(2)}</td>
-                          <td>{formatPercent(-row.strategy.maxDrawdownPct)}</td>
-                          <td>{formatPercent(row.strategy.winRatePct ?? 0)}</td>
-                          <td>{row.strategy.tradeCount ?? 0}</td>
-                          <td>{formatPercent(row.benchmark.totalReturnPct)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="content-block">
-                <div className="table-header">
-                  <div>
-                    <h3>複数銘柄比較</h3>
-                    <p>
-                      {dashboard.config.comparisonTickers.join(', ')} を同じルールで固定比較しています。
-                    </p>
-                  </div>
-                </div>
-                <div className="table-scroll">
-                  <table className="results-table">
-                    <thead>
-                      <tr>
-                        <th>銘柄</th>
-                        <th>戦略</th>
-                        <th>Sharpe</th>
-                        <th>最大DD</th>
-                        <th>勝率</th>
-                        <th>回数</th>
-                        <th>買い持ち</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dashboard.tickerCompare.results.map((row) => (
-                        <tr key={row.ticker}>
-                          <td>{row.ticker}</td>
-                          <td>{formatPercent(row.strategy.totalReturnPct)}</td>
-                          <td>{row.strategy.sharpeRatio.toFixed(2)}</td>
-                          <td>{formatPercent(-row.strategy.maxDrawdownPct)}</td>
-                          <td>{formatPercent(row.strategy.winRatePct ?? 0)}</td>
-                          <td>{row.strategy.tradeCount ?? 0}</td>
-                          <td>{formatPercent(row.benchmark.totalReturnPct)}</td>
+                      {dashboard.runs.map((run) => (
+                        <tr key={run.definition.key}>
+                          <td>{run.definition.label}</td>
+                          <td>{describeRule(run.definition)}</td>
+                          <td>{run.definition.hypothesis}</td>
+                          <td>{formatPercent(run.summary.totalReturnPct)}</td>
+                          <td>{run.summary.sharpeRatio.toFixed(2)}</td>
+                          <td>{formatPercent(-run.summary.maxDrawdownPct)}</td>
+                          <td>{run.summary.tradeCount ?? 0}</td>
+                          <td>{formatPercent(run.splitAnalysis.test.strategy.totalReturnPct)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -524,7 +368,7 @@ function App() {
               </div>
             </>
           ) : (
-            <div className="empty-state">固定ダッシュボードを読み込んでいます。</div>
+            <div className="empty-state">比較実験を読み込んでいます。</div>
           )}
         </section>
       </div>

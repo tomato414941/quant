@@ -7,12 +7,14 @@ from app.dashboard_config import DEFAULT_DASHBOARD_CONFIG
 from app.market_data import SUPPORTED_PERIODS, fetch_market_prices
 from app.strategy import (
     SUPPORTED_STRATEGIES,
-    STRATEGY_LABELS,
+    build_strategy_definition,
     compare_periods,
+    compare_strategies,
     compare_tickers,
     run_backtest,
     run_grid_search,
     run_split_backtest,
+    serialize_strategy_definition,
 )
 
 
@@ -37,95 +39,22 @@ def healthcheck() -> dict[str, str]:
 def dashboard() -> dict:
     try:
         config = DEFAULT_DASHBOARD_CONFIG
-        strategy = parse_strategy(config["strategy"])
-
         prices, metadata = fetch_market_prices(
-            ticker=config["ticker"],
-            period=config["period"],
+            ticker=config["dataset_spec"]["ticker"],
+            period=config["dataset_spec"]["period"],
         )
-        single = run_backtest(
+        runs = compare_strategies(
             prices=prices,
-            threshold=config["threshold"],
-            initial_capital=config["initial_capital"],
-            holding_days=config["holding_days"],
-            transaction_cost=config["transaction_cost"],
-            strategy=strategy,
+            strategy_definitions=config["strategy_definitions"],
+            initial_capital=config["backtest_config"]["initial_capital"],
+            transaction_cost=config["execution_model"]["commission_pct"] / 100,
+            split_ratio=config["backtest_config"]["split_ratio"],
         )
-        single["splitAnalysis"] = run_split_backtest(
-            prices=prices,
-            threshold=config["threshold"],
-            initial_capital=config["initial_capital"],
-            holding_days=config["holding_days"],
-            transaction_cost=config["transaction_cost"],
-            strategy=strategy,
-            split_ratio=config["split_ratio"],
-        )
-        single["dataset"] = metadata
-
-        grid_search = run_grid_search(
-            prices=prices,
-            thresholds=config["threshold_grid"],
-            holding_days_options=config["holding_days_grid"],
-            initial_capital=config["initial_capital"],
-            transaction_cost=config["transaction_cost"],
-            strategy=strategy,
-        )
-        grid_search["dataset"] = metadata
-
-        ticker_datasets = []
-        for ticker in config["comparison_tickers"]:
-            comparison_prices, comparison_metadata = fetch_market_prices(
-                ticker=ticker,
-                period=config["period"],
-            )
-            ticker_datasets.append(
-                {
-                    "ticker": comparison_metadata["ticker"],
-                    "period": comparison_metadata["period"],
-                    "prices": comparison_prices,
-                }
-            )
-        ticker_compare = compare_tickers(
-            datasets=ticker_datasets,
-            threshold=config["threshold"],
-            holding_days=config["holding_days"],
-            initial_capital=config["initial_capital"],
-            transaction_cost=config["transaction_cost"],
-            strategy=strategy,
-        )
-
-        period_datasets = []
-        for period in config["period_compare_periods"]:
-            period_prices, period_metadata = fetch_market_prices(
-                ticker=config["ticker"],
-                period=period,
-            )
-            period_datasets.append(
-                {
-                    "ticker": period_metadata["ticker"],
-                    "period": period_metadata["period"],
-                    "prices": period_prices,
-                }
-            )
-        period_compare = compare_periods(
-            datasets=period_datasets,
-            threshold=config["threshold"],
-            holding_days=config["holding_days"],
-            initial_capital=config["initial_capital"],
-            transaction_cost=config["transaction_cost"],
-            strategy=strategy,
-        )
-        period_compare["dataset"] = {
-            "ticker": config["ticker"],
-            "source": metadata["source"],
-        }
 
         return {
-            "config": serialize_dashboard_config(config),
-            "single": single,
-            "gridSearch": grid_search,
-            "tickerCompare": ticker_compare,
-            "periodCompare": period_compare,
+            "study": serialize_study(config, metadata),
+            "runs": runs,
+            "comparisonSeries": build_comparison_series(runs),
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -143,23 +72,23 @@ def backtest_market(
     split_ratio: float = 0.7,
 ) -> dict:
     try:
-        normalized_strategy = parse_strategy(strategy)
+        strategy_definition = build_strategy_definition(
+            engine=parse_strategy(strategy),
+            threshold=threshold,
+            holding_days=holding_days,
+        )
         prices, metadata = fetch_market_prices(ticker=ticker, period=period)
         payload = run_backtest(
             prices=prices,
-            threshold=threshold,
+            strategy_definition=strategy_definition,
             initial_capital=initial_capital,
-            holding_days=holding_days,
             transaction_cost=transaction_cost,
-            strategy=normalized_strategy,
         )
         payload["splitAnalysis"] = run_split_backtest(
             prices=prices,
-            threshold=threshold,
+            strategy_definition=strategy_definition,
             initial_capital=initial_capital,
-            holding_days=holding_days,
             transaction_cost=transaction_cost,
-            strategy=normalized_strategy,
             split_ratio=split_ratio,
         )
         payload["dataset"] = metadata
@@ -179,7 +108,6 @@ def grid_search_market(
     strategy: str = "mean_reversion",
 ) -> dict:
     try:
-        normalized_strategy = parse_strategy(strategy)
         prices, metadata = fetch_market_prices(ticker=ticker, period=period)
         payload = run_grid_search(
             prices=prices,
@@ -187,7 +115,7 @@ def grid_search_market(
             holding_days_options=parse_integer_values(holding_days_values),
             initial_capital=initial_capital,
             transaction_cost=transaction_cost,
-            strategy=normalized_strategy,
+            strategy=parse_strategy(strategy),
         )
         payload["dataset"] = metadata
         return payload
@@ -206,7 +134,11 @@ def ticker_compare_market(
     strategy: str = "mean_reversion",
 ) -> dict:
     try:
-        normalized_strategy = parse_strategy(strategy)
+        strategy_definition = build_strategy_definition(
+            engine=parse_strategy(strategy),
+            threshold=threshold,
+            holding_days=holding_days,
+        )
         ticker_values = parse_ticker_values(tickers)
         datasets = []
         for ticker in ticker_values:
@@ -221,11 +153,9 @@ def ticker_compare_market(
 
         return compare_tickers(
             datasets=datasets,
-            threshold=threshold,
-            holding_days=holding_days,
+            strategy_definition=strategy_definition,
             initial_capital=initial_capital,
             transaction_cost=transaction_cost,
-            strategy=normalized_strategy,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -242,7 +172,11 @@ def period_compare_market(
     strategy: str = "mean_reversion",
 ) -> dict:
     try:
-        normalized_strategy = parse_strategy(strategy)
+        strategy_definition = build_strategy_definition(
+            engine=parse_strategy(strategy),
+            threshold=threshold,
+            holding_days=holding_days,
+        )
         datasets = []
         normalized_ticker = ticker.strip().upper()
         for period in parse_period_values(periods):
@@ -257,11 +191,9 @@ def period_compare_market(
 
         payload = compare_periods(
             datasets=datasets,
-            threshold=threshold,
-            holding_days=holding_days,
+            strategy_definition=strategy_definition,
             initial_capital=initial_capital,
             transaction_cost=transaction_cost,
-            strategy=normalized_strategy,
         )
         payload["dataset"] = {"ticker": normalized_ticker, "source": "Yahoo Finance via yfinance"}
         return payload
@@ -321,20 +253,48 @@ def parse_period_values(raw_values: str) -> list[str]:
     return unique_values
 
 
-def serialize_dashboard_config(config: dict) -> dict:
-    strategy = parse_strategy(config["strategy"])
+def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
     return {
-        "ticker": config["ticker"],
-        "period": config["period"],
-        "periodComparePeriods": config["period_compare_periods"],
-        "comparisonTickers": config["comparison_tickers"],
-        "strategyId": strategy,
-        "strategyLabel": STRATEGY_LABELS[strategy],
-        "thresholdPct": round(config["threshold"] * 100, 2),
-        "holdingDays": config["holding_days"],
-        "splitRatioPct": round(config["split_ratio"] * 100, 1),
-        "initialCapital": round(config["initial_capital"], 2),
-        "transactionCostPct": round(config["transaction_cost"] * 100, 3),
-        "thresholdGridPct": [round(value * 100, 2) for value in config["threshold_grid"]],
-        "holdingDaysGrid": config["holding_days_grid"],
+        "id": config["study_id"],
+        "title": config["title"],
+        "question": config["question"],
+        "datasetSpec": {
+            "ticker": config["dataset_spec"]["ticker"],
+            "period": config["dataset_spec"]["period"],
+            "frequency": config["dataset_spec"]["frequency"],
+            "source": dataset_metadata["source"],
+        },
+        "executionModel": {
+            "entry": config["execution_model"]["entry"],
+            "commissionPct": round(config["execution_model"]["commission_pct"], 3),
+            "slippagePct": round(config["execution_model"]["slippage_pct"], 3),
+        },
+        "backtestConfig": {
+            "splitRatioPct": round(config["backtest_config"]["split_ratio"] * 100, 1),
+            "initialCapital": round(config["backtest_config"]["initial_capital"], 2),
+            "benchmark": config["backtest_config"]["benchmark"],
+        },
+        "strategyDefinitions": [
+            serialize_strategy_definition(strategy_definition)
+            for strategy_definition in config["strategy_definitions"]
+        ],
     }
+
+
+def build_comparison_series(runs: list[dict]) -> list[dict]:
+    rows_by_date: dict[str, dict] = {}
+
+    for run in runs:
+        strategy_key = run["definition"]["key"]
+        for point in run["series"]:
+            row = rows_by_date.setdefault(
+                point["date"],
+                {
+                    "date": point["date"],
+                    "benchmarkEquity": point["benchmarkEquity"],
+                },
+            )
+            row["benchmarkEquity"] = point["benchmarkEquity"]
+            row[strategy_key] = point["strategyEquity"]
+
+    return [rows_by_date[key] for key in sorted(rows_by_date.keys())]

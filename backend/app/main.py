@@ -4,7 +4,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dashboard_config import DEFAULT_DASHBOARD_CONFIG
-from app.market_data import SUPPORTED_PERIODS, fetch_market_prices
+from app.market_data import SUPPORTED_PERIODS, fetch_market_prices, fetch_market_universe
+from app.portfolio import (
+    compare_portfolio_runs,
+    serialize_portfolio_model_definition,
+    serialize_portfolio_strategy_definition,
+)
 from app.strategy import (
     SUPPORTED_STRATEGIES,
     build_strategy_definition,
@@ -39,16 +44,17 @@ def healthcheck() -> dict[str, str]:
 def dashboard() -> dict:
     try:
         config = DEFAULT_DASHBOARD_CONFIG
-        prices, metadata = fetch_market_prices(
-            ticker=config["dataset_spec"]["ticker"],
+        closes, metadata = fetch_market_universe(
+            tickers=config["dataset_spec"]["tickers"],
             period=config["dataset_spec"]["period"],
         )
-        runs = compare_strategies(
-            prices=prices,
+        runs = compare_portfolio_runs(
+            closes=closes,
             strategy_definitions=config["strategy_definitions"],
+            model_definitions=config["portfolio_models"],
             initial_capital=config["backtest_config"]["initial_capital"],
-            transaction_cost=config["execution_model"]["commission_pct"] / 100,
             split_ratio=config["backtest_config"]["split_ratio"],
+            transaction_cost=config["execution_model"]["commission_pct"] / 100,
         )
 
         return {
@@ -259,7 +265,7 @@ def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
         "title": config["title"],
         "question": config["question"],
         "datasetSpec": {
-            "ticker": config["dataset_spec"]["ticker"],
+            "tickers": config["dataset_spec"]["tickers"],
             "period": config["dataset_spec"]["period"],
             "frequency": config["dataset_spec"]["frequency"],
             "source": dataset_metadata["source"],
@@ -274,8 +280,12 @@ def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
             "initialCapital": round(config["backtest_config"]["initial_capital"], 2),
             "benchmark": config["backtest_config"]["benchmark"],
         },
+        "portfolioModels": [
+            serialize_portfolio_model_definition(model_definition)
+            for model_definition in config["portfolio_models"]
+        ],
         "strategyDefinitions": [
-            serialize_strategy_definition(strategy_definition)
+            serialize_portfolio_strategy_definition(strategy_definition)
             for strategy_definition in config["strategy_definitions"]
         ],
     }
@@ -285,7 +295,7 @@ def build_comparison_series(runs: list[dict]) -> list[dict]:
     rows_by_date: dict[str, dict] = {}
 
     for run in runs:
-        strategy_key = run["definition"]["key"]
+        model_key = run["key"]
         for point in run["series"]:
             row = rows_by_date.setdefault(
                 point["date"],
@@ -295,6 +305,6 @@ def build_comparison_series(runs: list[dict]) -> list[dict]:
                 },
             )
             row["benchmarkEquity"] = point["benchmarkEquity"]
-            row[strategy_key] = point["strategyEquity"]
+            row[model_key] = point["portfolioEquity"]
 
     return [rows_by_date[key] for key in sorted(rows_by_date.keys())]

@@ -16,29 +16,39 @@ type SummaryMetrics = {
   cagrPct: number
   sharpeRatio: number
   maxDrawdownPct: number
-  tradeCount?: number
-  winRatePct?: number
 }
 
-type StrategyDefinition = {
+type PortfolioStrategyDefinition = {
   key: string
-  engine: string
+  strategyType: string
   label: string
-  hypothesis: string
-  thresholdPct: number
-  holdingDays: number
+  description: string
+}
+
+type PortfolioModelDefinition = {
+  key: string
+  modelType: string
+  label: string
+  description: string
 }
 
 type SplitSegment = {
   startDate: string
   endDate: string
   dayCount: number
-  strategy: SummaryMetrics
+  portfolio: SummaryMetrics
   benchmark: SummaryMetrics
 }
 
-type StrategyRun = {
-  definition: StrategyDefinition
+type PortfolioRun = {
+  key: string
+  strategy: PortfolioStrategyDefinition
+  portfolioModel: PortfolioModelDefinition
+  weights: Array<{
+    asset: string
+    weightPct: number
+  }>
+  selectedAssets: string[]
   summary: SummaryMetrics
   benchmark: SummaryMetrics
   splitAnalysis: {
@@ -50,7 +60,7 @@ type StrategyRun = {
   }
   series: Array<{
     date: string
-    strategyEquity: number
+    portfolioEquity: number
     benchmarkEquity: number
   }>
 }
@@ -65,7 +75,7 @@ type StudyResult = {
   title: string
   question: string
   datasetSpec: {
-    ticker: string
+    tickers: string[]
     period: string
     frequency: string
     source: string
@@ -80,12 +90,13 @@ type StudyResult = {
     initialCapital: number
     benchmark: string
   }
-  strategyDefinitions: StrategyDefinition[]
+  strategyDefinitions: PortfolioStrategyDefinition[]
+  portfolioModels: PortfolioModelDefinition[]
 }
 
 type DashboardResult = {
   study: StudyResult
-  runs: StrategyRun[]
+  runs: PortfolioRun[]
   comparisonSeries: ComparisonRow[]
 }
 
@@ -98,7 +109,7 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
   `${window.location.protocol}//${window.location.hostname}:8000`
 
-const STRATEGY_COLORS = ['#b45b2a', '#748a6c', '#2f6c74', '#9f734f', '#7a4d72']
+const RUN_COLORS = ['#b45b2a', '#748a6c', '#2f6c74', '#9f734f', '#7a4d72', '#5d698f', '#8b5f3d']
 
 function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
@@ -110,11 +121,16 @@ function formatNumber(value: number): string {
   }).format(value)
 }
 
-function describeRule(definition: StrategyDefinition): string {
-  if (definition.engine === 'mean_reversion') {
-    return `前日が ${definition.thresholdPct.toFixed(2)}% 以上下落したら ${definition.holdingDays} 日保有`
-  }
-  return `前日が ${definition.thresholdPct.toFixed(2)}% 以上上昇したら ${definition.holdingDays} 日保有`
+function formatWeights(weights: PortfolioRun['weights']): string {
+  return weights
+    .filter((row) => row.weightPct > 0)
+    .slice(0, 3)
+    .map((row) => `${row.asset} ${row.weightPct.toFixed(1)}%`)
+    .join(' / ')
+}
+
+function formatRunLabel(run: PortfolioRun): string {
+  return `${run.strategy.label} × ${run.portfolioModel.label}`
 }
 
 function App() {
@@ -122,7 +138,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<StatusState>({
     tone: 'success',
-    text: '比較実験を読み込んでいます。',
+    text: '戦略とポートフォリオ比較実験を読み込んでいます。',
   })
 
   const refreshDashboard = useEffectEvent(async () => {
@@ -137,7 +153,7 @@ function App() {
       startTransition(() => setDashboard(payload))
       setStatus({
         tone: 'success',
-        text: `${payload.study.datasetSpec.ticker} / ${payload.study.datasetSpec.period} で ${payload.runs.length} 本の戦略を同条件比較しています。`,
+        text: `${payload.study.strategyDefinitions.length} 戦略 x ${payload.study.portfolioModels.length} ポートフォリオ構築法を比較しています。`,
       })
     } catch (caughtError) {
       setStatus({
@@ -161,10 +177,10 @@ function App() {
       <div className="page">
         <section className="hero panel">
           <p className="eyebrow">ミニマルクオンツ</p>
-          <h1>比較実験を、時系列で見る。</h1>
+          <h1>戦略と配分法を、同じ時系列で比べる。</h1>
           <p className="hero-copy">
-            この画面の主語は戦略そのものではなく、同一条件で複数戦略を比較する 1 つの比較実験です。
-            何を検証しているか、どの条件で比べているか、結果がどうだったかを同じ構造で見せています。
+            この画面は、同じETFユニバースに対して `戦略 x ポートフォリオ構築法` の組み合わせを比較する実験です。
+            戦略は候補資産を選び、`skfolio` の配分法がその中で重みを決めます。
           </p>
         </section>
 
@@ -182,12 +198,12 @@ function App() {
             <>
               <div className="cards cards-compact">
                 <article className="metric-card">
-                  <h3>データセット</h3>
+                  <h3>ユニバース</h3>
                   <div className="metric-grid">
                     <div className="metric">
-                      <span className="metric-label">銘柄</span>
+                      <span className="metric-label">銘柄群</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.study.datasetSpec.ticker}
+                        {dashboard.study.datasetSpec.tickers.join(', ')}
                       </strong>
                     </div>
                     <div className="metric">
@@ -197,15 +213,15 @@ function App() {
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">頻度</span>
+                      <span className="metric-label">戦略数</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.study.datasetSpec.frequency}
+                        {dashboard.study.strategyDefinitions.length}
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">データ元</span>
+                      <span className="metric-label">配分法数</span>
                       <strong className="metric-value metric-value-text">
-                        {dashboard.study.datasetSpec.source}
+                        {dashboard.study.portfolioModels.length}
                       </strong>
                     </div>
                   </div>
@@ -234,9 +250,7 @@ function App() {
                     </div>
                     <div className="metric">
                       <span className="metric-label">ベンチマーク</span>
-                      <strong className="metric-value metric-value-text">
-                        {dashboard.study.backtestConfig.benchmark}
-                      </strong>
+                      <strong className="metric-value metric-value-text">等金額買い持ち</strong>
                     </div>
                   </div>
                 </article>
@@ -245,7 +259,7 @@ function App() {
                   <h3>検証設定</h3>
                   <div className="metric-grid">
                     <div className="metric">
-                      <span className="metric-label">戦略数</span>
+                      <span className="metric-label">組み合わせ数</span>
                       <strong className="metric-value metric-value-text">{dashboard.runs.length}</strong>
                     </div>
                     <div className="metric">
@@ -261,7 +275,7 @@ function App() {
                       </strong>
                     </div>
                     <div className="metric">
-                      <span className="metric-label">買い持ち</span>
+                      <span className="metric-label">等金額買い持ち</span>
                       <strong className="metric-value">
                         {formatPercent(benchmarkSummary?.totalReturnPct ?? 0)}
                       </strong>
@@ -271,7 +285,7 @@ function App() {
               </div>
 
               <div className="content-block">
-                <ResponsiveContainer width="100%" height={360}>
+                <ResponsiveContainer width="100%" height={380}>
                   <LineChart data={dashboard.comparisonSeries}>
                     <CartesianGrid stroke="rgba(88, 67, 51, 0.08)" vertical={false} />
                     <XAxis
@@ -306,17 +320,17 @@ function App() {
                       stroke="#7d8f6f"
                       strokeWidth={2.2}
                       dot={false}
-                      name="買い持ち"
+                      name="等金額買い持ち"
                     />
                     {dashboard.runs.map((run, index) => (
                       <Line
-                        key={run.definition.key}
+                        key={run.key}
                         type="monotone"
-                        dataKey={run.definition.key}
-                        stroke={STRATEGY_COLORS[index % STRATEGY_COLORS.length]}
-                        strokeWidth={2.5}
+                        dataKey={run.key}
+                        stroke={RUN_COLORS[index % RUN_COLORS.length]}
+                        strokeWidth={2.3}
                         dot={false}
-                        name={run.definition.label}
+                        name={formatRunLabel(run)}
                       />
                     ))}
                   </LineChart>
@@ -324,15 +338,15 @@ function App() {
                 <p className="chart-note">
                   {loading
                     ? '比較実験を更新中…'
-                    : '同じ比較実験の中で、買い持ちと各戦略の資産曲線を重ねています。縦線より後ろが検証期間です。'}
+                    : '各線は 戦略 x 配分法 の組み合わせです。縦線より後ろが検証期間です。'}
                 </p>
               </div>
 
               <div className="content-block">
                 <div className="table-header">
                   <div>
-                    <h3>戦略ラン</h3>
-                    <p>この比較実験の中で実行した各戦略ランのルール、仮説、結果です。</p>
+                    <h3>組み合わせ結果</h3>
+                    <p>戦略が候補資産を選び、配分法が重みを決めた結果を並べています。</p>
                   </div>
                 </div>
                 <div className="table-scroll">
@@ -340,26 +354,26 @@ function App() {
                     <thead>
                       <tr>
                         <th>戦略</th>
-                        <th>ルール</th>
-                        <th>仮説</th>
+                        <th>配分法</th>
+                        <th>候補資産</th>
+                        <th>代表ウェイト</th>
                         <th>総リターン</th>
                         <th>Sharpe</th>
                         <th>最大DD</th>
-                        <th>回数</th>
                         <th>検証</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dashboard.runs.map((run) => (
-                        <tr key={run.definition.key}>
-                          <td>{run.definition.label}</td>
-                          <td>{describeRule(run.definition)}</td>
-                          <td>{run.definition.hypothesis}</td>
+                        <tr key={run.key}>
+                          <td>{run.strategy.label}</td>
+                          <td>{run.portfolioModel.label}</td>
+                          <td>{run.selectedAssets.join(', ')}</td>
+                          <td>{formatWeights(run.weights)}</td>
                           <td>{formatPercent(run.summary.totalReturnPct)}</td>
                           <td>{run.summary.sharpeRatio.toFixed(2)}</td>
                           <td>{formatPercent(-run.summary.maxDrawdownPct)}</td>
-                          <td>{run.summary.tradeCount ?? 0}</td>
-                          <td>{formatPercent(run.splitAnalysis.test.strategy.totalReturnPct)}</td>
+                          <td>{formatPercent(run.splitAnalysis.test.portfolio.totalReturnPct)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -368,7 +382,7 @@ function App() {
               </div>
             </>
           ) : (
-            <div className="empty-state">比較実験を読み込んでいます。</div>
+            <div className="empty-state">戦略とポートフォリオ比較実験を読み込んでいます。</div>
           )}
         </section>
       </div>

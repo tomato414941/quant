@@ -1,3 +1,4 @@
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -41,6 +42,28 @@ def fake_fetch_market_prices(ticker: str, period: str) -> tuple[list[PricePoint]
     return prices, {"ticker": ticker, "period": period, "source": "test"}
 
 
+def fake_fetch_market_universe(tickers: list[str], period: str) -> tuple[pd.DataFrame, dict]:
+    frame = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106, 107],
+            "QQQ": [100, 103, 105, 107, 108, 110, 112],
+            "IWM": [100, 99, 100, 101, 103, 102, 104],
+            "TLT": [100, 100, 99, 100, 101, 102, 101],
+            "GLD": [100, 101, 100, 102, 103, 104, 105],
+        },
+        index=[
+            "2025-01-01",
+            "2025-01-02",
+            "2025-01-03",
+            "2025-01-04",
+            "2025-01-05",
+            "2025-01-06",
+            "2025-01-07",
+        ],
+    )
+    return frame[tickers], {"tickers": tickers, "period": period, "source": "test"}
+
+
 def test_healthcheck() -> None:
     response = client.get("/api/health")
 
@@ -49,19 +72,21 @@ def test_healthcheck() -> None:
 
 
 def test_dashboard_endpoint(monkeypatch) -> None:
-    monkeypatch.setattr("app.main.fetch_market_prices", fake_fetch_market_prices)
+    monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
 
     response = client.get("/api/dashboard")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["study"]["id"] == "short_term_reaction_spy_2y"
-    assert payload["study"]["datasetSpec"]["ticker"] == "SPY"
+    assert payload["study"]["id"] == "etf_portfolio_models_5y"
     assert payload["study"]["datasetSpec"]["source"] == "test"
     assert payload["study"]["executionModel"]["commissionPct"] == 0.1
-    assert len(payload["study"]["strategyDefinitions"]) == 3
+    assert len(payload["study"]["strategyDefinitions"]) == 2
+    assert len(payload["study"]["portfolioModels"]) == 3
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
-    assert payload["comparisonSeries"][0]["date"] == "2025-01-01"
+    assert payload["runs"][0]["strategy"]["label"] == "全資産"
+    assert payload["runs"][0]["portfolioModel"]["label"] == "等金額配分"
+    assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
 
 
 def test_market_backtest_endpoint(monkeypatch) -> None:

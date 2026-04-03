@@ -48,6 +48,21 @@ def test_healthcheck() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_dashboard_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr("app.main.fetch_market_prices", fake_fetch_market_prices)
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["ticker"] == "SPY"
+    assert payload["config"]["strategyId"] == "mean_reversion"
+    assert payload["single"]["dataset"]["source"] == "test"
+    assert payload["gridSearch"]["dataset"]["ticker"] == "SPY"
+    assert len(payload["tickerCompare"]["results"]) == 6
+    assert [row["period"] for row in payload["periodCompare"]["results"]] == ["6mo", "1y", "2y", "3y", "5y"]
+
+
 def test_market_backtest_endpoint(monkeypatch) -> None:
     monkeypatch.setattr("app.main.fetch_market_prices", fake_fetch_market_prices)
 

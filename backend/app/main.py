@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.dashboard_config import DEFAULT_DASHBOARD_CONFIG
 from app.market_data import SUPPORTED_PERIODS, fetch_market_prices
 from app.strategy import (
     SUPPORTED_STRATEGIES,
+    STRATEGY_LABELS,
     compare_periods,
     compare_tickers,
     run_backtest,
@@ -29,6 +31,104 @@ app.add_middleware(
 @app.get("/api/health")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/dashboard")
+def dashboard() -> dict:
+    try:
+        config = DEFAULT_DASHBOARD_CONFIG
+        strategy = parse_strategy(config["strategy"])
+
+        prices, metadata = fetch_market_prices(
+            ticker=config["ticker"],
+            period=config["period"],
+        )
+        single = run_backtest(
+            prices=prices,
+            threshold=config["threshold"],
+            initial_capital=config["initial_capital"],
+            holding_days=config["holding_days"],
+            transaction_cost=config["transaction_cost"],
+            strategy=strategy,
+        )
+        single["splitAnalysis"] = run_split_backtest(
+            prices=prices,
+            threshold=config["threshold"],
+            initial_capital=config["initial_capital"],
+            holding_days=config["holding_days"],
+            transaction_cost=config["transaction_cost"],
+            strategy=strategy,
+            split_ratio=config["split_ratio"],
+        )
+        single["dataset"] = metadata
+
+        grid_search = run_grid_search(
+            prices=prices,
+            thresholds=config["threshold_grid"],
+            holding_days_options=config["holding_days_grid"],
+            initial_capital=config["initial_capital"],
+            transaction_cost=config["transaction_cost"],
+            strategy=strategy,
+        )
+        grid_search["dataset"] = metadata
+
+        ticker_datasets = []
+        for ticker in config["comparison_tickers"]:
+            comparison_prices, comparison_metadata = fetch_market_prices(
+                ticker=ticker,
+                period=config["period"],
+            )
+            ticker_datasets.append(
+                {
+                    "ticker": comparison_metadata["ticker"],
+                    "period": comparison_metadata["period"],
+                    "prices": comparison_prices,
+                }
+            )
+        ticker_compare = compare_tickers(
+            datasets=ticker_datasets,
+            threshold=config["threshold"],
+            holding_days=config["holding_days"],
+            initial_capital=config["initial_capital"],
+            transaction_cost=config["transaction_cost"],
+            strategy=strategy,
+        )
+
+        period_datasets = []
+        for period in config["period_compare_periods"]:
+            period_prices, period_metadata = fetch_market_prices(
+                ticker=config["ticker"],
+                period=period,
+            )
+            period_datasets.append(
+                {
+                    "ticker": period_metadata["ticker"],
+                    "period": period_metadata["period"],
+                    "prices": period_prices,
+                }
+            )
+        period_compare = compare_periods(
+            datasets=period_datasets,
+            threshold=config["threshold"],
+            holding_days=config["holding_days"],
+            initial_capital=config["initial_capital"],
+            transaction_cost=config["transaction_cost"],
+            strategy=strategy,
+        )
+        period_compare["dataset"] = {
+            "ticker": config["ticker"],
+            "source": metadata["source"],
+        }
+
+        return {
+            "config": serialize_dashboard_config(config),
+            "single": single,
+            "gridSearch": grid_search,
+            "tickerCompare": ticker_compare,
+            "periodCompare": period_compare,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/backtest")
@@ -219,3 +319,22 @@ def parse_period_values(raw_values: str) -> list[str]:
     if any(value not in SUPPORTED_PERIODS for value in unique_values):
         raise ValueError("Unsupported period list.")
     return unique_values
+
+
+def serialize_dashboard_config(config: dict) -> dict:
+    strategy = parse_strategy(config["strategy"])
+    return {
+        "ticker": config["ticker"],
+        "period": config["period"],
+        "periodComparePeriods": config["period_compare_periods"],
+        "comparisonTickers": config["comparison_tickers"],
+        "strategyId": strategy,
+        "strategyLabel": STRATEGY_LABELS[strategy],
+        "thresholdPct": round(config["threshold"] * 100, 2),
+        "holdingDays": config["holding_days"],
+        "splitRatioPct": round(config["split_ratio"] * 100, 1),
+        "initialCapital": round(config["initial_capital"], 2),
+        "transactionCostPct": round(config["transaction_cost"] * 100, 3),
+        "thresholdGridPct": [round(value * 100, 2) for value in config["threshold_grid"]],
+        "holdingDaysGrid": config["holding_days_grid"],
+    }

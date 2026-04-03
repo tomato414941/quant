@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useEffectEvent, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useEffectEvent, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -19,14 +19,21 @@ type SummaryMetrics = {
   winRatePct?: number
 }
 
+type DatasetInfo = {
+  ticker: string
+  period: string
+  source: string
+}
+
 type BacktestResult = {
+  dataset: DatasetInfo
   summary: {
     strategy: SummaryMetrics
     benchmark: SummaryMetrics
     config: {
       thresholdPct: number
       initialCapital: number
-      holdingRule: string
+      holdingDays: number
     }
   }
   series: Array<{
@@ -41,212 +48,189 @@ type BacktestResult = {
   }>
 }
 
+type GridSearchRow = {
+  rank: number
+  thresholdPct: number
+  holdingDays: number
+  totalReturnPct: number
+  cagrPct: number
+  sharpeRatio: number
+  maxDrawdownPct: number
+  tradeCount: number
+  winRatePct: number
+}
+
+type GridSearchResult = {
+  dataset: DatasetInfo
+  config: {
+    thresholdValuesPct: number[]
+    holdingDaysValues: number[]
+    initialCapital: number
+  }
+  results: GridSearchRow[]
+}
+
+type StatusState = {
+  tone: 'success' | 'error'
+  text: string
+}
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
   `${window.location.protocol}//${window.location.hostname}:8000`
-
-async function fetchDemoBacktest(threshold: number, initialCapital: number): Promise<BacktestResult> {
-  const params = new URLSearchParams({
-    threshold: (threshold / 100).toString(),
-    initial_capital: initialCapital.toString(),
-  })
-  const response = await fetch(`${API_BASE_URL}/api/backtest/demo?${params.toString()}`)
-  if (!response.ok) {
-    const payload = await response.json()
-    throw new Error(payload.detail ?? 'Failed to fetch demo backtest.')
-  }
-  return response.json()
-}
-
-async function uploadBacktest(
-  file: File,
-  threshold: number,
-  initialCapital: number,
-): Promise<BacktestResult> {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('threshold', (threshold / 100).toString())
-  formData.append('initial_capital', initialCapital.toString())
-
-  const response = await fetch(`${API_BASE_URL}/api/backtest/upload`, {
-    method: 'POST',
-    body: formData,
-  })
-  if (!response.ok) {
-    const payload = await response.json()
-    throw new Error(payload.detail ?? 'Failed to upload CSV.')
-  }
-  return response.json()
-}
 
 function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('ja-JP', {
     maximumFractionDigits: 0,
   }).format(value)
 }
 
+function isValidPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0
+}
+
+function isValidTicker(value: string): boolean {
+  return value.trim().length > 0
+}
+
 function App() {
+  const [ticker, setTicker] = useState('SPY')
+  const [period, setPeriod] = useState('2y')
   const [threshold, setThreshold] = useState(3)
+  const [holdingDays, setHoldingDays] = useState(1)
   const [initialCapital, setInitialCapital] = useState(10000)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [thresholdGrid, setThresholdGrid] = useState('1.5,2,3,4,5')
+  const [holdingDaysGrid, setHoldingDaysGrid] = useState('1,2,3')
   const [result, setResult] = useState<BacktestResult | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('Synthetic market demo loaded automatically.')
-
-  const loadDemo = async (nextThreshold: number, nextCapital: number) => {
-    setLoading(true)
-    setError('')
-
-    try {
-      const payload = await fetchDemoBacktest(nextThreshold, nextCapital)
-      startTransition(() => setResult(payload))
-      setMessage('Demo backtest updated.')
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unknown error.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const bootDemo = useEffectEvent(async () => {
-    await loadDemo(threshold, initialCapital)
+  const [gridSearch, setGridSearch] = useState<GridSearchResult | null>(null)
+  const [singleLoading, setSingleLoading] = useState(false)
+  const [gridLoading, setGridLoading] = useState(false)
+  const [status, setStatus] = useState<StatusState>({
+    tone: 'success',
+    text: '実データの結果を自動で読み込みます。',
   })
 
-  useEffect(() => {
-    void bootDemo()
-  }, [])
+  const deferredTicker = useDeferredValue(ticker)
+  const deferredPeriod = useDeferredValue(period)
+  const deferredThreshold = useDeferredValue(threshold)
+  const deferredHoldingDays = useDeferredValue(holdingDays)
+  const deferredInitialCapital = useDeferredValue(initialCapital)
+  const deferredThresholdGrid = useDeferredValue(thresholdGrid)
+  const deferredHoldingDaysGrid = useDeferredValue(holdingDaysGrid)
 
-  const handleRunDemo = async () => {
-    setSelectedFile(null)
-    await loadDemo(threshold, initialCapital)
-  }
-
-  const handleUpload = async () => {
-    if (!selectedFile) {
-      setError('Upload a CSV file with date and close columns first.')
+  const refreshSingleBacktest = useEffectEvent(async () => {
+    if (!isValidTicker(deferredTicker)) {
+      setStatus({ tone: 'error', text: '銘柄コードを入力してください。' })
+      return
+    }
+    if (!isValidPositiveInteger(deferredHoldingDays)) {
+      setStatus({ tone: 'error', text: '保有日数は 1 以上の整数で入力してください。' })
+      return
+    }
+    if (!isValidPositiveInteger(deferredInitialCapital)) {
+      setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
       return
     }
 
-    setLoading(true)
-    setError('')
+    setSingleLoading(true)
     try {
-      const payload = await uploadBacktest(selectedFile, threshold, initialCapital)
+      const params = new URLSearchParams({
+        ticker: deferredTicker.trim().toUpperCase(),
+        period: deferredPeriod,
+        threshold: (deferredThreshold / 100).toString(),
+        initial_capital: deferredInitialCapital.toString(),
+        holding_days: deferredHoldingDays.toString(),
+      })
+      const response = await fetch(`${API_BASE_URL}/api/backtest?${params.toString()}`)
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.detail ?? 'バックテスト結果の取得に失敗しました。')
+      }
+
       startTransition(() => setResult(payload))
-      setMessage(`CSV backtest updated from ${selectedFile.name}.`)
+      setStatus({
+        tone: 'success',
+        text: `${payload.dataset.ticker} の単発結果を表示しています。`,
+      })
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unknown error.')
+      setStatus({
+        tone: 'error',
+        text: caughtError instanceof Error ? caughtError.message : '不明なエラーが発生しました。',
+      })
     } finally {
-      setLoading(false)
+      setSingleLoading(false)
     }
-  }
+  })
+
+  const refreshGridSearch = useEffectEvent(async () => {
+    if (!isValidTicker(deferredTicker)) {
+      setStatus({ tone: 'error', text: '銘柄コードを入力してください。' })
+      return
+    }
+    if (!isValidPositiveInteger(deferredInitialCapital)) {
+      setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
+      return
+    }
+
+    setGridLoading(true)
+    try {
+      const params = new URLSearchParams({
+        ticker: deferredTicker.trim().toUpperCase(),
+        period: deferredPeriod,
+        threshold_values: deferredThresholdGrid,
+        holding_days_values: deferredHoldingDaysGrid,
+        initial_capital: deferredInitialCapital.toString(),
+      })
+      const response = await fetch(`${API_BASE_URL}/api/grid-search?${params.toString()}`)
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.detail ?? '条件比較の取得に失敗しました。')
+      }
+
+      startTransition(() => setGridSearch(payload))
+    } catch (caughtError) {
+      setStatus({
+        tone: 'error',
+        text: caughtError instanceof Error ? caughtError.message : '不明なエラーが発生しました。',
+      })
+    } finally {
+      setGridLoading(false)
+    }
+  })
+
+  useEffect(() => {
+    void refreshSingleBacktest()
+  }, [deferredTicker, deferredPeriod, deferredThreshold, deferredHoldingDays, deferredInitialCapital])
+
+  useEffect(() => {
+    void refreshGridSearch()
+  }, [deferredTicker, deferredPeriod, deferredThresholdGrid, deferredHoldingDaysGrid, deferredInitialCapital])
 
   return (
     <main className="app-shell">
       <div className="page">
         <section className="hero panel">
-          <p className="eyebrow">Minimal Quant</p>
-          <h1>One idea. One rule. One chart.</h1>
+          <p className="eyebrow">ミニマルクオンツ</p>
+          <h1>1つのルールから始める、最小のクオンツ検証。</h1>
           <p className="hero-copy">
-            This is the smallest useful quant workflow: price series in, explicit rule,
-            backtest out. The rule is fixed to a one-day mean reversion trade after a large drop.
+            実データだけを使う最小構成のクオンツ検証です。銘柄コードを入れると価格系列を取得し、
+            明示的なルールでバックテストして結果をそのまま確認できます。
           </p>
-          <div className="hero-grid">
-            <div className="hero-chip">
-              <div>
-                <strong>Rule</strong>
-                <span>Buy after a drop larger than threshold</span>
-              </div>
-            </div>
-            <div className="hero-chip">
-              <div>
-                <strong>Input</strong>
-                <span>Built-in synthetic data or your own CSV</span>
-              </div>
-            </div>
-            <div className="hero-chip">
-              <div>
-                <strong>Output</strong>
-                <span>Return, Sharpe, drawdown, win rate</span>
-              </div>
-            </div>
-          </div>
         </section>
 
         <div className="layout">
-          <section className="panel controls">
-            <div className="panel-title">
-              <div>
-                <h2>Controls</h2>
-                <p>Frontend and backend are connected only through the API.</p>
-              </div>
-            </div>
-
-            <div className="control-grid">
-              <div className="field">
-                <div className="range-header">
-                  <label htmlFor="threshold">Drop Threshold</label>
-                  <span className="range-value">{threshold.toFixed(1)}%</span>
-                </div>
-                <input
-                  id="threshold"
-                  type="range"
-                  min="1"
-                  max="8"
-                  step="0.5"
-                  value={threshold}
-                  onChange={(event) => setThreshold(Number(event.target.value))}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="capital">Initial Capital</label>
-                <input
-                  id="capital"
-                  type="number"
-                  min="1000"
-                  step="1000"
-                  value={initialCapital}
-                  onChange={(event) => setInitialCapital(Number(event.target.value))}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="csv">Optional CSV Upload</label>
-                <input
-                  id="csv"
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-                />
-                <p className="footnote">Expected columns: date, close</p>
-              </div>
-
-              <div className="actions">
-                <button className="button button-primary" disabled={loading} onClick={() => void handleRunDemo()}>
-                  {loading ? 'Running…' : 'Run Demo Backtest'}
-                </button>
-                <button className="button button-secondary" disabled={loading} onClick={() => void handleUpload()}>
-                  {loading ? 'Uploading…' : 'Run Uploaded CSV'}
-                </button>
-              </div>
-            </div>
-
-            <p className={`status ${error ? 'error' : 'success'}`}>{error || message}</p>
-          </section>
-
           <section className="panel results">
             <div className="panel-title">
               <div>
-                <h2>Results</h2>
+                <h2>結果</h2>
                 <p>
                   {result
-                    ? `${result.summary.config.holdingRule} Threshold ${result.summary.config.thresholdPct.toFixed(2)}%.`
-                    : 'No results yet.'}
+                    ? `${result.dataset.ticker} / ${result.dataset.period} / 前日下落が ${result.summary.config.thresholdPct.toFixed(2)}% 以上なら ${result.summary.config.holdingDays} 日保有。`
+                    : 'まだ結果がありません。'}
                 </p>
               </div>
             </div>
@@ -255,56 +239,59 @@ function App() {
               <>
                 <div className="cards">
                   <article className="metric-card">
-                    <h3>Strategy</h3>
+                    <h3>戦略</h3>
                     <div className="metric-grid">
                       <div className="metric">
-                        <span className="metric-label">Total Return</span>
+                        <span className="metric-label">総リターン</span>
                         <strong className="metric-value">
                           {formatPercent(result.summary.strategy.totalReturnPct)}
                         </strong>
                       </div>
                       <div className="metric">
-                        <span className="metric-label">Sharpe</span>
+                        <span className="metric-label">シャープレシオ</span>
                         <strong className="metric-value">
                           {result.summary.strategy.sharpeRatio.toFixed(2)}
                         </strong>
                       </div>
                       <div className="metric">
-                        <span className="metric-label">Max Drawdown</span>
+                        <span className="metric-label">最大ドローダウン</span>
                         <strong className="metric-value">
                           {formatPercent(-result.summary.strategy.maxDrawdownPct)}
                         </strong>
                       </div>
                       <div className="metric">
-                        <span className="metric-label">Win Rate</span>
+                        <span className="metric-label">勝率</span>
                         <strong className="metric-value">
                           {formatPercent(result.summary.strategy.winRatePct ?? 0)}
                         </strong>
                       </div>
                     </div>
                     <p className="chart-note">
-                      {result.summary.strategy.tradeCount} trades from starting capital $
-                      {formatNumber(result.summary.config.initialCapital)}.
+                      初期資金 {formatNumber(result.summary.config.initialCapital)} 円相当で
+                      {result.summary.strategy.tradeCount} 回トレード、保有日数は {result.summary.config.holdingDays} 日です。
+                    </p>
+                    <p className="footnote">
+                      {singleLoading ? '単発結果を更新中…' : `${result.dataset.source} の実データを表示しています。`}
                     </p>
                   </article>
 
                   <article className="metric-card">
-                    <h3>Benchmark</h3>
+                    <h3>ベンチマーク</h3>
                     <div className="metric-grid">
                       <div className="metric">
-                        <span className="metric-label">Total Return</span>
+                        <span className="metric-label">総リターン</span>
                         <strong className="metric-value">
                           {formatPercent(result.summary.benchmark.totalReturnPct)}
                         </strong>
                       </div>
                       <div className="metric">
-                        <span className="metric-label">Sharpe</span>
+                        <span className="metric-label">シャープレシオ</span>
                         <strong className="metric-value">
                           {result.summary.benchmark.sharpeRatio.toFixed(2)}
                         </strong>
                       </div>
                       <div className="metric">
-                        <span className="metric-label">Max Drawdown</span>
+                        <span className="metric-label">最大ドローダウン</span>
                         <strong className="metric-value">
                           {formatPercent(-result.summary.benchmark.maxDrawdownPct)}
                         </strong>
@@ -316,11 +303,11 @@ function App() {
                         </strong>
                       </div>
                     </div>
-                    <p className="chart-note">Buy and hold on the same price path.</p>
+                    <p className="chart-note">同じ価格系列での単純な買い持ちです。</p>
                   </article>
                 </div>
 
-                <div className="chart-wrap">
+                <div className="content-block">
                   <ResponsiveContainer width="100%" height={320}>
                     <LineChart data={result.series}>
                       <CartesianGrid stroke="rgba(88, 67, 51, 0.08)" vertical={false} />
@@ -343,7 +330,7 @@ function App() {
                         stroke="#b45b2a"
                         strokeWidth={2.5}
                         dot={false}
-                        name="Strategy"
+                        name="戦略"
                       />
                       <Line
                         type="monotone"
@@ -351,19 +338,168 @@ function App() {
                         stroke="#667d5d"
                         strokeWidth={2.1}
                         dot={false}
-                        name="Buy & Hold"
+                        name="買い持ち"
                       />
                     </LineChart>
                   </ResponsiveContainer>
                   <p className="chart-note">
-                    Strategy equity is compared directly against buy and hold so the rule either
-                    earns its keep or it does not.
+                    戦略の資産推移を買い持ちと直接比較して、このルールに意味があるかを見ます。
                   </p>
+                </div>
+
+                <div className="content-block">
+                  <div className="table-header">
+                    <div>
+                      <h3>条件比較</h3>
+                      <p>
+                        {gridSearch
+                          ? `${gridSearch.dataset.ticker} / ${gridSearch.dataset.period} の実データで、閾値 ${gridSearch.config.thresholdValuesPct.join(', ')}% と保有日数 ${gridSearch.config.holdingDaysValues.join(', ')} 日を比較しています。`
+                          : '条件比較を読み込んでいます。'}
+                      </p>
+                      <p className="footnote">
+                        {gridLoading ? '条件比較を更新中…' : '比較条件を変えると自動で更新されます。'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {gridSearch && gridSearch.results.length > 0 ? (
+                    <div className="table-scroll">
+                      <table className="results-table">
+                        <thead>
+                          <tr>
+                            <th>順位</th>
+                            <th>閾値</th>
+                            <th>保有</th>
+                            <th>総リターン</th>
+                            <th>Sharpe</th>
+                            <th>最大DD</th>
+                            <th>勝率</th>
+                            <th>回数</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gridSearch.results.slice(0, 8).map((row) => (
+                            <tr key={`${row.thresholdPct}-${row.holdingDays}`}>
+                              <td>{row.rank}</td>
+                              <td>{row.thresholdPct.toFixed(2)}%</td>
+                              <td>{row.holdingDays}日</td>
+                              <td>{formatPercent(row.totalReturnPct)}</td>
+                              <td>{row.sharpeRatio.toFixed(2)}</td>
+                              <td>{formatPercent(-row.maxDrawdownPct)}</td>
+                              <td>{formatPercent(row.winRatePct)}</td>
+                              <td>{row.tradeCount}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state">条件比較を読み込めませんでした。</div>
+                  )}
                 </div>
               </>
             ) : (
-              <div className="empty-state">Run the demo backtest to see metrics and the equity curve.</div>
+              <div className="empty-state">実データの結果を読み込んでいます。</div>
             )}
+          </section>
+
+          <section className="panel controls">
+            <div className="panel-title">
+              <div>
+                <h2>条件</h2>
+                <p>ここを変えると結果が自動更新されます。</p>
+              </div>
+            </div>
+
+            <div className="control-grid">
+              <div className="field">
+                <label htmlFor="ticker">銘柄コード</label>
+                <input
+                  id="ticker"
+                  type="text"
+                  value={ticker}
+                  onChange={(event) => setTicker(event.target.value)}
+                />
+                <p className="footnote">例: SPY, QQQ, BTC-USD, AAPL</p>
+              </div>
+
+              <div className="field">
+                <label htmlFor="period">取得期間</label>
+                <select id="period" value={period} onChange={(event) => setPeriod(event.target.value)}>
+                  <option value="6mo">6か月</option>
+                  <option value="1y">1年</option>
+                  <option value="2y">2年</option>
+                  <option value="5y">5年</option>
+                  <option value="10y">10年</option>
+                  <option value="max">全期間</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <div className="range-header">
+                  <label htmlFor="threshold">下落閾値</label>
+                  <span className="range-value">{threshold.toFixed(1)}%</span>
+                </div>
+                <input
+                  id="threshold"
+                  type="range"
+                  min="1"
+                  max="8"
+                  step="0.5"
+                  value={threshold}
+                  onChange={(event) => setThreshold(Number(event.target.value))}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="holding-days">保有日数</label>
+                <input
+                  id="holding-days"
+                  type="number"
+                  min="1"
+                  max="30"
+                  step="1"
+                  value={holdingDays}
+                  onChange={(event) => setHoldingDays(Number(event.target.value))}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="capital">初期資金</label>
+                <input
+                  id="capital"
+                  type="number"
+                  min="1000"
+                  step="1000"
+                  value={initialCapital}
+                  onChange={(event) => setInitialCapital(Number(event.target.value))}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="threshold-grid">比較する閾値一覧</label>
+                <input
+                  id="threshold-grid"
+                  type="text"
+                  value={thresholdGrid}
+                  onChange={(event) => setThresholdGrid(event.target.value)}
+                />
+                <p className="footnote">例: 1.5,2,3,4,5</p>
+              </div>
+
+              <div className="field">
+                <label htmlFor="holding-days-grid">比較する保有日数</label>
+                <input
+                  id="holding-days-grid"
+                  type="text"
+                  value={holdingDaysGrid}
+                  onChange={(event) => setHoldingDaysGrid(event.target.value)}
+                />
+                <p className="footnote">例: 1,2,3</p>
+              </div>
+            </div>
+
+            <p className={`status ${status.tone}`}>{status.text}</p>
           </section>
         </div>
       </div>

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import csv
-import io
 import math
-import random
 import statistics
 from dataclasses import dataclass
-from datetime import date, timedelta
 
 
 TRADING_DAYS_PER_YEAR = 252
@@ -16,77 +12,11 @@ TRADING_DAYS_PER_YEAR = 252
 class PricePoint:
     date: str
     close: float
-
-
-def generate_demo_prices(days: int = 260, seed: int = 7) -> list[PricePoint]:
-    rng = random.Random(seed)
-    current_price = 100.0
-    current_date = date(2025, 1, 2)
-    prices: list[PricePoint] = []
-
-    for index in range(days):
-        if index > 0:
-            drift = 0.0005
-            shock = rng.gauss(0, 0.015)
-            if index % 37 == 0:
-                shock -= 0.045
-            current_price *= 1 + drift + shock
-
-        prices.append(
-            PricePoint(
-                date=current_date.isoformat(),
-                close=round(max(current_price, 1.0), 2),
-            )
-        )
-        current_date += timedelta(days=1)
-
-    return prices
-
-
-def parse_uploaded_prices(file_bytes: bytes) -> list[PricePoint]:
-    text = file_bytes.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    field_map = {normalize_column_name(name): name for name in reader.fieldnames or []}
-
-    date_field = first_matching_field(field_map, ["date", "datetime", "timestamp"])
-    close_field = first_matching_field(field_map, ["close", "adjclose", "adjustedclose"])
-    if not date_field or not close_field:
-        raise ValueError("CSV must contain date and close columns.")
-
-    prices: list[PricePoint] = []
-    for row in reader:
-        raw_date = (row.get(date_field) or "").strip()
-        raw_close = (row.get(close_field) or "").strip()
-        if not raw_date or not raw_close:
-            continue
-
-        try:
-            prices.append(PricePoint(date=raw_date, close=float(raw_close)))
-        except ValueError as exc:
-            raise ValueError("CSV contains invalid numeric values.") from exc
-
-    if len(prices) < 3:
-        raise ValueError("At least 3 rows are required for a backtest.")
-
-    prices.sort(key=lambda item: item.date)
-    return prices
-
-
-def normalize_column_name(name: str) -> str:
-    return "".join(char for char in name.lower() if char.isalnum())
-
-
-def first_matching_field(field_map: dict[str, str], candidates: list[str]) -> str | None:
-    for candidate in candidates:
-        if candidate in field_map:
-            return field_map[candidate]
-    return None
-
-
 def run_backtest(
     prices: list[PricePoint],
     threshold: float,
     initial_capital: float,
+    holding_days: int = 1,
 ) -> dict:
     if len(prices) < 3:
         raise ValueError("At least 3 prices are required.")
@@ -94,6 +24,8 @@ def run_backtest(
         raise ValueError("Threshold must be between 0 and 1.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
+    if holding_days <= 0 or holding_days > 30:
+        raise ValueError("Holding days must be between 1 and 30.")
 
     returns = [0.0]
     for index in range(1, len(prices)):
@@ -108,19 +40,23 @@ def run_backtest(
     trade_returns: list[float] = []
     series: list[dict] = []
     trade_count = 0
-    previous_position = 0
+    holding_remaining = 0
+    current_trade_growth = 1.0
 
     for index, point in enumerate(prices):
         previous_day_return = returns[index - 1] if index >= 1 else 0.0
         current_day_return = returns[index]
-        signal = previous_day_return <= -threshold
-        position = 1 if signal else 0
+        signal = previous_day_return <= -threshold and holding_remaining == 0
+        if signal:
+            holding_remaining = holding_days
+            current_trade_growth = 1.0
+            trade_count += 1
+
+        position = 1 if holding_remaining > 0 else 0
         strategy_return = current_day_return * position
 
-        if position == 1 and previous_position == 0:
-            trade_count += 1
         if position == 1:
-            trade_returns.append(strategy_return)
+            current_trade_growth *= 1 + strategy_return
 
         strategy_equity *= 1 + strategy_return
         benchmark_equity *= 1 + current_day_return
@@ -139,7 +75,11 @@ def run_backtest(
                 "strategyReturnPct": round(strategy_return * 100, 2),
             }
         )
-        previous_position = position
+
+        if holding_remaining > 0:
+            holding_remaining -= 1
+            if holding_remaining == 0:
+                trade_returns.append(current_trade_growth - 1)
 
     summary = {
         "strategy": {
@@ -159,11 +99,72 @@ def run_backtest(
         "config": {
             "thresholdPct": round(threshold * 100, 2),
             "initialCapital": round(initial_capital, 2),
-            "holdingRule": "Buy for one day after a drop larger than threshold.",
+            "holdingDays": holding_days,
+            "holdingRule": f"Buy for {holding_days} day(s) after a drop larger than threshold.",
         },
     }
 
     return {"summary": summary, "series": series}
+
+
+def run_grid_search(
+    prices: list[PricePoint],
+    thresholds: list[float],
+    holding_days_options: list[int],
+    initial_capital: float,
+) -> dict:
+    if not thresholds:
+        raise ValueError("At least one threshold is required.")
+    if not holding_days_options:
+        raise ValueError("At least one holding-day value is required.")
+
+    results: list[dict] = []
+    benchmark_summary: dict | None = None
+
+    for threshold in thresholds:
+        for holding_days in holding_days_options:
+            backtest = run_backtest(
+                prices=prices,
+                threshold=threshold,
+                initial_capital=initial_capital,
+                holding_days=holding_days,
+            )
+            summary = backtest["summary"]
+            benchmark_summary = summary["benchmark"]
+            strategy_summary = summary["strategy"]
+            results.append(
+                {
+                    "thresholdPct": summary["config"]["thresholdPct"],
+                    "holdingDays": summary["config"]["holdingDays"],
+                    "totalReturnPct": strategy_summary["totalReturnPct"],
+                    "cagrPct": strategy_summary["cagrPct"],
+                    "sharpeRatio": strategy_summary["sharpeRatio"],
+                    "maxDrawdownPct": strategy_summary["maxDrawdownPct"],
+                    "tradeCount": strategy_summary["tradeCount"],
+                    "winRatePct": strategy_summary["winRatePct"],
+                }
+            )
+
+    results.sort(
+        key=lambda item: (
+            item["sharpeRatio"],
+            item["totalReturnPct"],
+            -item["maxDrawdownPct"],
+        ),
+        reverse=True,
+    )
+
+    for index, result in enumerate(results, start=1):
+        result["rank"] = index
+
+    return {
+        "config": {
+            "thresholdValuesPct": [round(value * 100, 2) for value in thresholds],
+            "holdingDaysValues": holding_days_options,
+            "initialCapital": round(initial_capital, 2),
+        },
+        "results": results,
+    }
 
 
 def percent_return(final_value: float, initial_value: float) -> float:

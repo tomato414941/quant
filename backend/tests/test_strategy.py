@@ -1,24 +1,19 @@
-from app.strategy import PricePoint, generate_demo_prices, parse_uploaded_prices, run_backtest
+from app.strategy import PricePoint, run_backtest
 
 
-def test_demo_backtest_returns_series_and_summary() -> None:
-    result = run_backtest(generate_demo_prices(), threshold=0.03, initial_capital=10_000)
+def test_backtest_returns_series_and_summary() -> None:
+    prices = [
+        PricePoint(date="2025-01-01", close=100),
+        PricePoint(date="2025-01-02", close=95),
+        PricePoint(date="2025-01-03", close=97),
+        PricePoint(date="2025-01-04", close=98),
+    ]
+    result = run_backtest(prices, threshold=0.03, initial_capital=10_000)
 
-    assert len(result["series"]) == 260
+    assert len(result["series"]) == 4
     assert result["summary"]["strategy"]["tradeCount"] > 0
     assert "benchmark" in result["summary"]
-
-
-def test_parse_uploaded_prices_accepts_common_columns() -> None:
-    contents = b"Date,Close\n2025-01-01,100\n2025-01-02,95\n2025-01-03,97\n"
-
-    prices = parse_uploaded_prices(contents)
-
-    assert prices == [
-        PricePoint(date="2025-01-01", close=100.0),
-        PricePoint(date="2025-01-02", close=95.0),
-        PricePoint(date="2025-01-03", close=97.0),
-    ]
+    assert result["summary"]["config"]["holdingDays"] == 1
 
 
 def test_backtest_rejects_invalid_threshold() -> None:
@@ -34,3 +29,18 @@ def test_backtest_rejects_invalid_threshold() -> None:
         assert "Threshold" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_backtest_supports_multiple_holding_days() -> None:
+    prices = [
+        PricePoint(date="2025-01-01", close=100),
+        PricePoint(date="2025-01-02", close=95),
+        PricePoint(date="2025-01-03", close=96),
+        PricePoint(date="2025-01-04", close=98),
+    ]
+
+    result = run_backtest(prices, threshold=0.03, initial_capital=10_000, holding_days=2)
+
+    assert result["series"][2]["position"] == 1
+    assert result["series"][3]["position"] == 1
+    assert result["summary"]["strategy"]["tradeCount"] == 1

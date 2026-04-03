@@ -12,11 +12,14 @@ TRADING_DAYS_PER_YEAR = 252
 class PricePoint:
     date: str
     close: float
+
+
 def run_backtest(
     prices: list[PricePoint],
     threshold: float,
     initial_capital: float,
     holding_days: int = 1,
+    transaction_cost: float = 0.0,
 ) -> dict:
     if len(prices) < 3:
         raise ValueError("At least 3 prices are required.")
@@ -26,6 +29,8 @@ def run_backtest(
         raise ValueError("Initial capital must be positive.")
     if holding_days <= 0 or holding_days > 30:
         raise ValueError("Holding days must be between 1 and 30.")
+    if transaction_cost < 0 or transaction_cost >= 1:
+        raise ValueError("Transaction cost must be between 0 and 1.")
 
     returns = [0.0]
     for index in range(1, len(prices)):
@@ -54,6 +59,8 @@ def run_backtest(
 
         position = 1 if holding_remaining > 0 else 0
         strategy_return = current_day_return * position
+        if signal:
+            strategy_return -= transaction_cost
 
         if position == 1:
             current_trade_growth *= 1 + strategy_return
@@ -100,6 +107,7 @@ def run_backtest(
             "thresholdPct": round(threshold * 100, 2),
             "initialCapital": round(initial_capital, 2),
             "holdingDays": holding_days,
+            "transactionCostPct": round(transaction_cost * 100, 3),
             "holdingRule": f"Buy for {holding_days} day(s) after a drop larger than threshold.",
         },
     }
@@ -112,6 +120,7 @@ def run_grid_search(
     thresholds: list[float],
     holding_days_options: list[int],
     initial_capital: float,
+    transaction_cost: float = 0.0,
 ) -> dict:
     if not thresholds:
         raise ValueError("At least one threshold is required.")
@@ -128,6 +137,7 @@ def run_grid_search(
                 threshold=threshold,
                 initial_capital=initial_capital,
                 holding_days=holding_days,
+                transaction_cost=transaction_cost,
             )
             summary = backtest["summary"]
             benchmark_summary = summary["benchmark"]
@@ -162,8 +172,54 @@ def run_grid_search(
             "thresholdValuesPct": [round(value * 100, 2) for value in thresholds],
             "holdingDaysValues": holding_days_options,
             "initialCapital": round(initial_capital, 2),
+            "transactionCostPct": round(transaction_cost * 100, 3),
         },
         "results": results,
+    }
+
+
+def compare_tickers(
+    datasets: list[dict],
+    threshold: float,
+    holding_days: int,
+    initial_capital: float,
+    transaction_cost: float,
+) -> dict:
+    comparisons: list[dict] = []
+    for dataset in datasets:
+        backtest = run_backtest(
+            prices=dataset["prices"],
+            threshold=threshold,
+            initial_capital=initial_capital,
+            holding_days=holding_days,
+            transaction_cost=transaction_cost,
+        )
+        summary = backtest["summary"]
+        comparisons.append(
+            {
+                "ticker": dataset["ticker"],
+                "period": dataset["period"],
+                "strategy": summary["strategy"],
+                "benchmark": summary["benchmark"],
+            }
+        )
+
+    comparisons.sort(
+        key=lambda item: (
+            item["strategy"]["sharpeRatio"],
+            item["strategy"]["totalReturnPct"],
+        ),
+        reverse=True,
+    )
+
+    return {
+        "config": {
+            "thresholdPct": round(threshold * 100, 2),
+            "holdingDays": holding_days,
+            "initialCapital": round(initial_capital, 2),
+            "transactionCostPct": round(transaction_cost * 100, 3),
+        },
+        "results": comparisons,
     }
 
 

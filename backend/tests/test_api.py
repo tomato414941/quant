@@ -8,6 +8,18 @@ client = TestClient(app)
 
 
 def fake_fetch_market_prices(ticker: str, period: str) -> tuple[list[PricePoint], dict[str, str]]:
+    if ticker == "QQQ":
+        return (
+            [
+                PricePoint(date="2025-01-01", close=100),
+                PricePoint(date="2025-01-02", close=94),
+                PricePoint(date="2025-01-03", close=99),
+                PricePoint(date="2025-01-04", close=101),
+                PricePoint(date="2025-01-05", close=100),
+            ],
+            {"ticker": ticker, "period": period, "source": "test"},
+        )
+
     return (
         [
             PricePoint(date="2025-01-01", close=100),
@@ -62,3 +74,24 @@ def test_market_grid_search_endpoint(monkeypatch) -> None:
     assert payload["config"]["initialCapital"] == 5000
     assert payload["dataset"]["source"] == "test"
     assert len(payload["results"]) == 6
+
+
+def test_ticker_compare_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr("app.main.fetch_market_prices", fake_fetch_market_prices)
+
+    response = client.get(
+        "/api/ticker-compare",
+        params={
+            "tickers": "SPY,QQQ",
+            "period": "2y",
+            "threshold": 0.03,
+            "holding_days": 1,
+            "initial_capital": 5000,
+            "transaction_cost": 0.001,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["transactionCostPct"] == 0.1
+    assert len(payload["results"]) == 2

@@ -34,6 +34,7 @@ type BacktestResult = {
       thresholdPct: number
       initialCapital: number
       holdingDays: number
+      transactionCostPct: number
     }
   }
   series: Array<{
@@ -66,8 +67,24 @@ type GridSearchResult = {
     thresholdValuesPct: number[]
     holdingDaysValues: number[]
     initialCapital: number
+    transactionCostPct: number
   }
   results: GridSearchRow[]
+}
+
+type TickerCompareResult = {
+  config: {
+    thresholdPct: number
+    holdingDays: number
+    initialCapital: number
+    transactionCostPct: number
+  }
+  results: Array<{
+    ticker: string
+    period: string
+    strategy: SummaryMetrics
+    benchmark: SummaryMetrics
+  }>
 }
 
 type StatusState = {
@@ -97,28 +114,38 @@ function isValidTicker(value: string): boolean {
   return value.trim().length > 0
 }
 
+function isValidTransactionCost(value: number): boolean {
+  return value >= 0 && value < 100
+}
+
 function App() {
   const [ticker, setTicker] = useState('SPY')
+  const [comparisonTickers, setComparisonTickers] = useState('SPY,QQQ,IWM,TLT,GLD,BTC-USD')
   const [period, setPeriod] = useState('2y')
   const [threshold, setThreshold] = useState(3)
   const [holdingDays, setHoldingDays] = useState(1)
   const [initialCapital, setInitialCapital] = useState(10000)
+  const [transactionCost, setTransactionCost] = useState(0.1)
   const [thresholdGrid, setThresholdGrid] = useState('1.5,2,3,4,5')
   const [holdingDaysGrid, setHoldingDaysGrid] = useState('1,2,3')
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [gridSearch, setGridSearch] = useState<GridSearchResult | null>(null)
+  const [tickerCompare, setTickerCompare] = useState<TickerCompareResult | null>(null)
   const [singleLoading, setSingleLoading] = useState(false)
   const [gridLoading, setGridLoading] = useState(false)
+  const [compareLoading, setCompareLoading] = useState(false)
   const [status, setStatus] = useState<StatusState>({
     tone: 'success',
     text: '実データの結果を自動で読み込みます。',
   })
 
   const deferredTicker = useDeferredValue(ticker)
+  const deferredComparisonTickers = useDeferredValue(comparisonTickers)
   const deferredPeriod = useDeferredValue(period)
   const deferredThreshold = useDeferredValue(threshold)
   const deferredHoldingDays = useDeferredValue(holdingDays)
   const deferredInitialCapital = useDeferredValue(initialCapital)
+  const deferredTransactionCost = useDeferredValue(transactionCost)
   const deferredThresholdGrid = useDeferredValue(thresholdGrid)
   const deferredHoldingDaysGrid = useDeferredValue(holdingDaysGrid)
 
@@ -135,6 +162,10 @@ function App() {
       setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
       return
     }
+    if (!isValidTransactionCost(deferredTransactionCost)) {
+      setStatus({ tone: 'error', text: '片道コストは 0 以上 100 未満で入力してください。' })
+      return
+    }
 
     setSingleLoading(true)
     try {
@@ -144,6 +175,7 @@ function App() {
         threshold: (deferredThreshold / 100).toString(),
         initial_capital: deferredInitialCapital.toString(),
         holding_days: deferredHoldingDays.toString(),
+        transaction_cost: (deferredTransactionCost / 100).toString(),
       })
       const response = await fetch(`${API_BASE_URL}/api/backtest?${params.toString()}`)
       const payload = await response.json()
@@ -175,6 +207,10 @@ function App() {
       setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
       return
     }
+    if (!isValidTransactionCost(deferredTransactionCost)) {
+      setStatus({ tone: 'error', text: '片道コストは 0 以上 100 未満で入力してください。' })
+      return
+    }
 
     setGridLoading(true)
     try {
@@ -184,6 +220,7 @@ function App() {
         threshold_values: deferredThresholdGrid,
         holding_days_values: deferredHoldingDaysGrid,
         initial_capital: deferredInitialCapital.toString(),
+        transaction_cost: (deferredTransactionCost / 100).toString(),
       })
       const response = await fetch(`${API_BASE_URL}/api/grid-search?${params.toString()}`)
       const payload = await response.json()
@@ -202,13 +239,65 @@ function App() {
     }
   })
 
+  const refreshTickerCompare = useEffectEvent(async () => {
+    if (!isValidTicker(deferredComparisonTickers)) {
+      setStatus({ tone: 'error', text: '比較する銘柄を 1 つ以上入力してください。' })
+      return
+    }
+    if (!isValidPositiveInteger(deferredInitialCapital)) {
+      setStatus({ tone: 'error', text: '初期資金は 1 以上の整数で入力してください。' })
+      return
+    }
+    if (!isValidTransactionCost(deferredTransactionCost)) {
+      setStatus({ tone: 'error', text: '片道コストは 0 以上 100 未満で入力してください。' })
+      return
+    }
+
+    setCompareLoading(true)
+    try {
+      const params = new URLSearchParams({
+        tickers: deferredComparisonTickers,
+        period: deferredPeriod,
+        threshold: (deferredThreshold / 100).toString(),
+        initial_capital: deferredInitialCapital.toString(),
+        holding_days: deferredHoldingDays.toString(),
+        transaction_cost: (deferredTransactionCost / 100).toString(),
+      })
+      const response = await fetch(`${API_BASE_URL}/api/ticker-compare?${params.toString()}`)
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload.detail ?? '複数銘柄比較の取得に失敗しました。')
+      }
+
+      startTransition(() => setTickerCompare(payload))
+    } catch (caughtError) {
+      setStatus({
+        tone: 'error',
+        text: caughtError instanceof Error ? caughtError.message : '不明なエラーが発生しました。',
+      })
+    } finally {
+      setCompareLoading(false)
+    }
+  })
+
   useEffect(() => {
     void refreshSingleBacktest()
-  }, [deferredTicker, deferredPeriod, deferredThreshold, deferredHoldingDays, deferredInitialCapital])
+  }, [
+    deferredTicker,
+    deferredPeriod,
+    deferredThreshold,
+    deferredHoldingDays,
+    deferredInitialCapital,
+    deferredTransactionCost,
+  ])
 
   useEffect(() => {
     void refreshGridSearch()
-  }, [deferredTicker, deferredPeriod, deferredThresholdGrid, deferredHoldingDaysGrid, deferredInitialCapital])
+  }, [deferredTicker, deferredPeriod, deferredThresholdGrid, deferredHoldingDaysGrid, deferredInitialCapital, deferredTransactionCost])
+
+  useEffect(() => {
+    void refreshTickerCompare()
+  }, [deferredComparisonTickers, deferredPeriod, deferredThreshold, deferredHoldingDays, deferredInitialCapital, deferredTransactionCost])
 
   return (
     <main className="app-shell">
@@ -271,7 +360,9 @@ function App() {
                       {result.summary.strategy.tradeCount} 回トレード、保有日数は {result.summary.config.holdingDays} 日です。
                     </p>
                     <p className="footnote">
-                      {singleLoading ? '単発結果を更新中…' : `${result.dataset.source} の実データを表示しています。`}
+                      {singleLoading
+                        ? '単発結果を更新中…'
+                        : `${result.dataset.source} の実データを表示しています。片道コスト ${result.summary.config.transactionCostPct.toFixed(3)}%。`}
                     </p>
                   </article>
 
@@ -397,6 +488,55 @@ function App() {
                     <div className="empty-state">条件比較を読み込めませんでした。</div>
                   )}
                 </div>
+
+                <div className="content-block">
+                  <div className="table-header">
+                    <div>
+                      <h3>複数銘柄比較</h3>
+                      <p>
+                        {tickerCompare
+                          ? `同じルールを ${tickerCompare.results.length} 銘柄に当てています。片道コスト ${tickerCompare.config.transactionCostPct.toFixed(3)}%。`
+                          : '複数銘柄比較を読み込んでいます。'}
+                      </p>
+                      <p className="footnote">
+                        {compareLoading ? '複数銘柄比較を更新中…' : '銘柄一覧を変えると自動で更新されます。'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {tickerCompare && tickerCompare.results.length > 0 ? (
+                    <div className="table-scroll">
+                      <table className="results-table">
+                        <thead>
+                          <tr>
+                            <th>銘柄</th>
+                            <th>戦略</th>
+                            <th>Sharpe</th>
+                            <th>最大DD</th>
+                            <th>勝率</th>
+                            <th>回数</th>
+                            <th>買い持ち</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tickerCompare.results.map((row) => (
+                            <tr key={row.ticker}>
+                              <td>{row.ticker}</td>
+                              <td>{formatPercent(row.strategy.totalReturnPct)}</td>
+                              <td>{row.strategy.sharpeRatio.toFixed(2)}</td>
+                              <td>{formatPercent(-row.strategy.maxDrawdownPct)}</td>
+                              <td>{formatPercent(row.strategy.winRatePct ?? 0)}</td>
+                              <td>{row.strategy.tradeCount ?? 0}</td>
+                              <td>{formatPercent(row.benchmark.totalReturnPct)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state">複数銘柄比較を読み込めませんでした。</div>
+                  )}
+                </div>
               </>
             ) : (
               <div className="empty-state">実データの結果を読み込んでいます。</div>
@@ -421,6 +561,17 @@ function App() {
                   onChange={(event) => setTicker(event.target.value)}
                 />
                 <p className="footnote">例: SPY, QQQ, BTC-USD, AAPL</p>
+              </div>
+
+              <div className="field">
+                <label htmlFor="comparison-tickers">比較する銘柄一覧</label>
+                <input
+                  id="comparison-tickers"
+                  type="text"
+                  value={comparisonTickers}
+                  onChange={(event) => setComparisonTickers(event.target.value)}
+                />
+                <p className="footnote">例: SPY,QQQ,IWM,TLT,GLD,BTC-USD</p>
               </div>
 
               <div className="field">
@@ -474,6 +625,19 @@ function App() {
                   value={initialCapital}
                   onChange={(event) => setInitialCapital(Number(event.target.value))}
                 />
+              </div>
+
+              <div className="field">
+                <label htmlFor="transaction-cost">片道コスト (%)</label>
+                <input
+                  id="transaction-cost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={transactionCost}
+                  onChange={(event) => setTransactionCost(Number(event.target.value))}
+                />
+                <p className="footnote">例: 0.10 は 0.10%</p>
               </div>
 
               <div className="field">

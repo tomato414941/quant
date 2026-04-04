@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from skfolio.optimization import HierarchicalRiskParity, MeanRisk, RiskBudgeting
+from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
 
 from app.strategy import (
     cagr,
@@ -20,17 +20,23 @@ SUPPORTED_PORTFOLIO_MODELS = {
     "risk_budgeting",
     "minimum_variance",
     "hierarchical_risk_parity",
+    "mean_risk_utility",
+    "mean_risk_utility_conservative",
 }
 PORTFOLIO_MODEL_LABELS = {
     "equal_weight": "等金額配分",
     "risk_budgeting": "リスク予算配分",
     "minimum_variance": "最小分散",
     "hierarchical_risk_parity": "HRP",
+    "mean_risk_utility": "MeanRisk効用最大化",
+    "mean_risk_utility_conservative": "MeanRisk効用最大化 弱",
 }
 SUPPORTED_REBALANCE_FREQUENCIES = {"hold", "monthly", "quarterly", "annual"}
 SUPPORTED_PORTFOLIO_STRATEGIES = {
     "full_universe",
     "full_universe_momentum_tilt",
+    "full_universe_momentum_low_vol_tilt",
+    "full_universe_momentum_macro_tilt",
     "momentum_top3",
     "dual_momentum_top3",
     "trailing_momentum_low_vol_universe",
@@ -41,6 +47,8 @@ SUPPORTED_PORTFOLIO_STRATEGIES = {
 PORTFOLIO_STRATEGY_LABELS = {
     "full_universe": "全資産",
     "full_universe_momentum_tilt": "全資産モメンタム傾斜",
+    "full_universe_momentum_low_vol_tilt": "全資産モメンタム低ボラ傾斜",
+    "full_universe_momentum_macro_tilt": "全資産モメンタムマクロ傾斜",
     "momentum_top3": "モメンタム上位3",
     "dual_momentum_top3": "デュアルモメンタム上位3",
     "trailing_momentum_low_vol_universe": "12ヶ月モメンタム低ボラ資産",
@@ -57,6 +65,8 @@ SCORE_MODEL_LABELS = {
     "none": "シグナルなし",
     "momentum": "モメンタム",
     "trailing_momentum_12m": "12ヶ月モメンタム",
+    "momentum_low_vol": "12ヶ月モメンタム+低ボラ",
+    "momentum_macro": "12ヶ月モメンタム+マクロproxy",
     "volatility": "ボラティリティ",
     "volume_strength": "出来高強度",
 }
@@ -131,6 +141,16 @@ class PortfolioCandidateDefinition:
     model_definition: PortfolioModelDefinition
 
 
+@dataclass(frozen=True)
+class AssetRankingDefinition:
+    key: str
+    label: str
+    description: str
+    strategy_definition: PortfolioStrategyDefinition
+    source_strategy_keys: tuple[str, ...]
+    source_strategy_labels: tuple[str, ...]
+
+
 def build_portfolio_strategy_definition(
     strategy_type: str,
     *,
@@ -145,6 +165,8 @@ def build_portfolio_strategy_definition(
     default_descriptions = {
         "full_universe": "全ETFを候補にする",
         "full_universe_momentum_tilt": "全ETFを候補にし、12ヶ月モメンタムで重みを傾ける",
+        "full_universe_momentum_low_vol_tilt": "全ETFを候補にし、12ヶ月モメンタムと低ボラの複合スコアで重みを傾ける",
+        "full_universe_momentum_macro_tilt": "全ETFを候補にし、12ヶ月モメンタムとマクロproxyの複合スコアで重みを傾ける",
         "momentum_top3": "学習期間のモメンタム上位3ETFを候補にする",
         "dual_momentum_top3": "上昇しているETFだけからモメンタム上位3を候補にする",
         "trailing_momentum_low_vol_universe": "12ヶ月モメンタムが正のETFを候補にし、低ボラ群だけへ配分する",
@@ -155,6 +177,8 @@ def build_portfolio_strategy_definition(
     feature_inputs = {
         "full_universe": ("close",),
         "full_universe_momentum_tilt": ("close",),
+        "full_universe_momentum_low_vol_tilt": ("close",),
+        "full_universe_momentum_macro_tilt": ("close",),
         "momentum_top3": ("close",),
         "dual_momentum_top3": ("close",),
         "trailing_momentum_low_vol_universe": ("close",),
@@ -165,6 +189,14 @@ def build_portfolio_strategy_definition(
     universe_policies = {
         "full_universe": UniversePolicyDefinition("all_assets", UNIVERSE_POLICY_LABELS["all_assets"]),
         "full_universe_momentum_tilt": UniversePolicyDefinition(
+            "all_assets",
+            UNIVERSE_POLICY_LABELS["all_assets"],
+        ),
+        "full_universe_momentum_low_vol_tilt": UniversePolicyDefinition(
+            "all_assets",
+            UNIVERSE_POLICY_LABELS["all_assets"],
+        ),
+        "full_universe_momentum_macro_tilt": UniversePolicyDefinition(
             "all_assets",
             UNIVERSE_POLICY_LABELS["all_assets"],
         ),
@@ -196,6 +228,14 @@ def build_portfolio_strategy_definition(
             "trailing_momentum_12m",
             SCORE_MODEL_LABELS["trailing_momentum_12m"],
         ),
+        "full_universe_momentum_low_vol_tilt": ScoreModelDefinition(
+            "momentum_low_vol",
+            SCORE_MODEL_LABELS["momentum_low_vol"],
+        ),
+        "full_universe_momentum_macro_tilt": ScoreModelDefinition(
+            "momentum_macro",
+            SCORE_MODEL_LABELS["momentum_macro"],
+        ),
         "momentum_top3": ScoreModelDefinition("momentum", SCORE_MODEL_LABELS["momentum"]),
         "dual_momentum_top3": ScoreModelDefinition("momentum", SCORE_MODEL_LABELS["momentum"]),
         "trailing_momentum_low_vol_universe": ScoreModelDefinition(
@@ -212,6 +252,18 @@ def build_portfolio_strategy_definition(
     default_score_parameters = {
         "full_universe": {},
         "full_universe_momentum_tilt": {"tilt_strength": 0.5},
+        "full_universe_momentum_low_vol_tilt": {
+            "tilt_strength": 0.25,
+            "tilt_shape": 1.0,
+            "momentum_weight": 0.7,
+            "low_vol_weight": 0.3,
+        },
+        "full_universe_momentum_macro_tilt": {
+            "tilt_strength": 0.25,
+            "tilt_shape": 1.0,
+            "momentum_weight": 0.85,
+            "macro_weight": 0.15,
+        },
         "momentum_top3": {},
         "dual_momentum_top3": {},
         "trailing_momentum_low_vol_universe": {},
@@ -222,6 +274,8 @@ def build_portfolio_strategy_definition(
     filter_rules = {
         "full_universe": (),
         "full_universe_momentum_tilt": (),
+        "full_universe_momentum_low_vol_tilt": (),
+        "full_universe_momentum_macro_tilt": (),
         "momentum_top3": (
             FilterRuleDefinition("top_3", FILTER_RULE_LABELS["top_3"]),
         ),
@@ -248,6 +302,8 @@ def build_portfolio_strategy_definition(
     fallback_rules = {
         "full_universe": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
         "full_universe_momentum_tilt": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
+        "full_universe_momentum_low_vol_tilt": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
+        "full_universe_momentum_macro_tilt": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
         "momentum_top3": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
         "dual_momentum_top3": FallbackRuleDefinition("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
         "trailing_momentum_low_vol_universe": FallbackRuleDefinition(
@@ -293,6 +349,8 @@ def build_portfolio_model_definition(
         "risk_budgeting": "各資産のリスク寄与が近づくように配分する",
         "minimum_variance": "分散が最小になるように配分する",
         "hierarchical_risk_parity": "相関クラスタを使って階層的にリスクを分散する",
+        "mean_risk_utility": "期待リターン proxy とリスクを同時に見て効用最大化する",
+        "mean_risk_utility_conservative": "期待リターン proxy を弱めに使い、リスクをより強く見る",
     }
 
     return PortfolioModelDefinition(
@@ -352,6 +410,110 @@ def serialize_portfolio_candidate_definition(
         "strategy": serialize_portfolio_strategy_definition(candidate_definition.strategy_definition),
         "portfolioModel": serialize_portfolio_model_definition(candidate_definition.model_definition),
     }
+
+
+def serialize_asset_ranking_definition(
+    ranking_definition: AssetRankingDefinition,
+) -> dict:
+    strategy_definition = ranking_definition.strategy_definition
+    return {
+        "key": ranking_definition.key,
+        "label": ranking_definition.label,
+        "description": ranking_definition.description,
+        "featureInputs": list(strategy_definition.feature_inputs),
+        "universePolicy": {
+            "key": strategy_definition.universe_policy.key,
+            "label": strategy_definition.universe_policy.label,
+        },
+        "rankingModel": {
+            "key": strategy_definition.score_model.key,
+            "label": strategy_definition.score_model.label,
+        },
+        "scoreParameters": extract_ranking_score_parameters(strategy_definition),
+        "filterRules": [
+            {
+                "key": filter_rule.key,
+                "label": filter_rule.label,
+            }
+            for filter_rule in strategy_definition.filter_rules
+        ],
+        "fallbackRule": {
+            "key": strategy_definition.fallback_rule.key,
+            "label": strategy_definition.fallback_rule.label,
+        },
+        "sourceStrategyKeys": list(ranking_definition.source_strategy_keys),
+        "sourceStrategyLabels": list(ranking_definition.source_strategy_labels),
+    }
+
+
+def build_asset_ranking_definitions(
+    candidate_definitions: list[PortfolioCandidateDefinition],
+) -> list[AssetRankingDefinition]:
+    grouped: dict[
+        tuple[str, str, tuple[str, ...], tuple[str, ...], str, tuple[tuple[str, float], ...]],
+        list[PortfolioStrategyDefinition],
+    ] = {}
+
+    for candidate_definition in candidate_definitions:
+        strategy_definition = candidate_definition.strategy_definition
+        if strategy_definition.score_model.key == "none":
+            continue
+        signature = (
+            strategy_definition.strategy_type,
+            strategy_definition.score_model.key,
+            tuple(strategy_definition.feature_inputs),
+            tuple(filter_rule.key for filter_rule in strategy_definition.filter_rules),
+            strategy_definition.fallback_rule.key,
+            tuple(sorted(extract_ranking_score_parameters(strategy_definition).items())),
+        )
+        grouped.setdefault(signature, []).append(strategy_definition)
+
+    ranking_definitions: list[AssetRankingDefinition] = []
+    for strategies in grouped.values():
+        representative = strategies[0]
+        filter_label = " / ".join(filter_rule.label for filter_rule in representative.filter_rules)
+        label_parts = [
+            representative.universe_policy.label,
+            representative.score_model.label,
+        ]
+        ranking_score_parameters = extract_ranking_score_parameters(representative)
+        if ranking_score_parameters:
+            parameter_label = ", ".join(
+                f"{key}={value:.2f}" for key, value in ranking_score_parameters.items()
+            )
+            label_parts.append(parameter_label)
+        if filter_label:
+            label_parts.append(filter_label)
+        ranking_definitions.append(
+            AssetRankingDefinition(
+                key=f"ranking__{representative.key}",
+                label=" / ".join(label_parts),
+                description=representative.description,
+                strategy_definition=representative,
+                source_strategy_keys=tuple(strategy.key for strategy in strategies),
+                source_strategy_labels=tuple(strategy.label for strategy in strategies),
+            )
+        )
+
+    ranking_definitions.sort(key=lambda definition: definition.label)
+    return ranking_definitions
+
+
+def extract_ranking_score_parameters(
+    strategy_definition: PortfolioStrategyDefinition,
+) -> dict[str, float]:
+    score_parameters = dict(strategy_definition.score_parameters)
+    if strategy_definition.score_model.key == "momentum_low_vol":
+        return {
+            "momentumWeight": float(score_parameters.get("momentum_weight", 0.7)),
+            "lowVolWeight": float(score_parameters.get("low_vol_weight", 0.3)),
+        }
+    if strategy_definition.score_model.key == "momentum_macro":
+        return {
+            "momentumWeight": float(score_parameters.get("momentum_weight", 0.85)),
+            "macroWeight": float(score_parameters.get("macro_weight", 0.15)),
+        }
+    return {}
 
 
 def build_portfolio_candidate_definition(
@@ -561,6 +723,10 @@ def select_assets(
         return list(returns.columns)
     if strategy_definition.strategy_type == "full_universe_momentum_tilt":
         return list(returns.columns)
+    if strategy_definition.strategy_type == "full_universe_momentum_low_vol_tilt":
+        return list(returns.columns)
+    if strategy_definition.strategy_type == "full_universe_momentum_macro_tilt":
+        return list(returns.columns)
     if strategy_definition.strategy_type == "momentum_top3":
         selected = trailing_total_returns.sort_values(ascending=False).head(min(3, len(trailing_total_returns)))
         return list(selected.index)
@@ -621,10 +787,176 @@ def select_assets(
     raise ValueError("Unsupported portfolio strategy.")
 
 
+def compute_strategy_score_series(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy_definition: PortfolioStrategyDefinition,
+) -> pd.Series | None:
+    score_key = strategy_definition.score_model.key
+    if score_key == "none":
+        return None
+    if score_key in {"momentum", "trailing_momentum_12m"}:
+        return compute_trailing_total_returns(returns)
+    if score_key == "momentum_low_vol":
+        score_parameters = dict(strategy_definition.score_parameters)
+        momentum_weight = float(score_parameters.get("momentum_weight", 0.7))
+        low_vol_weight = float(score_parameters.get("low_vol_weight", 0.3))
+        trailing_returns = compute_trailing_total_returns(returns)
+        momentum_rank = trailing_returns.rank(method="average", pct=True)
+        low_vol_rank = (-returns.std()).rank(method="average", pct=True)
+        return momentum_weight * momentum_rank + low_vol_weight * low_vol_rank
+    if score_key == "momentum_macro":
+        score_parameters = dict(strategy_definition.score_parameters)
+        momentum_weight = float(score_parameters.get("momentum_weight", 0.85))
+        macro_weight = float(score_parameters.get("macro_weight", 0.15))
+        trailing_returns = compute_trailing_total_returns(returns)
+        momentum_rank = trailing_returns.rank(method="average", pct=True)
+        macro_rank = compute_macro_proxy_rank(returns)
+        return momentum_weight * momentum_rank + macro_weight * macro_rank
+    if score_key == "volume_strength":
+        if volume_history is None:
+            raise ValueError("Volume history is required for the selected ranking model.")
+        return compute_volume_strength(volume_history)
+    if score_key == "volatility":
+        return -returns.std()
+    raise ValueError("Unsupported score model.")
+
+
 def compute_trailing_total_returns(returns: pd.DataFrame) -> pd.Series:
     lookback = min(len(returns), 252)
     trailing_returns = returns.iloc[-lookback:]
     return (1 + trailing_returns).prod() - 1
+
+
+def compute_volume_strength(volume_history: pd.DataFrame) -> pd.Series:
+    recent_window = max(2, min(20, max(2, len(volume_history) // 4)))
+    if len(volume_history) <= recent_window:
+        baseline = volume_history.mean(axis=0)
+    else:
+        baseline = volume_history.iloc[:-recent_window].mean(axis=0)
+    baseline = baseline.replace(0, np.nan)
+    recent = volume_history.iloc[-recent_window:].mean(axis=0)
+    return (recent / baseline).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
+def compute_macro_proxy_rank(returns: pd.DataFrame) -> pd.Series:
+    trailing_returns = compute_trailing_total_returns(returns)
+    risk_assets = [asset for asset in ["SPY", "QQQ", "IWM", "EFA", "EEM", "EWJ", "EWZ", "VNQ", "DBC", "USO", "BTC-USD", "ETH-USD"] if asset in trailing_returns.index]
+    defensive_assets = [asset for asset in ["TLT", "IEF", "LQD", "HYG", "TIP", "GLD", "SLV", "UUP"] if asset in trailing_returns.index]
+    if not risk_assets or not defensive_assets:
+        return trailing_returns.rank(method="average", pct=True)
+
+    risk_signal = float(trailing_returns.loc[risk_assets].mean())
+    defensive_signal = float(trailing_returns.loc[defensive_assets].mean())
+    regime_signal = risk_signal - defensive_signal
+
+    macro_scores: dict[str, float] = {}
+    for asset in trailing_returns.index:
+        if asset in risk_assets:
+            macro_scores[asset] = regime_signal
+        elif asset in defensive_assets:
+            macro_scores[asset] = -regime_signal
+        else:
+            macro_scores[asset] = 0.0
+    return pd.Series(macro_scores, dtype="float64").rank(method="average", pct=True)
+
+
+def evaluate_asset_ranking_definition(
+    returns: pd.DataFrame,
+    volumes: pd.DataFrame | None,
+    split_ratio: float,
+    ranking_definition: AssetRankingDefinition,
+) -> dict:
+    split_index = compute_split_index(len(returns), split_ratio)
+    observations: list[dict] = []
+    latest_top_assets: list[str] = []
+
+    for index in range(2, len(returns)):
+        history_returns = returns.iloc[:index]
+        history_volumes = volumes.iloc[:index] if volumes is not None else None
+        strategy_definition = ranking_definition.strategy_definition
+        selected_assets = select_assets(history_returns, history_volumes, strategy_definition)
+        if len(selected_assets) < 2:
+            continue
+
+        score_series = compute_strategy_score_series(history_returns, history_volumes, strategy_definition)
+        if score_series is None:
+            continue
+
+        selected_scores = score_series.loc[selected_assets].dropna()
+        if len(selected_scores) < 2 or selected_scores.nunique() < 2:
+            continue
+
+        forward_returns = returns.iloc[index].loc[selected_scores.index].dropna()
+        if len(forward_returns) < 2:
+            continue
+
+        aligned_scores = selected_scores.loc[forward_returns.index]
+        if len(aligned_scores) < 2 or aligned_scores.nunique() < 2 or forward_returns.nunique() < 2:
+            continue
+
+        group_size = max(1, len(aligned_scores) // 3)
+        ordered_scores = aligned_scores.sort_values(ascending=False)
+        top_assets = list(ordered_scores.head(group_size).index)
+        bottom_assets = list(ordered_scores.tail(group_size).index)
+        top_return = float(forward_returns.loc[top_assets].mean())
+        bottom_return = float(forward_returns.loc[bottom_assets].mean())
+        rank_ic = aligned_scores.rank().corr(forward_returns.rank(), method="pearson")
+        if pd.isna(rank_ic):
+            continue
+
+        latest_top_assets = top_assets
+        observations.append(
+            {
+                "date": str(returns.index[index]),
+                "rankIc": float(rank_ic),
+                "topReturn": top_return,
+                "bottomReturn": bottom_return,
+                "topMinusBottom": top_return - bottom_return,
+                "assetCount": len(aligned_scores),
+                "segment": "train" if index < split_index else "test",
+            }
+        )
+
+    return {
+        "rankingDefinition": serialize_asset_ranking_definition(ranking_definition),
+        "latestTopAssets": latest_top_assets,
+        "overall": summarize_ranking_observations(observations),
+        "train": summarize_ranking_observations(
+            [observation for observation in observations if observation["segment"] == "train"]
+        ),
+        "test": summarize_ranking_observations(
+            [observation for observation in observations if observation["segment"] == "test"]
+        ),
+    }
+
+
+def summarize_ranking_observations(observations: list[dict]) -> dict:
+    if not observations:
+        return {
+            "observationCount": 0,
+            "meanRankIc": None,
+            "meanTopReturnPct": None,
+            "meanBottomReturnPct": None,
+            "meanTopMinusBottomPct": None,
+            "hitRatePct": None,
+            "meanAssetCount": None,
+        }
+
+    top_minus_bottom_values = [observation["topMinusBottom"] for observation in observations]
+    hit_count = sum(1 for value in top_minus_bottom_values if value > 0)
+    return {
+        "observationCount": len(observations),
+        "meanRankIc": round(float(np.mean([observation["rankIc"] for observation in observations])), 4),
+        "meanTopReturnPct": round(float(np.mean([observation["topReturn"] for observation in observations])) * 100, 2),
+        "meanBottomReturnPct": round(
+            float(np.mean([observation["bottomReturn"] for observation in observations])) * 100,
+            2,
+        ),
+        "meanTopMinusBottomPct": round(float(np.mean(top_minus_bottom_values)) * 100, 2),
+        "hitRatePct": round(hit_count / len(observations) * 100, 2),
+        "meanAssetCount": round(float(np.mean([observation["assetCount"] for observation in observations])), 2),
+    }
 
 
 def expand_weights(
@@ -662,6 +994,11 @@ def compute_portfolio_allocation(
             [previous_weight_map.get(asset, 0.0) for asset in selected_assets],
             dtype="float64",
         )
+    expected_return_proxy = compute_expected_return_proxy(
+        returns=strategy_returns,
+        volume_history=volume_history[selected_assets] if volume_history is not None else None,
+        strategy_definition=strategy_definition,
+    )
     weights = fit_portfolio_model(
         strategy_returns,
         model_definition,
@@ -669,14 +1006,16 @@ def compute_portfolio_allocation(
         max_weight=max_weight,
         previous_weights=selected_previous_weights,
         transaction_cost=transaction_cost,
+        expected_return_proxy=expected_return_proxy,
     ) * max_investment_ratio
-    weights = apply_strategy_weight_tilt(
-        weights=weights,
-        history_returns=strategy_returns,
-        strategy_definition=strategy_definition,
-        max_investment_ratio=max_investment_ratio,
-        max_weight=max_weight,
-    )
+    if model_definition.model_type != "mean_risk_utility":
+        weights = apply_strategy_weight_tilt(
+            weights=weights,
+            history_returns=strategy_returns,
+            strategy_definition=strategy_definition,
+            max_investment_ratio=max_investment_ratio,
+            max_weight=max_weight,
+        )
     expanded_weights = expand_weights(
         universe_columns=universe_columns,
         selected_columns=strategy_returns.columns,
@@ -693,12 +1032,18 @@ def apply_strategy_weight_tilt(
     max_investment_ratio: float,
     max_weight: float | None,
 ) -> np.ndarray:
-    if strategy_definition.strategy_type != "full_universe_momentum_tilt":
+    score_parameters = dict(strategy_definition.score_parameters)
+    if "tilt_strength" not in score_parameters:
         return weights
 
-    trailing_returns = compute_trailing_total_returns(history_returns)
-    percentile_ranks = trailing_returns.rank(method="average", pct=True)
-    score_parameters = dict(strategy_definition.score_parameters)
+    score_series = compute_strategy_score_series(
+        history_returns,
+        None,
+        strategy_definition,
+    )
+    if score_series is None:
+        return weights
+    percentile_ranks = score_series.rank(method="average", pct=True)
     tilt_strength = float(score_parameters.get("tilt_strength", 0.5))
     tilt_shape = float(score_parameters.get("tilt_shape", 0.0))
     rank_values = percentile_ranks.to_numpy(dtype="float64")
@@ -729,6 +1074,42 @@ def filter_positive_variance_assets(returns: pd.DataFrame) -> pd.DataFrame:
     return filtered
 
 
+def compute_expected_return_proxy(
+    *,
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy_definition: PortfolioStrategyDefinition,
+) -> np.ndarray | None:
+    score_series = compute_strategy_score_series(returns, volume_history, strategy_definition)
+    if score_series is None:
+        return None
+
+    aligned_scores = score_series.reindex(returns.columns).replace([np.inf, -np.inf], np.nan)
+    if aligned_scores.isna().all():
+        return None
+
+    aligned_scores = aligned_scores.fillna(aligned_scores.mean())
+    if aligned_scores.nunique() < 2:
+        return None
+
+    standardized_scores = (aligned_scores - aligned_scores.mean()) / aligned_scores.std(ddof=0)
+    standardized_scores = standardized_scores.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    historical_mean = returns.mean(axis=0)
+    proxy_scale = float(max(historical_mean.std(ddof=0), 1e-4))
+    proxy = standardized_scores.to_numpy(dtype="float64") * proxy_scale
+    return np.clip(proxy, -0.05, 0.05)
+
+
+def shrink_expected_return_proxy(
+    expected_return_proxy: np.ndarray | None,
+    strength: float,
+) -> np.ndarray | None:
+    if expected_return_proxy is None:
+        return None
+    return np.asarray(expected_return_proxy, dtype="float64") * float(strength)
+
+
 def fit_portfolio_model(
     returns: pd.DataFrame,
     model_definition: PortfolioModelDefinition,
@@ -737,6 +1118,7 @@ def fit_portfolio_model(
     max_weight: float | None,
     previous_weights: np.ndarray | None,
     transaction_cost: float,
+    expected_return_proxy: np.ndarray | None,
 ) -> np.ndarray:
     asset_count = len(returns.columns)
     if asset_count == 0:
@@ -793,6 +1175,43 @@ def fit_portfolio_model(
                 weights = estimator.weights_
             except Exception:
                 weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+    elif model_definition.model_type == "mean_risk_utility":
+        try:
+            estimator = MeanRisk(
+                objective_function=ObjectiveFunction.MAXIMIZE_UTILITY,
+                risk_aversion=3.0,
+                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
+                transaction_costs=transaction_cost,
+                previous_weights=previous_weights,
+                overwrite_expected_return=(
+                    None
+                    if expected_return_proxy is None
+                    else lambda w, proxy=expected_return_proxy: proxy @ w
+                ),
+            )
+            estimator.fit(returns)
+            weights = estimator.weights_
+        except Exception:
+            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+    elif model_definition.model_type == "mean_risk_utility_conservative":
+        try:
+            conservative_proxy = shrink_expected_return_proxy(expected_return_proxy, 0.35)
+            estimator = MeanRisk(
+                objective_function=ObjectiveFunction.MAXIMIZE_UTILITY,
+                risk_aversion=8.0,
+                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
+                transaction_costs=transaction_cost,
+                previous_weights=previous_weights,
+                overwrite_expected_return=(
+                    None
+                    if conservative_proxy is None
+                    else lambda w, proxy=conservative_proxy: proxy @ w
+                ),
+            )
+            estimator.fit(returns)
+            weights = estimator.weights_
+        except Exception:
+            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
     else:
         raise ValueError("Unsupported portfolio model.")
 

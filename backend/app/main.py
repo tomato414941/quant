@@ -4,7 +4,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dashboard_config import DEFAULT_DASHBOARD_CONFIG
-from app.dashboard_service import build_condition_sweep_payload, build_dashboard_payload
+from app.dashboard_service import (
+    build_condition_sweep_payload,
+    build_dashboard_payload,
+    generate_parameter_sweep_runs_payload,
+    build_ranking_evaluation_payload,
+    build_run_catalog_payload,
+)
 from app.market_data import SUPPORTED_PERIODS, fetch_market_prices, fetch_market_universe, fetch_market_universe_bundle
 from app.strategy import (
     SUPPORTED_STRATEGIES,
@@ -49,6 +55,45 @@ def dashboard() -> dict:
 def condition_sweep() -> dict:
     try:
         return build_condition_sweep_payload(
+            DEFAULT_DASHBOARD_CONFIG,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/runs/generate-parameter-sweep")
+def generate_parameter_sweep_runs() -> dict:
+    try:
+        return generate_parameter_sweep_runs_payload(
+            DEFAULT_DASHBOARD_CONFIG,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/run-catalog")
+def run_catalog(
+    limit: int = Query(50, ge=1, le=500),
+    run_kind: str | None = Query(None),
+    generation_method: str | None = Query(None),
+) -> dict:
+    try:
+        return build_run_catalog_payload(
+            DEFAULT_DASHBOARD_CONFIG,
+            limit=limit,
+            run_kind=run_kind,
+            generation_method=generation_method,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/ranking-evaluation")
+def ranking_evaluation() -> dict:
+    try:
+        return build_ranking_evaluation_payload(
             DEFAULT_DASHBOARD_CONFIG,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )

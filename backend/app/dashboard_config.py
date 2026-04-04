@@ -42,6 +42,42 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     description="全ETFを候補に残しつつ、弱めの上位優遇モメンタム傾斜で重みを調整する",
     score_parameters={"tilt_strength": 0.25, "tilt_shape": 1.0},
 )
+FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_low_vol_tilt",
+    key="full_universe_momentum_low_vol_tilt_weak_top",
+    label="全資産モメンタム低ボラ傾斜 弱 上位優遇",
+    description="全ETFを候補に残しつつ、12ヶ月モメンタムと低ボラの複合スコアで弱く上位優遇する",
+    score_parameters={
+        "tilt_strength": 0.25,
+        "tilt_shape": 1.0,
+        "momentum_weight": 0.7,
+        "low_vol_weight": 0.3,
+    },
+)
+FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_low_vol_tilt",
+    key="full_universe_momentum_low_vol_tilt_light_top",
+    label="全資産モメンタム低ボラ傾斜 低ボラ弱め 上位優遇",
+    description="全ETFを候補に残しつつ、12ヶ月モメンタムを主役に低ボラを弱く混ぜて上位優遇する",
+    score_parameters={
+        "tilt_strength": 0.25,
+        "tilt_shape": 1.0,
+        "momentum_weight": 0.85,
+        "low_vol_weight": 0.15,
+    },
+)
+FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_macro_tilt",
+    key="full_universe_momentum_macro_tilt_light_top",
+    label="全資産モメンタムマクロ傾斜 マクロ弱め 上位優遇",
+    description="全ETFを候補に残しつつ、12ヶ月モメンタムを主役にマクロproxyを弱く混ぜて上位優遇する",
+    score_parameters={
+        "tilt_strength": 0.25,
+        "tilt_shape": 1.0,
+        "momentum_weight": 0.85,
+        "macro_weight": 0.15,
+    },
+)
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_softmax",
@@ -110,6 +146,18 @@ HIERARCHICAL_RISK_PARITY = build_portfolio_model_definition(
     key="hierarchical_risk_parity",
     label="HRP",
     description="相関クラスタを使って階層的にリスクを分散する",
+)
+MEAN_RISK_UTILITY = build_portfolio_model_definition(
+    model_type="mean_risk_utility",
+    key="mean_risk_utility",
+    label="MeanRisk効用最大化",
+    description="モメンタム順位から作った期待リターン proxy とリスクの両方で配分する",
+)
+MEAN_RISK_UTILITY_CONSERVATIVE = build_portfolio_model_definition(
+    model_type="mean_risk_utility_conservative",
+    key="mean_risk_utility_conservative",
+    label="MeanRisk効用最大化 弱",
+    description="モメンタム順位の期待リターン proxy を弱めに使い、リスクをより強く見る",
 )
 
 
@@ -224,6 +272,11 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
         build_portfolio_candidate_definition(FULL_UNIVERSE, HIERARCHICAL_RISK_PARITY),
         build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK, HIERARCHICAL_RISK_PARITY),
         build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, MEAN_RISK_UTILITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, MEAN_RISK_UTILITY_CONSERVATIVE),
         build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX, HIERARCHICAL_RISK_PARITY),
         build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT, HIERARCHICAL_RISK_PARITY),
         build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_STRONG, HIERARCHICAL_RISK_PARITY),

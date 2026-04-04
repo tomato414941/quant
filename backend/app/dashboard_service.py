@@ -4,8 +4,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.portfolio import (
+    build_asset_ranking_definitions,
+    build_portfolio_candidate_definition,
+    build_portfolio_strategy_definition,
+    evaluate_asset_ranking_definition,
     PortfolioCandidateDefinition,
     compare_portfolio_candidate,
+    serialize_asset_ranking_definition,
     serialize_portfolio_candidate_definition,
     serialize_portfolio_model_definition,
     serialize_portfolio_state,
@@ -105,6 +110,86 @@ def build_condition_sweep_payload(
     }
 
 
+def build_ranking_evaluation_payload(
+    study: StudyDefinition,
+    *,
+    fetch_market_universe_bundle,
+) -> dict:
+    run_store = build_run_result_store(study)
+    market_bundle, metadata = fetch_market_universe_bundle(
+        tickers=study.dataset_spec.tickers,
+        period=study.dataset_spec.period,
+    )
+    results, run_store_summary = build_ranking_evaluation_runs(
+        study=study,
+        closes=market_bundle["closes"],
+        volumes=market_bundle["volumes"],
+        dataset_period=study.dataset_spec.period,
+        dataset_metadata=metadata,
+        run_store=run_store,
+    )
+    return {
+        "study": serialize_study(study, metadata),
+        "resultCount": len(results),
+        "runStoreSummary": run_store_summary.to_payload(),
+        "results": results,
+    }
+
+
+def build_run_catalog_payload(
+    study: StudyDefinition,
+    *,
+    limit: int = 50,
+    run_kind: str | None = None,
+    generation_method: str | None = None,
+) -> dict:
+    run_store = build_run_result_store(study)
+    records = run_store.list_records(
+        run_kind=run_kind,
+        generation_method=generation_method,
+        limit=limit,
+    )
+    return {
+        "studyId": study.study_id,
+        "limit": limit,
+        "runKind": run_kind,
+        "generationMethod": generation_method,
+        "recordCount": len(records),
+        "records": [compact_run_record(record) for record in records],
+    }
+
+
+def generate_parameter_sweep_runs_payload(
+    study: StudyDefinition,
+    *,
+    fetch_market_universe_bundle,
+) -> dict:
+    run_store = build_run_result_store(study)
+    market_bundle, metadata = fetch_market_universe_bundle(
+        tickers=study.dataset_spec.tickers,
+        period=study.dataset_spec.period,
+    )
+    results, run_store_summary = build_parameter_sweep_runs(
+        study=study,
+        closes=market_bundle["closes"],
+        volumes=market_bundle["volumes"],
+        dataset_period=study.dataset_spec.period,
+        dataset_metadata=metadata,
+        run_store=run_store,
+    )
+    return {
+        "study": serialize_study(study, metadata),
+        "generation": {
+            "method": "parameter_sweep",
+            "batchKey": "local_tilt_search_v1",
+            "spec": build_parameter_sweep_generation_spec(),
+        },
+        "resultCount": len(results),
+        "runStoreSummary": run_store_summary.to_payload(),
+        "results": results,
+    }
+
+
 def build_run_result_store(study: StudyDefinition) -> FileRunResultStore:
     root_dir = Path(study.result_store_dir)
     if not root_dir.is_absolute():
@@ -197,6 +282,36 @@ def serialize_condition_variant(condition_variant: ConditionVariant) -> dict:
         "maxWeightPct": round(condition_variant.max_weight * 100, 1)
         if condition_variant.max_weight is not None
         else None,
+    }
+
+
+def compact_run_record(record: dict) -> dict:
+    run_definition = record["runDefinition"]
+    result = record["result"]
+    candidate = run_definition.get("candidate", {})
+    strategy = candidate.get("strategy", {})
+    portfolio_model = candidate.get("portfolioModel", {})
+    execution_model = run_definition.get("executionModel", {})
+    backtest_config = run_definition.get("backtestConfig", {})
+    dataset_spec = run_definition.get("datasetSpec", {})
+    summary = result.get("summary", {})
+    portfolio_summary = summary.get("portfolio", summary)
+
+    return {
+        "runKey": record["runKey"],
+        "savedAtUtc": record.get("savedAtUtc"),
+        "runKind": run_definition.get("runKind"),
+        "generationMethod": run_definition.get("generation", {}).get("method"),
+        "generationBatchKey": run_definition.get("generation", {}).get("batchKey"),
+        "strategyLabel": strategy.get("label"),
+        "portfolioModelLabel": portfolio_model.get("label"),
+        "executionLabel": execution_model.get("label"),
+        "period": dataset_spec.get("period"),
+        "maxInvestmentPct": backtest_config.get("maxInvestmentPct"),
+        "maxWeightPct": backtest_config.get("maxWeightPct"),
+        "sharpeRatio": portfolio_summary.get("sharpeRatio"),
+        "totalReturnPct": portfolio_summary.get("totalReturnPct"),
+        "maxDrawdownPct": portfolio_summary.get("maxDrawdownPct"),
     }
 
 
@@ -349,6 +464,211 @@ def build_condition_sweep_runs(
     )
 
 
+def build_ranking_evaluation_runs(
+    *,
+    study: StudyDefinition,
+    closes,
+    volumes,
+    dataset_period: str,
+    dataset_metadata: dict[str, str],
+    run_store: FileRunResultStore,
+) -> tuple[list[dict], RunStoreSummary]:
+    serialized_execution_model = serialize_execution_model(study.execution_variants[0])
+    serialized_backtest_config = serialize_backtest_config(study.backtest_config)
+    serialized_portfolio_state = serialize_portfolio_state(study.portfolio_state)
+    dataset_spec = {
+        "tickers": study.dataset_spec.tickers,
+        "period": dataset_period,
+        "frequency": study.dataset_spec.frequency,
+    }
+    returns = closes.pct_change().dropna()
+    aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
+    ranking_definitions = build_asset_ranking_definitions(study.candidate_definitions)
+    results: list[dict] = []
+    cached_run_count = 0
+    computed_run_count = 0
+
+    for ranking_definition in ranking_definitions:
+        serialized_ranking_definition = serialize_asset_ranking_definition(ranking_definition)
+        run_definition = build_run_definition(
+            run_kind="ranking_evaluation",
+            candidate={"ranking": serialized_ranking_definition},
+            dataset_spec=dataset_spec,
+            execution_model=serialized_execution_model,
+            backtest_config=serialized_backtest_config,
+            portfolio_state=serialized_portfolio_state,
+            dataset_metadata=dataset_metadata,
+        )
+        cached_run = run_store.load(run_definition)
+        if cached_run is not None:
+            cached_run_count += 1
+            results.append(cached_run)
+            continue
+
+        result = evaluate_asset_ranking_definition(
+            returns=returns,
+            volumes=aligned_volumes,
+            split_ratio=study.backtest_config.split_ratio,
+            ranking_definition=ranking_definition,
+        )
+        run_store.save(run_definition, result)
+        computed_run_count += 1
+        results.append(result)
+
+    results.sort(
+        key=lambda row: (
+            row["overall"]["meanRankIc"] if row["overall"]["meanRankIc"] is not None else float("-inf"),
+            row["overall"]["meanTopMinusBottomPct"]
+            if row["overall"]["meanTopMinusBottomPct"] is not None
+            else float("-inf"),
+        ),
+        reverse=True,
+    )
+    return results, RunStoreSummary(
+        cached_run_count=cached_run_count,
+        computed_run_count=computed_run_count,
+    )
+
+
+def build_parameter_sweep_runs(
+    *,
+    study: StudyDefinition,
+    closes,
+    volumes,
+    dataset_period: str,
+    dataset_metadata: dict[str, str],
+    run_store: FileRunResultStore,
+) -> tuple[list[dict], RunStoreSummary]:
+    serialized_portfolio_state = serialize_portfolio_state(study.portfolio_state)
+    dataset_spec = {
+        "tickers": study.dataset_spec.tickers,
+        "period": dataset_period,
+        "frequency": study.dataset_spec.frequency,
+    }
+    base_execution = study.execution_variants[0]
+    base_backtest = replace(
+        study.backtest_config,
+        max_investment_ratio=1.0,
+    )
+    results: list[dict] = []
+    cached_run_count = 0
+    computed_run_count = 0
+    generation = {
+        "method": "parameter_sweep",
+        "batchKey": "local_tilt_search_v1",
+        "spec": build_parameter_sweep_generation_spec(),
+    }
+
+    family_specs = [
+        {
+            "familyKey": "momentum_top",
+            "familyLabel": "全資産モメンタム傾斜 上位優遇",
+            "strategyType": "full_universe_momentum_tilt",
+            "macroWeights": [None],
+        },
+        {
+            "familyKey": "momentum_macro_top",
+            "familyLabel": "全資産モメンタムマクロ傾斜 上位優遇",
+            "strategyType": "full_universe_momentum_macro_tilt",
+            "macroWeights": [0.05, 0.10, 0.15, 0.20],
+        },
+    ]
+    tilt_strengths = [0.15, 0.20, 0.25, 0.30, 0.35]
+    max_weights = [0.40, 0.425, 0.45, 0.475, 0.50]
+
+    for family_spec in family_specs:
+        for tilt_strength in tilt_strengths:
+            for macro_weight in family_spec["macroWeights"]:
+                for max_weight in max_weights:
+                    score_parameters = {
+                        "tilt_strength": tilt_strength,
+                        "tilt_shape": 1.0,
+                    }
+                    if macro_weight is not None:
+                        score_parameters["momentum_weight"] = round(1.0 - macro_weight, 2)
+                        score_parameters["macro_weight"] = macro_weight
+
+                    strategy_definition = build_portfolio_strategy_definition(
+                        strategy_type=family_spec["strategyType"],
+                        key=(
+                            f"{family_spec['familyKey']}"
+                            f"__tilt_{str(tilt_strength).replace('.', '_')}"
+                            f"{'' if macro_weight is None else f'__macro_{str(macro_weight).replace('.', '_')}'}"
+                            f"__cap_{str(max_weight).replace('.', '_')}"
+                        ),
+                        label=family_spec["familyLabel"],
+                        description="Local parameter sweep candidate",
+                        score_parameters=score_parameters,
+                    )
+                    model_definition = next(
+                        candidate_definition.model_definition
+                        for candidate_definition in study.candidate_definitions
+                        if candidate_definition.model_definition.model_type == "hierarchical_risk_parity"
+                    )
+                    candidate_definition = build_portfolio_candidate_definition(
+                        strategy_definition,
+                        model_definition,
+                    )
+                    candidate = serialize_portfolio_candidate_definition(candidate_definition)
+                    effective_backtest = replace(base_backtest, max_weight=max_weight)
+                    serialized_execution_model = serialize_execution_model(base_execution)
+                    serialized_backtest_config = serialize_backtest_config(effective_backtest)
+                    run_definition = build_run_definition(
+                        run_kind="portfolio_comparison",
+                        candidate=candidate,
+                        dataset_spec=dataset_spec,
+                        execution_model=serialized_execution_model,
+                        backtest_config=serialized_backtest_config,
+                        portfolio_state=serialized_portfolio_state,
+                        dataset_metadata=dataset_metadata,
+                        generation=generation,
+                    )
+                    cached_run = run_store.load(run_definition)
+                    if cached_run is not None:
+                        cached_run_count += 1
+                        results.append(cached_run)
+                        continue
+
+                    run = compare_portfolio_candidate(
+                        closes=closes,
+                        volumes=volumes,
+                        candidate_definition=candidate_definition,
+                        initial_capital=effective_backtest.initial_capital,
+                        split_ratio=effective_backtest.split_ratio,
+                        transaction_cost=base_execution.commission_pct / 100,
+                        max_investment_ratio=effective_backtest.max_investment_ratio,
+                        max_weight=effective_backtest.max_weight,
+                        rebalance_frequency=base_execution.rebalance_frequency,
+                        portfolio_state=study.portfolio_state,
+                    )
+                    compact_run = compact_parameter_sweep_run(
+                        run=run,
+                        family_key=family_spec["familyKey"],
+                        family_label=family_spec["familyLabel"],
+                        tilt_strength=tilt_strength,
+                        macro_weight=macro_weight,
+                        max_weight=max_weight,
+                        execution_model=serialized_execution_model,
+                        backtest_config=serialized_backtest_config,
+                    )
+                    run_store.save(run_definition, compact_run)
+                    computed_run_count += 1
+                    results.append(compact_run)
+
+    results.sort(
+        key=lambda row: (
+            row["summary"]["sharpeRatio"],
+            row["summary"]["totalReturnPct"],
+            -row["summary"]["maxDrawdownPct"],
+        ),
+        reverse=True,
+    )
+    return results, RunStoreSummary(
+        cached_run_count=cached_run_count,
+        computed_run_count=computed_run_count,
+    )
+
+
 def compact_condition_sweep_run(
     *,
     run: dict,
@@ -367,6 +687,67 @@ def compact_condition_sweep_run(
         "summary": run["summary"],
         "benchmark": run["benchmark"],
         "splitAnalysis": run["splitAnalysis"],
+    }
+
+
+def compact_parameter_sweep_run(
+    *,
+    run: dict,
+    family_key: str,
+    family_label: str,
+    tilt_strength: float,
+    macro_weight: float | None,
+    max_weight: float,
+    execution_model: dict,
+    backtest_config: dict,
+) -> dict:
+    return {
+        "key": (
+            f"{family_key}"
+            f"__tilt_{tilt_strength}"
+            f"{'' if macro_weight is None else f'__macro_{macro_weight}'}"
+            f"__cap_{max_weight}"
+        ),
+        "family": {
+            "key": family_key,
+            "label": family_label,
+        },
+        "parameterSet": {
+            "tiltStrength": tilt_strength,
+            "macroWeight": macro_weight,
+            "maxWeightPct": round(max_weight * 100, 1),
+        },
+        "strategy": run["strategy"],
+        "portfolioModel": run["portfolioModel"],
+        "executionModel": execution_model,
+        "backtestConfig": backtest_config,
+        "weights": run["weights"],
+        "selectedAssets": run["selectedAssets"],
+        "summary": run["summary"],
+        "benchmark": run["benchmark"],
+        "splitAnalysis": run["splitAnalysis"],
+    }
+
+
+def build_parameter_sweep_generation_spec() -> dict:
+    return {
+        "families": [
+            {
+                "key": "momentum_top",
+                "strategyType": "full_universe_momentum_tilt",
+                "tiltShape": "top_favored",
+            },
+            {
+                "key": "momentum_macro_top",
+                "strategyType": "full_universe_momentum_macro_tilt",
+                "tiltShape": "top_favored",
+            },
+        ],
+        "parameterGrid": {
+            "tiltStrength": [0.15, 0.20, 0.25, 0.30, 0.35],
+            "macroWeight": [0.05, 0.10, 0.15, 0.20],
+            "maxWeight": [0.40, 0.425, 0.45, 0.475, 0.50],
+        },
     }
 
 

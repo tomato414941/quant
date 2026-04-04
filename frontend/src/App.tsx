@@ -137,6 +137,73 @@ type RunStoreSummary = {
   computedRunCount: number
 }
 
+type RunCatalogRecord = {
+  runKey: string
+  savedAtUtc: string | null
+  runKind: string
+  strategyLabel: string
+  portfolioModelLabel: string
+  executionLabel: string
+  period: string
+  maxInvestmentPct: number | null
+  maxWeightPct: number | null
+  sharpeRatio: number | null
+  totalReturnPct: number | null
+  maxDrawdownPct: number | null
+}
+
+type RunCatalogResult = {
+  studyId: string
+  limit: number
+  runKind: string | null
+  recordCount: number
+  records: RunCatalogRecord[]
+}
+
+type RankingEvaluationResultRow = {
+  rankingDefinition: {
+    key: string
+    label: string
+    description: string
+    featureInputs: string[]
+    universePolicy: StrategyComponent
+    rankingModel: StrategyComponent
+    filterRules: StrategyComponent[]
+    fallbackRule: StrategyComponent
+    sourceStrategyKeys: string[]
+    sourceStrategyLabels: string[]
+  }
+  latestTopAssets: string[]
+  overall: {
+    observationCount: number
+    meanRankIc: number | null
+    meanTopReturnPct: number | null
+    meanBottomReturnPct: number | null
+    meanTopMinusBottomPct: number | null
+    hitRatePct: number | null
+    meanAssetCount: number | null
+  }
+  train: {
+    observationCount: number
+    meanRankIc: number | null
+    meanTopMinusBottomPct: number | null
+    hitRatePct: number | null
+  }
+  test: {
+    observationCount: number
+    meanRankIc: number | null
+    meanTopMinusBottomPct: number | null
+    hitRatePct: number | null
+  }
+}
+
+type RankingEvaluationResult = {
+  study: StudyResult
+  resultCount: number
+  runStoreSummary: RunStoreSummary
+  results: RankingEvaluationResultRow[]
+}
+
 type DashboardResult = {
   study: StudyResult
   runs: PortfolioRun[]
@@ -251,9 +318,25 @@ function formatScoreParameters(parameters: Record<string, number>): string {
     .join(' / ')
 }
 
+function formatNullablePercent(value: number | null): string {
+  if (value === null) {
+    return '-'
+  }
+  return formatPercent(value)
+}
+
+function formatNullableNumber(value: number | null, digits = 2): string {
+  if (value === null) {
+    return '-'
+  }
+  return value.toFixed(digits)
+}
+
 function App() {
   const [dashboard, setDashboard] = useState<DashboardResult | null>(null)
   const [conditionSweep, setConditionSweep] = useState<ConditionSweepResult | null>(null)
+  const [runCatalog, setRunCatalog] = useState<RunCatalogResult | null>(null)
+  const [rankingEvaluation, setRankingEvaluation] = useState<RankingEvaluationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<StatusState>({
     tone: 'success',
@@ -263,26 +346,38 @@ function App() {
   const refreshDashboard = useEffectEvent(async () => {
     setLoading(true)
     try {
-      const [dashboardResponse, sweepResponse] = await Promise.all([
+      const [dashboardResponse, sweepResponse, catalogResponse, rankingResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/api/dashboard`),
         fetch(`${API_BASE_URL}/api/condition-sweep`),
+        fetch(`${API_BASE_URL}/api/run-catalog?limit=20&run_kind=dashboard`),
+        fetch(`${API_BASE_URL}/api/ranking-evaluation`),
       ])
       const dashboardPayload = await dashboardResponse.json()
       const sweepPayload = await sweepResponse.json()
+      const catalogPayload = await catalogResponse.json()
+      const rankingPayload = await rankingResponse.json()
       if (!dashboardResponse.ok) {
         throw new Error(dashboardPayload.detail ?? '比較実験の取得に失敗しました。')
       }
       if (!sweepResponse.ok) {
         throw new Error(sweepPayload.detail ?? '条件感度の取得に失敗しました。')
       }
+      if (!catalogResponse.ok) {
+        throw new Error(catalogPayload.detail ?? 'run catalog の取得に失敗しました。')
+      }
+      if (!rankingResponse.ok) {
+        throw new Error(rankingPayload.detail ?? 'ranking evaluation の取得に失敗しました。')
+      }
 
       startTransition(() => {
         setDashboard(dashboardPayload)
         setConditionSweep(sweepPayload)
+        setRunCatalog(catalogPayload)
+        setRankingEvaluation(rankingPayload)
       })
       setStatus({
         tone: 'success',
-        text: `${dashboardPayload.study.datasetSpec.period} を主期間に、最良条件へ固定した ${dashboardPayload.runs.length} 候補を比較しています。条件感度は ${sweepPayload.resultCount} run です。比較実験は再利用 ${dashboardPayload.runStoreSummary.cachedRunCount} 件、条件感度は再利用 ${sweepPayload.runStoreSummary.cachedRunCount} 件です。`,
+        text: `${dashboardPayload.study.datasetSpec.period} を主期間に、最良条件へ固定した ${dashboardPayload.runs.length} 候補を比較しています。条件感度は ${sweepPayload.resultCount} run、ranking evaluation は ${rankingPayload.resultCount} 件、catalog は ${catalogPayload.recordCount} 件です。比較実験は再利用 ${dashboardPayload.runStoreSummary.cachedRunCount} 件、条件感度は再利用 ${sweepPayload.runStoreSummary.cachedRunCount} 件、ranking は再利用 ${rankingPayload.runStoreSummary.cachedRunCount} 件です。`,
       })
     } catch (caughtError) {
       setStatus({
@@ -538,6 +633,97 @@ function App() {
                       <p className="card-copy">{strategy.description}</p>
                     </article>
                   ))}
+                </div>
+              </div>
+
+              {rankingEvaluation ? (
+                <div className="content-block">
+                  <div className="table-header">
+                    <div>
+                      <h3>Asset Ranking Model 評価</h3>
+                      <p>
+                        ポートフォリオ化する前に、順位付け自体がどれくらい効いているかを見ています。
+                        `rank IC` は順位相関、`Top-Bottom` は上位群と下位群の翌日リターン差です。再利用{' '}
+                        {rankingEvaluation.runStoreSummary.cachedRunCount} 件、再計算{' '}
+                        {rankingEvaluation.runStoreSummary.computedRunCount} 件です。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="table-scroll">
+                    <table className="results-table">
+                      <thead>
+                        <tr>
+                          <th>ランキング</th>
+                          <th>候補集合</th>
+                          <th>フィルタ</th>
+                          <th>観測数</th>
+                          <th>平均資産数</th>
+                          <th>全体 rank IC</th>
+                          <th>全体 Top-Bottom</th>
+                          <th>検証 rank IC</th>
+                          <th>検証 Top-Bottom</th>
+                          <th>勝率</th>
+                          <th>直近上位資産</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rankingEvaluation.results.map((result) => (
+                          <tr key={result.rankingDefinition.key}>
+                            <td>{result.rankingDefinition.label}</td>
+                            <td>{result.rankingDefinition.universePolicy.label}</td>
+                            <td>{formatFilterRules(result.rankingDefinition.filterRules)}</td>
+                            <td>{result.overall.observationCount}</td>
+                            <td>{formatNullableNumber(result.overall.meanAssetCount, 1)}</td>
+                            <td>{formatNullableNumber(result.overall.meanRankIc, 3)}</td>
+                            <td>{formatNullablePercent(result.overall.meanTopMinusBottomPct)}</td>
+                            <td>{formatNullableNumber(result.test.meanRankIc, 3)}</td>
+                            <td>{formatNullablePercent(result.test.meanTopMinusBottomPct)}</td>
+                            <td>{formatNullablePercent(result.overall.hitRatePct)}</td>
+                            <td>{result.latestTopAssets.join(', ') || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="content-block">
+                <div className="table-header">
+                  <div>
+                    <h3>Run Catalog</h3>
+                    <p>実験条件と結果を後から辿れるように、直近の run を保存順で並べています。</p>
+                  </div>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>保存時刻</th>
+                        <th>戦略</th>
+                        <th>配分法</th>
+                        <th>執行</th>
+                        <th>期間</th>
+                        <th>Sharpe</th>
+                        <th>総リターン</th>
+                        <th>最大DD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {runCatalog?.records.map((record) => (
+                        <tr key={record.runKey}>
+                          <td>{record.savedAtUtc ? record.savedAtUtc.replace('T', ' ').slice(0, 19) : '-'}</td>
+                          <td>{record.strategyLabel ?? '-'}</td>
+                          <td>{record.portfolioModelLabel ?? '-'}</td>
+                          <td>{record.executionLabel ?? '-'}</td>
+                          <td>{record.period ?? '-'}</td>
+                          <td>{record.sharpeRatio?.toFixed(2) ?? '-'}</td>
+                          <td>{record.totalReturnPct !== null ? formatPercent(record.totalReturnPct) : '-'}</td>
+                          <td>{record.maxDrawdownPct !== null ? formatPercent(record.maxDrawdownPct) : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 

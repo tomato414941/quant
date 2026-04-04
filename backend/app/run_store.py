@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v4"
+RUN_STORE_LOGIC_VERSION = "v5"
 
 
 @dataclass(frozen=True)
@@ -30,12 +31,56 @@ class FileRunResultStore:
         path = self._path_for(run_definition)
         if not path.exists():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
         return payload["result"]
+
+    def list_records(
+        self,
+        *,
+        run_kind: str | None = None,
+        generation_method: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        records: list[dict] = []
+        for path in self.root_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            run_definition = payload.get("runDefinition", {})
+            if run_definition.get("logicVersion") != RUN_STORE_LOGIC_VERSION:
+                continue
+            if run_kind is not None and run_definition.get("runKind") != run_kind:
+                continue
+            generation = run_definition.get("generation", {})
+            if generation_method is not None and generation.get("method") != generation_method:
+                continue
+            records.append(
+                {
+                    "runKey": path.stem,
+                    "savedAtUtc": payload.get("savedAtUtc"),
+                    "runDefinition": run_definition,
+                    "result": payload.get("result", {}),
+                }
+            )
+        records.sort(
+            key=lambda record: (
+                record["savedAtUtc"] or "",
+                record["runKey"],
+            ),
+            reverse=True,
+        )
+        if limit is not None:
+            return records[:limit]
+        return records
 
     def save(self, run_definition: dict, result: dict) -> None:
         path = self._path_for(run_definition)
         payload = {
+            "savedAtUtc": datetime.now(timezone.utc).isoformat(),
             "runDefinition": run_definition,
             "result": result,
         }
@@ -63,8 +108,9 @@ def build_run_definition(
     backtest_config: dict,
     portfolio_state: dict,
     dataset_metadata: dict,
+    generation: dict | None = None,
 ) -> dict:
-    return {
+    run_definition = {
         "logicVersion": RUN_STORE_LOGIC_VERSION,
         "runKind": run_kind,
         "candidate": candidate,
@@ -80,3 +126,6 @@ def build_run_definition(
         "backtestConfig": backtest_config,
         "portfolioState": portfolio_state,
     }
+    if generation is not None:
+        run_definition["generation"] = generation
+    return run_definition

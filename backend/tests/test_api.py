@@ -178,34 +178,34 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["backtestConfig"]["maxWeightPct"] == 45.0
     assert payload["study"]["portfolioState"]["weights"][0]["asset"] == "CASH"
     assert payload["study"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
-    assert len(payload["study"]["strategyDefinitions"]) == 11
+    assert len(payload["study"]["strategyDefinitions"]) == 14
     assert payload["study"]["strategyDefinitions"][0]["universePolicy"]["label"]
     assert payload["study"]["strategyDefinitions"][0]["scoreModel"]["label"]
     assert "filterRules" in payload["study"]["strategyDefinitions"][0]
     assert payload["study"]["strategyDefinitions"][0]["fallbackRule"]["label"]
     assert len(payload["study"]["datasetSpec"]["tickers"]) == 20
-    assert len(payload["study"]["portfolioModels"]) == 4
+    assert len(payload["study"]["portfolioModels"]) == 6
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
     assert payload["runs"][0]["strategy"]["label"] == "全資産"
     assert payload["runs"][0]["portfolioModel"]["label"] == "等金額配分"
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
     assert payload["runs"][0]["executionModel"]["label"] == "年次"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 34
+    assert payload["runStoreSummary"]["computedRunCount"] == 44
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert payload["sanityChecks"][0]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 17
-    assert len(payload["sanityChecks"][0]["runs"]) == 17
+    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 22
+    assert len(payload["sanityChecks"][0]["runs"]) == 22
 
     second_response = client.get("/api/dashboard")
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 34
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 44
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
-    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 17
+    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 22
     assert second_payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 0
 
 
@@ -297,6 +297,97 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     assert third_payload["resultCount"] == 3
     assert third_payload["runStoreSummary"]["cachedRunCount"] == 2
     assert third_payload["runStoreSummary"]["computedRunCount"] == 1
+
+
+def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config.result_store_dir = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+
+    dashboard_response = client.get("/api/dashboard")
+    assert dashboard_response.status_code == 200
+
+    response = client.get("/api/run-catalog", params={"limit": 5, "run_kind": "dashboard"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["studyId"] == "etf_portfolio_models_10y"
+    assert payload["limit"] == 5
+    assert payload["runKind"] == "dashboard"
+    assert payload["recordCount"] == 5
+    assert payload["records"][0]["strategyLabel"]
+    assert payload["records"][0]["portfolioModelLabel"]
+    assert payload["records"][0]["sharpeRatio"] is not None
+    assert payload["records"][0]["generationMethod"] is None
+
+
+def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config.result_store_dir = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+
+    response = client.post("/api/runs/generate-parameter-sweep")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["study"]["id"] == "etf_portfolio_models_10y"
+    assert payload["generation"]["method"] == "parameter_sweep"
+    assert payload["generation"]["batchKey"] == "local_tilt_search_v1"
+    assert payload["generation"]["spec"]["parameterGrid"]["tiltStrength"] == [0.15, 0.2, 0.25, 0.3, 0.35]
+    assert payload["resultCount"] == 125
+    assert payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert payload["runStoreSummary"]["computedRunCount"] == 125
+    assert payload["results"][0]["family"]["label"]
+    assert payload["results"][0]["parameterSet"]["tiltStrength"] in [0.15, 0.2, 0.25, 0.3, 0.35]
+    assert payload["results"][0]["parameterSet"]["maxWeightPct"] in [40.0, 42.5, 45.0, 47.5, 50.0]
+    assert payload["results"][0]["summary"]["sharpeRatio"] is not None
+
+    second_response = client.post("/api/runs/generate-parameter-sweep")
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["resultCount"] == 125
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 125
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 0
+
+    catalog_response = client.get(
+        "/api/run-catalog",
+        params={"generation_method": "parameter_sweep", "limit": 5},
+    )
+
+    assert catalog_response.status_code == 200
+    catalog_payload = catalog_response.json()
+    assert catalog_payload["generationMethod"] == "parameter_sweep"
+    assert catalog_payload["recordCount"] == 5
+    assert all(record["generationMethod"] == "parameter_sweep" for record in catalog_payload["records"])
+
+
+def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config.result_store_dir = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+
+    response = client.get("/api/ranking-evaluation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["study"]["id"] == "etf_portfolio_models_10y"
+    assert payload["resultCount"] == 9
+    assert payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert payload["runStoreSummary"]["computedRunCount"] == 9
+    assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
+    assert payload["results"][0]["overall"]["observationCount"] >= 1
+    assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
+
+    second_response = client.get("/api/ranking-evaluation")
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 9
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 
 def test_market_backtest_endpoint(monkeypatch) -> None:

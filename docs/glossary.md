@@ -4,7 +4,7 @@
 
 ## 用語の流れ
 
-`Hypothesis -> Raw Data -> Features -> Asset Ranking Model -> Strategy -> Portfolio Model -> Execution Model -> Run -> Study`
+`Hypothesis -> Raw Data -> Features -> Asset Ranking Model -> Strategy -> Run -> Study`
 
 ## Core Terms
 
@@ -53,13 +53,31 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 
 ### Strategy
 
-Asset Ranking Model をどう使うかを決めるルール。  
-候補集合、スコアの使い方、フィルタ、フォールバックを含む。
+このプロジェクトで最終的に採用候補として選ぶ、意思決定ルールの完全な仕様。  
+`Strategy` は上位概念であり、内部に複数の構成要素を持つ。
+
+含まれるもの:
+- Universe Policy
+- Asset Ranking Model
+- Filter Rule
+- Fallback Rule
+- Portfolio Model
+- Execution Policy
+- Risk Controls
+
+含まれないもの:
+- 評価期間
+- benchmark
+- train/test split
+- generation method
+- fee のような市場前提そのもの
+
+要するに、`Strategy` は「何をどう持つか」の仕様であり、  
+`Portfolio Model` や `Execution Policy` はその構成要素である。
 
 例:
-- 全資産を残して、上位だけ少し厚くする
-- 上昇資産だけを候補にする
-- 候補が空なら CASH に逃がす
+- 全資産を候補にし、12ヶ月モメンタムで上位優遇 tilt をかけ、HRP で配分し、年次で更新する
+- 上昇資産のみを候補にし、モメンタム上位3へ絞り、候補ゼロなら CASH に逃がす
 
 ### Universe Policy
 
@@ -88,7 +106,8 @@ Asset Ranking Model をどう使うかを決めるルール。
 
 ### Portfolio Model
 
-Strategy が作った候補やスコアを受けて、最終ウェイトを決めるモデル。
+Strategy の構成要素の1つ。  
+候補資産やランキングを受けて、最終ウェイトを決めるモデル。
 
 例:
 - Equal Weight
@@ -103,25 +122,32 @@ Strategy が作った候補やスコアを受けて、最終ウェイトを決�
 
 ### Execution Model
 
+Strategy の構成要素の1つ。  
 目標ウェイトへの変更をどう実行したとみなすかを決めるモデル。
 
 例:
 - 年次リバランス
-- 手数料 0.05%
-- slippage 0.0%
+- 月次リバランス
+
+補足:
+- 手数料や slippage の実数値そのものは、普通は Strategy ではなく評価前提やコスト前提として扱う
+- ただし「どのコストモデルを使うか」は比較対象になりうる
 
 ### Candidate
 
-比較対象の単位。  
-このプロジェクトでは基本的に `Strategy x Portfolio Model` の組み合わせを指す。
+比較対象として並べる Strategy の候補。
+
+補足:
+- 実装上は一時的に `Strategy x Portfolio Model` のような組み方をしていた時期がある
+- ただし、概念としては `Candidate` は最終的に選ぶ Strategy 候補そのものを指す
 
 例:
-- 全資産 x HRP
-- 全資産モメンタム傾斜 弱 上位優遇 x HRP
+- 全資産モメンタム傾斜 最良 上位優遇 × HRP × 年次
+- 上昇資産のみ × モメンタム上位3 × HRP × 年次
 
 ### Condition Variant
 
-Candidate に対して追加で振る実験条件。
+Run を生成するために追加で振る評価条件。
 
 例:
 - 手数料
@@ -130,15 +156,26 @@ Candidate に対して追加で振る実験条件。
 
 ### Run
 
-1つの条件セットで実行した1回の結果。
+1つの Strategy を、特定の前提条件・制約条件・評価条件のもとで実行した1回の結果。
+
+式で書くと:
+
+`Run = Strategy + Assumptions + Result`
+
+ここでいう `Assumptions` には、たとえば次が入る。
+- 評価期間
+- benchmark
+- split ratio
+- cost assumptions
+- portfolio state
+- generation metadata
 
 構成:
-- Candidate
-- Dataset
-- Execution Model
-- Backtest Config
+- Strategy
+- Dataset / Period
+- Cost / Constraint assumptions
 - Portfolio State
-- Condition Variant
+- Evaluation settings
 
 出力:
 - Sharpe
@@ -149,10 +186,13 @@ Candidate に対して追加で振る実験条件。
 
 ### Study
 
-複数の Run をまとめて比較する実験全体。
+複数の Strategy を、共通の問いのもとで比較する実験全体。
+
+Study は「何を比較したいか」を表し、Run は「その比較の中で1回どうだったか」を表す。
 
 例:
-- 20資産ユニバースで、複数 candidate を同条件比較する
+- 20資産ユニバースで、複数 Strategy を同条件比較する
+- ある Strategy 群を、10y と 3y で比較する
 
 ## Inputs to Portfolio Construction
 
@@ -181,8 +221,10 @@ Candidate に対して追加で振る実験条件。
   - `Score Model` は互換名としてのみ使う
 - `Portfolio Model`
   - `Allocator` より優先
+  - Strategy の構成要素として扱う
 - `Execution Model`
   - `Trading Rule` より優先
+  - Strategy の構成要素として扱う
 - `Run`
   - `Result` 単体より優先
 - `Study`

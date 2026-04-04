@@ -1,40 +1,22 @@
-.app-shell {
+.decision-shell {
   min-height: 100vh;
-  padding: 24px 16px 56px;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px 48px;
 }
 
-.page {
-  width: min(1120px, 100%);
-  margin: 0 auto;
-}
-
-.hero {
-  position: relative;
-  overflow: hidden;
+.decision-card {
+  width: min(760px, 100%);
   padding: 28px;
   border: 1px solid var(--border);
   border-radius: 28px;
   background:
-    radial-gradient(circle at top left, rgba(215, 122, 74, 0.22), transparent 32%),
-    linear-gradient(135deg, rgba(255, 248, 238, 0.96), rgba(247, 239, 225, 0.88));
-  box-shadow: 0 26px 60px rgba(70, 48, 31, 0.11);
+    radial-gradient(circle at top right, rgba(180, 91, 42, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(247, 240, 231, 0.94));
+  box-shadow: 0 24px 60px rgba(55, 36, 20, 0.08);
 }
 
-.hero::after {
-  content: "";
-  position: absolute;
-  inset: auto -8% -40% auto;
-  width: 260px;
-  height: 260px;
-  border-radius: 50%;
-  background: rgba(116, 138, 108, 0.16);
-  filter: blur(8px);
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.decision-kicker {
   margin: 0 0 12px;
   font-size: 0.78rem;
   font-weight: 600;
@@ -43,208 +25,114 @@
   color: var(--accent-strong);
 }
 
-.eyebrow::before {
-  content: "";
-  width: 18px;
-  height: 1px;
-  background: currentColor;
-}
-
-.hero h1 {
-  position: relative;
-  z-index: 1;
-  max-width: 11ch;
+.decision-card h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2.8rem, 9vw, 5.8rem);
+  font-size: clamp(2.3rem, 8vw, 4.8rem);
   font-weight: 600;
-  line-height: 0.94;
+  line-height: 0.92;
   letter-spacing: -0.06em;
 }
 
-.hero-copy {
-  position: relative;
-  z-index: 1;
-  max-width: 58ch;
-  margin-top: 20px;
+.decision-summary {
+  max-width: 54ch;
+  margin: 18px 0 0;
   color: var(--muted);
   font-size: 1rem;
 }
 
-.panel {
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  background: var(--panel);
-  box-shadow: 0 14px 40px rgba(55, 36, 20, 0.06);
-}
-
-.panel-title {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.panel-title h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(1.45rem, 4vw, 2rem);
-  font-weight: 550;
-  letter-spacing: -0.03em;
-}
-
-.panel-title p,
-.footnote {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-}
-
-.status {
-  min-height: 24px;
-  margin-top: 4px;
-  font-size: 0.94rem;
-  color: var(--muted);
-}
-
-.status.error {
+.error-text {
   color: var(--danger);
 }
 
-.status.success {
-  color: var(--success);
+.decision-highlight {
+  margin-top: 24px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 249, 241, 0.92);
+  border: 1px solid rgba(103, 82, 61, 0.08);
 }
 
-.results {
-  margin-top: 22px;
-  padding: 22px;
+.decision-highlight h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 5vw, 2.4rem);
+  font-weight: 550;
+  line-height: 1;
+  letter-spacing: -0.04em;
 }
 
-.cards {
+.decision-metrics {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 18px;
 }
 
-.cards-compact {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-}
-
-.metric-card {
-  padding: 18px;
+.decision-metrics article {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(255, 252, 248, 1), rgba(248, 241, 232, 0.96));
-  border: 1px solid rgba(104, 79, 64, 0.1);
+  background: rgba(255, 252, 248, 0.96);
+  border: 1px solid rgba(103, 82, 61, 0.08);
 }
 
-.metric-card h3 {
-  margin: 0 0 16px;
-  font-size: 0.95rem;
+.decision-metrics span {
+  font-size: 0.8rem;
+  color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted);
+  letter-spacing: 0.1em;
 }
 
-.metric-grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.metric {
-  display: grid;
-  gap: 4px;
-}
-
-.metric-label {
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.metric-value {
+.decision-metrics strong {
   font-family: var(--font-display);
-  font-size: 1.4rem;
+  font-size: 1.55rem;
+  font-weight: 600;
   line-height: 1;
   letter-spacing: -0.05em;
 }
 
-.metric-value-text {
-  font-size: 1.1rem;
-  letter-spacing: -0.03em;
+.decision-details {
+  display: grid;
+  gap: 12px;
+  margin: 22px 0 0;
 }
 
-.content-block {
-  margin-top: 18px;
-  padding: 16px;
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(255, 250, 244, 0.96), rgba(250, 244, 236, 0.72));
-  border: 1px solid rgba(103, 82, 61, 0.08);
+.decision-details div {
+  display: grid;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(103, 82, 61, 0.08);
 }
 
-.chart-note {
-  margin-top: 12px;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.table-header h3 {
-  margin: 0;
-  font-size: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted);
-}
-
-.table-header p {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.table-scroll {
-  overflow-x: auto;
-  margin-top: 14px;
-}
-
-.results-table {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: collapse;
-  font-size: 0.92rem;
-}
-
-.results-table th,
-.results-table td {
-  padding: 12px 10px;
-  border-bottom: 1px solid rgba(103, 82, 61, 0.08);
-  text-align: left;
-  white-space: nowrap;
-}
-
-.results-table th {
-  color: var(--muted);
-  font-size: 0.78rem;
+.decision-details dt {
+  font-size: 0.8rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.results-table tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-.empty-state {
-  padding: 28px;
-  text-align: center;
   color: var(--muted);
+}
+
+.decision-details dd {
+  margin: 0;
+  font-size: 0.98rem;
 }
 
 @media (min-width: 720px) {
-  .app-shell {
+  .decision-shell {
     padding: 32px 24px 72px;
   }
 
-  .cards {
+  .decision-card {
+    padding: 32px;
+  }
+
+  .decision-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .decision-details {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
   }
 }

@@ -38,9 +38,9 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK = build_portfolio_strategy_definition(
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top",
-    label="全資産モメンタム傾斜 弱 上位優遇",
-    description="全ETFを候補に残しつつ、弱めの上位優遇モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.25, "tilt_shape": 1.0},
+    label="全資産モメンタム傾斜 最良 上位優遇",
+    description="全ETFを候補に残しつつ、局所探索で最良だった上位優遇モメンタム傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0},
 )
 FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_low_vol_tilt",

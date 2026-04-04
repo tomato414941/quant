@@ -107,10 +107,16 @@ type StudyResult = {
   portfolioModels: PortfolioModelDefinition[]
 }
 
+type RunStoreSummary = {
+  cachedRunCount: number
+  computedRunCount: number
+}
+
 type DashboardResult = {
   study: StudyResult
   runs: PortfolioRun[]
   comparisonSeries: ComparisonRow[]
+  runStoreSummary: RunStoreSummary
   sanityChecks: Array<{
     period: string
     datasetSpec: {
@@ -122,6 +128,7 @@ type DashboardResult = {
       alignedEndDate: string
       rowCount: number
     }
+    runStoreSummary: RunStoreSummary
     runs: PortfolioRun[]
   }>
 }
@@ -184,7 +191,7 @@ function App() {
       startTransition(() => setDashboard(payload))
       setStatus({
         tone: 'success',
-        text: `${payload.study.datasetSpec.period} を主期間に、${payload.study.executionModel.rebalanceFrequency} リバランスで比較しています。`,
+        text: `${payload.study.datasetSpec.period} を主期間に、${payload.study.executionModel.rebalanceFrequency} リバランスで比較しています。再利用 ${payload.runStoreSummary.cachedRunCount} 件、再計算 ${payload.runStoreSummary.computedRunCount} 件です。`,
       })
     } catch (caughtError) {
       setStatus({
@@ -348,6 +355,18 @@ function App() {
                         {formatPercent(benchmarkSummary?.totalReturnPct ?? 0)}
                       </strong>
                     </div>
+                    <div className="metric">
+                      <span className="metric-label">再利用候補</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.runStoreSummary.cachedRunCount}
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">今回計算</span>
+                      <strong className="metric-value metric-value-text">
+                        {dashboard.runStoreSummary.computedRunCount}
+                      </strong>
+                    </div>
                   </div>
                 </article>
               </div>
@@ -459,7 +478,8 @@ function App() {
                       <p>
                         主期間の結論が最近の相場でも大きく崩れていないかを見るための補助比較です。
                         共通期間は {sanityCheck.datasetSpec.alignedStartDate} - {sanityCheck.datasetSpec.alignedEndDate}
-                        です。
+                        です。再利用 {sanityCheck.runStoreSummary.cachedRunCount} 件、再計算{' '}
+                        {sanityCheck.runStoreSummary.computedRunCount} 件です。
                       </p>
                     </div>
                   </div>

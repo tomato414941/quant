@@ -1,6 +1,9 @@
+import copy
+
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from app import main as main_module
 from app.main import app
 from app.strategy import PricePoint
 
@@ -138,8 +141,11 @@ def test_healthcheck() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_dashboard_endpoint(monkeypatch) -> None:
+def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
+    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config["result_store_dir"] = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
 
     response = client.get("/api/dashboard")
 
@@ -164,10 +170,52 @@ def test_dashboard_endpoint(monkeypatch) -> None:
     assert payload["runs"][0]["strategy"]["label"] == "全資産"
     assert payload["runs"][0]["portfolioModel"]["label"] == "等金額配分"
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
+    assert payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert payload["runStoreSummary"]["computedRunCount"] == 16
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert payload["sanityChecks"][0]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
+    assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
+    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 8
     assert len(payload["sanityChecks"][0]["runs"]) == 8
+
+    second_response = client.get("/api/dashboard")
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 16
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 0
+    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 8
+    assert second_payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 0
+
+
+def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
+    base_config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config = copy.deepcopy(base_config)
+    config["result_store_dir"] = str(tmp_path / "run_results")
+    config["dataset_spec"]["sanity_periods"] = []
+    config["strategy_definitions"] = [config["strategy_definitions"][0]]
+    config["portfolio_models"] = [config["portfolio_models"][0]]
+    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+
+    first_response = client.get("/api/dashboard")
+
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    assert len(first_payload["runs"]) == 1
+    assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert first_payload["runStoreSummary"]["computedRunCount"] == 1
+
+    config["portfolio_models"].append(copy.deepcopy(base_config["portfolio_models"][1]))
+
+    second_response = client.get("/api/dashboard")
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert len(second_payload["runs"]) == 2
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 1
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 1
 
 
 def test_market_backtest_endpoint(monkeypatch) -> None:

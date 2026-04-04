@@ -123,6 +123,17 @@ def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrate
     }
 
 
+def serialize_portfolio_candidate_definition(
+    strategy_definition: PortfolioStrategyDefinition,
+    model_definition: PortfolioModelDefinition,
+) -> dict:
+    return {
+        "key": f"{strategy_definition.key}__{model_definition.key}",
+        "strategy": serialize_portfolio_strategy_definition(strategy_definition),
+        "portfolioModel": serialize_portfolio_model_definition(model_definition),
+    }
+
+
 def build_portfolio_state(
     *,
     current_weights: dict[str, float],
@@ -240,6 +251,30 @@ def compare_portfolio_runs(
             )
 
     return runs
+
+
+def compare_portfolio_candidate(
+    closes: pd.DataFrame,
+    strategy_definition: PortfolioStrategyDefinition,
+    model_definition: PortfolioModelDefinition,
+    initial_capital: float,
+    split_ratio: float,
+    transaction_cost: float,
+    max_investment_ratio: float = 1.0,
+    rebalance_frequency: str = "hold",
+    portfolio_state: PortfolioState | None = None,
+) -> dict:
+    return compare_portfolio_runs(
+        closes=closes,
+        strategy_definitions=[strategy_definition],
+        model_definitions=[model_definition],
+        initial_capital=initial_capital,
+        split_ratio=split_ratio,
+        transaction_cost=transaction_cost,
+        max_investment_ratio=max_investment_ratio,
+        rebalance_frequency=rebalance_frequency,
+        portfolio_state=portfolio_state,
+    )[0]
 
 
 def compare_portfolio_models(

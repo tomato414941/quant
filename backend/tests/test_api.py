@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app import main as main_module
 from app.main import app
 from app.strategy import PricePoint
+from app.study_models import ConditionVariant
 
 
 client = TestClient(app)
@@ -134,6 +135,18 @@ def fake_fetch_market_universe(tickers: list[str], period: str) -> tuple[pd.Data
     }
 
 
+def fake_fetch_market_universe_bundle(tickers: list[str], period: str) -> tuple[dict, dict]:
+    closes, metadata = fake_fetch_market_universe(tickers, period)
+    volumes = pd.DataFrame(
+        {
+            ticker: [1_000_000 + index * 10_000 + offset * 1_000 for index in range(len(closes))]
+            for offset, ticker in enumerate(closes.columns)
+        },
+        index=closes.index,
+    )
+    return {"closes": closes, "volumes": volumes}, metadata
+
+
 def test_healthcheck() -> None:
     response = client.get("/api/health")
 
@@ -142,7 +155,7 @@ def test_healthcheck() -> None:
 
 
 def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
     monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
@@ -158,43 +171,51 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
     assert payload["study"]["datasetSpec"]["alignedEndDate"] == "2025-01-07"
     assert payload["study"]["datasetSpec"]["rowCount"] == 7
-    assert payload["study"]["executionModel"]["commissionPct"] == 0.1
-    assert payload["study"]["executionModel"]["rebalanceFrequency"] == "monthly"
-    assert payload["study"]["backtestConfig"]["maxInvestmentPct"] == 85.0
+    assert len(payload["study"]["executionVariants"]) == 1
+    assert payload["study"]["executionVariants"][0]["commissionPct"] == 0.05
+    assert payload["study"]["executionVariants"][0]["rebalanceFrequency"] == "annual"
+    assert payload["study"]["backtestConfig"]["maxInvestmentPct"] == 100.0
+    assert payload["study"]["backtestConfig"]["maxWeightPct"] == 45.0
     assert payload["study"]["portfolioState"]["weights"][0]["asset"] == "CASH"
     assert payload["study"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
-    assert len(payload["study"]["strategyDefinitions"]) == 2
+    assert len(payload["study"]["strategyDefinitions"]) == 11
+    assert payload["study"]["strategyDefinitions"][0]["universePolicy"]["label"]
+    assert payload["study"]["strategyDefinitions"][0]["scoreModel"]["label"]
+    assert "filterRules" in payload["study"]["strategyDefinitions"][0]
+    assert payload["study"]["strategyDefinitions"][0]["fallbackRule"]["label"]
     assert len(payload["study"]["datasetSpec"]["tickers"]) == 20
     assert len(payload["study"]["portfolioModels"]) == 4
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
     assert payload["runs"][0]["strategy"]["label"] == "全資産"
     assert payload["runs"][0]["portfolioModel"]["label"] == "等金額配分"
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
+    assert payload["runs"][0]["executionModel"]["label"] == "年次"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 16
+    assert payload["runStoreSummary"]["computedRunCount"] == 34
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert payload["sanityChecks"][0]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 8
-    assert len(payload["sanityChecks"][0]["runs"]) == 8
+    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 17
+    assert len(payload["sanityChecks"][0]["runs"]) == 17
 
     second_response = client.get("/api/dashboard")
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 16
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 34
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
-    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 8
+    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 17
     assert second_payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 0
 
 
 def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     base_config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
     config = copy.deepcopy(base_config)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
+    config.execution_variants = [config.execution_variants[0]]
     config.candidate_definitions = [config.candidate_definitions[0]]
     monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
 
@@ -215,6 +236,67 @@ def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_pa
     assert len(second_payload["runs"]) == 2
     assert second_payload["runStoreSummary"]["cachedRunCount"] == 1
     assert second_payload["runStoreSummary"]["computedRunCount"] == 1
+
+
+def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config.result_store_dir = str(tmp_path / "run_results")
+    config.dataset_spec.sanity_periods = []
+    config.execution_variants = [config.execution_variants[0]]
+    config.candidate_definitions = [config.candidate_definitions[0]]
+    config.condition_variants = [
+        ConditionVariant(
+            key="baseline",
+            label="手数料 0.10% / 投資 85% / 上限なし",
+            commission_pct=0.1,
+            max_investment_ratio=0.85,
+            max_weight=None,
+        ),
+        ConditionVariant(
+            key="cash_80",
+            label="手数料 0.10% / 投資 80% / 上限なし",
+            commission_pct=0.1,
+            max_investment_ratio=0.8,
+            max_weight=None,
+        ),
+    ]
+    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+
+    first_response = client.get("/api/condition-sweep")
+
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    assert first_payload["resultCount"] == 2
+    assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert first_payload["runStoreSummary"]["computedRunCount"] == 2
+    assert len(first_payload["conditionVariants"]) == 2
+    assert first_payload["results"][0]["conditionVariant"]["label"]
+
+    second_response = client.get("/api/condition-sweep")
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 2
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 0
+
+    config.condition_variants.append(
+        ConditionVariant(
+            key="cap_45",
+            label="手数料 0.10% / 投資 85% / 45%上限",
+            commission_pct=0.1,
+            max_investment_ratio=0.85,
+            max_weight=0.45,
+        )
+    )
+
+    third_response = client.get("/api/condition-sweep")
+
+    assert third_response.status_code == 200
+    third_payload = third_response.json()
+    assert third_payload["resultCount"] == 3
+    assert third_payload["runStoreSummary"]["cachedRunCount"] == 2
+    assert third_payload["runStoreSummary"]["computedRunCount"] == 1
 
 
 def test_market_backtest_endpoint(monkeypatch) -> None:

@@ -4,8 +4,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dashboard_config import DEFAULT_DASHBOARD_CONFIG
-from app.dashboard_service import build_dashboard_payload
-from app.market_data import SUPPORTED_PERIODS, fetch_market_prices, fetch_market_universe
+from app.dashboard_service import build_condition_sweep_payload, build_dashboard_payload
+from app.market_data import SUPPORTED_PERIODS, fetch_market_prices, fetch_market_universe, fetch_market_universe_bundle
 from app.strategy import (
     SUPPORTED_STRATEGIES,
     build_strategy_definition,
@@ -39,7 +39,18 @@ def dashboard() -> dict:
     try:
         return build_dashboard_payload(
             DEFAULT_DASHBOARD_CONFIG,
-            fetch_market_universe=fetch_market_universe,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/condition-sweep")
+def condition_sweep() -> dict:
+    try:
+        return build_condition_sweep_payload(
+            DEFAULT_DASHBOARD_CONFIG,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v1"
+RUN_STORE_LOGIC_VERSION = "v4"
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,7 @@ def build_run_cache_key(run_definition: dict) -> str:
 
 def build_run_definition(
     *,
+    run_kind: str,
     candidate: dict,
     dataset_spec: dict,
     execution_model: dict,
@@ -65,6 +66,7 @@ def build_run_definition(
 ) -> dict:
     return {
         "logicVersion": RUN_STORE_LOGIC_VERSION,
+        "runKind": run_kind,
         "candidate": candidate,
         "datasetSpec": {
             "tickers": dataset_spec["tickers"],

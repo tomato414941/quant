@@ -6,7 +6,13 @@ from app.portfolio import (
     build_portfolio_state,
     build_portfolio_strategy_definition,
 )
-from app.study_models import BacktestConfig, DatasetSpec, ExecutionModelConfig, StudyDefinition
+from app.study_models import (
+    BacktestConfig,
+    ConditionVariant,
+    DatasetSpec,
+    ExecutionModelConfig,
+    StudyDefinition,
+)
 
 
 FULL_UNIVERSE = build_portfolio_strategy_definition(
@@ -15,11 +21,70 @@ FULL_UNIVERSE = build_portfolio_strategy_definition(
     label="全資産",
     description="全ETFを候補にして配分する",
 )
+FULL_UNIVERSE_MOMENTUM_TILT = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt",
+    label="全資産モメンタム傾斜",
+    description="全ETFを候補に残しつつ、12ヶ月モメンタムで重みだけを傾ける",
+    score_parameters={"tilt_strength": 0.5},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak",
+    label="全資産モメンタム傾斜 弱",
+    description="全ETFを候補に残しつつ、弱めの12ヶ月モメンタム傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 0.0},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top",
+    label="全資産モメンタム傾斜 弱 上位優遇",
+    description="全ETFを候補に残しつつ、弱めの上位優遇モメンタム傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 1.0},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_softmax",
+    label="全資産モメンタム傾斜 弱 softmax",
+    description="全ETFを候補に残しつつ、弱めのsoftmax型モメンタム傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 2.0},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_STRONG = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_strong",
+    label="全資産モメンタム傾斜 強",
+    description="全ETFを候補に残しつつ、強めの12ヶ月モメンタム傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 1.0, "tilt_shape": 0.0},
+)
 MOMENTUM_TOP3 = build_portfolio_strategy_definition(
     strategy_type="momentum_top3",
     key="momentum_top3",
     label="モメンタム上位3",
     description="学習期間で強かった上位3ETFに絞って配分する",
+)
+DUAL_MOMENTUM_TOP3 = build_portfolio_strategy_definition(
+    strategy_type="dual_momentum_top3",
+    key="dual_momentum_top3",
+    label="デュアルモメンタム上位3",
+    description="上昇しているETFだけからモメンタム上位3を選び、弱い相場ではCASHへ逃がす",
+)
+POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE = build_portfolio_strategy_definition(
+    strategy_type="positive_momentum_low_vol_universe",
+    key="positive_momentum_low_vol_universe",
+    label="上昇低ボラ資産",
+    description="上昇しているETFのうち、低ボラ群だけを候補にして配分する",
+)
+TRAILING_MOMENTUM_LOW_VOL_UNIVERSE = build_portfolio_strategy_definition(
+    strategy_type="trailing_momentum_low_vol_universe",
+    key="trailing_momentum_low_vol_universe",
+    label="12ヶ月モメンタム低ボラ資産",
+    description="12ヶ月モメンタムが正のETFを候補にし、低ボラ群だけをHRPへ渡す",
+)
+POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE = build_portfolio_strategy_definition(
+    strategy_type="positive_momentum_high_volume_universe",
+    key="positive_momentum_high_volume_universe",
+    label="上昇出来高資産",
+    description="上昇しているETFのうち、出来高が強い群だけを候補にして配分する",
 )
 
 EQUAL_WEIGHT = build_portfolio_model_definition(
@@ -48,10 +113,41 @@ HIERARCHICAL_RISK_PARITY = build_portfolio_model_definition(
 )
 
 
+def build_condition_variants() -> list[ConditionVariant]:
+    variants: list[ConditionVariant] = []
+    commission_values = [0.05, 0.1, 0.2]
+    investment_values = [1.0, 0.9, 0.8]
+    max_weight_values = [None, 0.45, 0.35]
+
+    for commission_pct in commission_values:
+        for max_investment_ratio in investment_values:
+            for max_weight in max_weight_values:
+                cash_pct = round((1 - max_investment_ratio) * 100)
+                cap_label = "上限なし" if max_weight is None else f"{max_weight * 100:.0f}%上限"
+                cap_key = "no_cap" if max_weight is None else f"cap_{int(max_weight * 100)}"
+                variants.append(
+                    ConditionVariant(
+                        key=(
+                            f"fee_{str(commission_pct).replace('.', '_')}"
+                            f"__invest_{int(max_investment_ratio * 100)}"
+                            f"__{cap_key}"
+                        ),
+                        label=(
+                            f"手数料 {commission_pct:.2f}% / 投資 {int(max_investment_ratio * 100)}%"
+                            f" / CASH {cash_pct}% / {cap_label}"
+                        ),
+                        commission_pct=commission_pct,
+                        max_investment_ratio=max_investment_ratio,
+                        max_weight=max_weight,
+                    )
+                )
+    return variants
+
+
 DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
     study_id="etf_portfolio_models_10y",
     title="マルチアセット戦略 x ポートフォリオ構築の比較",
-    question="株式、債券、コモディティ、不動産、暗号資産を含むユニバースで、10y を主期間に戦略と配分法を比較する",
+    question="条件スイープで最良だった 年次 / 100%投資 / 45%上限 / 0.05%手数料 を固定し、10y を主期間に戦略と配分法を比較する",
     dataset_spec=DatasetSpec(
         tickers=[
             "SPY",
@@ -79,17 +175,22 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
         sanity_periods=["3y"],
         frequency="daily",
     ),
-    execution_model=ExecutionModelConfig(
-        entry="train_once_then_periodic_rebalance",
-        commission_pct=0.1,
-        slippage_pct=0.0,
-        rebalance_frequency="monthly",
-    ),
+    execution_variants=[
+        ExecutionModelConfig(
+            key="annual",
+            label="年次",
+            entry="train_once_then_periodic_rebalance",
+            commission_pct=0.05,
+            slippage_pct=0.0,
+            rebalance_frequency="annual",
+        ),
+    ],
     backtest_config=BacktestConfig(
         split_ratio=0.7,
         initial_capital=10_000,
-        max_investment_ratio=0.85,
+        max_investment_ratio=1.0,
         benchmark="equal_weight_buy_and_hold_with_cash",
+        max_weight=0.45,
     ),
     portfolio_state=build_portfolio_state(
         current_weights={
@@ -121,9 +222,28 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
         build_portfolio_candidate_definition(FULL_UNIVERSE, RISK_BUDGETING),
         build_portfolio_candidate_definition(FULL_UNIVERSE, MINIMUM_VARIANCE),
         build_portfolio_candidate_definition(FULL_UNIVERSE, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_STRONG, HIERARCHICAL_RISK_PARITY),
         build_portfolio_candidate_definition(MOMENTUM_TOP3, EQUAL_WEIGHT),
         build_portfolio_candidate_definition(MOMENTUM_TOP3, RISK_BUDGETING),
         build_portfolio_candidate_definition(MOMENTUM_TOP3, MINIMUM_VARIANCE),
         build_portfolio_candidate_definition(MOMENTUM_TOP3, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(DUAL_MOMENTUM_TOP3, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(
+            POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE,
+            HIERARCHICAL_RISK_PARITY,
+        ),
+        build_portfolio_candidate_definition(
+            TRAILING_MOMENTUM_LOW_VOL_UNIVERSE,
+            HIERARCHICAL_RISK_PARITY,
+        ),
+        build_portfolio_candidate_definition(
+            POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE,
+            HIERARCHICAL_RISK_PARITY,
+        ),
     ],
+    condition_variants=build_condition_variants(),
 )

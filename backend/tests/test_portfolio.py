@@ -1,6 +1,7 @@
 import pandas as pd
 
 from app.portfolio import (
+    build_portfolio_candidate_definition,
     build_portfolio_state,
     build_portfolio_model_definition,
     build_portfolio_strategy_definition,
@@ -37,15 +38,39 @@ def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
 
     payload = compare_portfolio_runs(
         closes=closes,
-        strategy_definitions=[
-            build_portfolio_strategy_definition("full_universe"),
-            build_portfolio_strategy_definition("momentum_top3"),
-        ],
-        model_definitions=[
-            build_portfolio_model_definition("equal_weight"),
-            build_portfolio_model_definition("risk_budgeting"),
-            build_portfolio_model_definition("minimum_variance"),
-            build_portfolio_model_definition("hierarchical_risk_parity"),
+        candidate_definitions=[
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("full_universe"),
+                build_portfolio_model_definition("equal_weight"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("full_universe"),
+                build_portfolio_model_definition("risk_budgeting"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("full_universe"),
+                build_portfolio_model_definition("minimum_variance"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("full_universe"),
+                build_portfolio_model_definition("hierarchical_risk_parity"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("momentum_top3"),
+                build_portfolio_model_definition("equal_weight"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("momentum_top3"),
+                build_portfolio_model_definition("risk_budgeting"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("momentum_top3"),
+                build_portfolio_model_definition("minimum_variance"),
+            ),
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("momentum_top3"),
+                build_portfolio_model_definition("hierarchical_risk_parity"),
+            ),
         ],
         initial_capital=10_000,
         split_ratio=0.6,

@@ -144,7 +144,7 @@ def test_healthcheck() -> None:
 def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
     config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
-    config["result_store_dir"] = str(tmp_path / "run_results")
+    config.result_store_dir = str(tmp_path / "run_results")
     monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
 
     response = client.get("/api/dashboard")
@@ -193,10 +193,9 @@ def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_pa
     monkeypatch.setattr("app.main.fetch_market_universe", fake_fetch_market_universe)
     base_config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
     config = copy.deepcopy(base_config)
-    config["result_store_dir"] = str(tmp_path / "run_results")
-    config["dataset_spec"]["sanity_periods"] = []
-    config["strategy_definitions"] = [config["strategy_definitions"][0]]
-    config["portfolio_models"] = [config["portfolio_models"][0]]
+    config.result_store_dir = str(tmp_path / "run_results")
+    config.dataset_spec.sanity_periods = []
+    config.candidate_definitions = [config.candidate_definitions[0]]
     monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
 
     first_response = client.get("/api/dashboard")
@@ -207,7 +206,7 @@ def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_pa
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 1
 
-    config["portfolio_models"].append(copy.deepcopy(base_config["portfolio_models"][1]))
+    config.candidate_definitions.append(copy.deepcopy(base_config.candidate_definitions[1]))
 
     second_response = client.get("/api/dashboard")
 

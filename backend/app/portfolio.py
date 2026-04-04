@@ -57,6 +57,13 @@ class PortfolioState:
     cash_weight: float = 0.0
 
 
+@dataclass(frozen=True)
+class PortfolioCandidateDefinition:
+    key: str
+    strategy_definition: PortfolioStrategyDefinition
+    model_definition: PortfolioModelDefinition
+
+
 def build_portfolio_strategy_definition(
     strategy_type: str,
     *,
@@ -124,14 +131,26 @@ def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrate
 
 
 def serialize_portfolio_candidate_definition(
-    strategy_definition: PortfolioStrategyDefinition,
-    model_definition: PortfolioModelDefinition,
+    candidate_definition: PortfolioCandidateDefinition,
 ) -> dict:
     return {
-        "key": f"{strategy_definition.key}__{model_definition.key}",
-        "strategy": serialize_portfolio_strategy_definition(strategy_definition),
-        "portfolioModel": serialize_portfolio_model_definition(model_definition),
+        "key": candidate_definition.key,
+        "strategy": serialize_portfolio_strategy_definition(candidate_definition.strategy_definition),
+        "portfolioModel": serialize_portfolio_model_definition(candidate_definition.model_definition),
     }
+
+
+def build_portfolio_candidate_definition(
+    strategy_definition: PortfolioStrategyDefinition,
+    model_definition: PortfolioModelDefinition,
+    *,
+    key: str | None = None,
+) -> PortfolioCandidateDefinition:
+    return PortfolioCandidateDefinition(
+        key=key or f"{strategy_definition.key}__{model_definition.key}",
+        strategy_definition=strategy_definition,
+        model_definition=model_definition,
+    )
 
 
 def build_portfolio_state(
@@ -168,8 +187,7 @@ def serialize_portfolio_state(portfolio_state: PortfolioState) -> dict:
 
 def compare_portfolio_runs(
     closes: pd.DataFrame,
-    strategy_definitions: list[PortfolioStrategyDefinition],
-    model_definitions: list[PortfolioModelDefinition],
+    candidate_definitions: list[PortfolioCandidateDefinition],
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
@@ -177,10 +195,8 @@ def compare_portfolio_runs(
     rebalance_frequency: str = "hold",
     portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
-    if not strategy_definitions:
-        raise ValueError("At least one portfolio strategy is required.")
-    if not model_definitions:
-        raise ValueError("At least one portfolio model is required.")
+    if not candidate_definitions:
+        raise ValueError("At least one portfolio candidate is required.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
     if transaction_cost < 0 or transaction_cost >= 1:
@@ -209,54 +225,54 @@ def compare_portfolio_runs(
     )
 
     runs: list[dict] = []
-    for strategy_definition in strategy_definitions:
-        for model_definition in model_definitions:
-            initial_selected_assets, initial_weights = compute_portfolio_allocation(
-                history_returns=train_returns,
-                strategy_definition=strategy_definition,
-                model_definition=model_definition,
-                universe_columns=returns.columns,
-                max_investment_ratio=max_investment_ratio,
-                previous_weights=initial_portfolio_weights,
-                transaction_cost=transaction_cost,
-            )
-            backtest = run_portfolio_backtest(
-                returns=returns,
-                split_index=split_index,
-                split_ratio=split_ratio,
-                strategy_definition=strategy_definition,
-                model_definition=model_definition,
-                initial_weights=initial_weights,
-                initial_selected_assets=initial_selected_assets,
-                max_investment_ratio=max_investment_ratio,
-                initial_capital=initial_capital,
-                benchmark_returns=benchmark_returns,
-                transaction_cost=transaction_cost,
-                rebalance_frequency=rebalance_frequency,
-                portfolio_state=portfolio_state,
-            )
+    for candidate_definition in candidate_definitions:
+        strategy_definition = candidate_definition.strategy_definition
+        model_definition = candidate_definition.model_definition
+        initial_selected_assets, initial_weights = compute_portfolio_allocation(
+            history_returns=train_returns,
+            strategy_definition=strategy_definition,
+            model_definition=model_definition,
+            universe_columns=returns.columns,
+            max_investment_ratio=max_investment_ratio,
+            previous_weights=initial_portfolio_weights,
+            transaction_cost=transaction_cost,
+        )
+        backtest = run_portfolio_backtest(
+            returns=returns,
+            split_index=split_index,
+            split_ratio=split_ratio,
+            strategy_definition=strategy_definition,
+            model_definition=model_definition,
+            initial_weights=initial_weights,
+            initial_selected_assets=initial_selected_assets,
+            max_investment_ratio=max_investment_ratio,
+            initial_capital=initial_capital,
+            benchmark_returns=benchmark_returns,
+            transaction_cost=transaction_cost,
+            rebalance_frequency=rebalance_frequency,
+            portfolio_state=portfolio_state,
+        )
 
-            runs.append(
-                {
-                    "key": f"{strategy_definition.key}__{model_definition.key}",
-                    "strategy": serialize_portfolio_strategy_definition(strategy_definition),
-                    "portfolioModel": serialize_portfolio_model_definition(model_definition),
-                    "weights": serialize_weights(returns.columns, backtest["latestWeights"], max_investment_ratio),
-                    "selectedAssets": backtest["latestSelectedAssets"],
-                    "summary": backtest["summary"]["portfolio"],
-                    "benchmark": backtest["summary"]["benchmark"],
-                    "splitAnalysis": backtest["splitAnalysis"],
-                    "series": backtest["series"],
-                }
-            )
+        runs.append(
+            {
+                "key": candidate_definition.key,
+                "strategy": serialize_portfolio_strategy_definition(strategy_definition),
+                "portfolioModel": serialize_portfolio_model_definition(model_definition),
+                "weights": serialize_weights(returns.columns, backtest["latestWeights"], max_investment_ratio),
+                "selectedAssets": backtest["latestSelectedAssets"],
+                "summary": backtest["summary"]["portfolio"],
+                "benchmark": backtest["summary"]["benchmark"],
+                "splitAnalysis": backtest["splitAnalysis"],
+                "series": backtest["series"],
+            }
+        )
 
     return runs
 
 
 def compare_portfolio_candidate(
     closes: pd.DataFrame,
-    strategy_definition: PortfolioStrategyDefinition,
-    model_definition: PortfolioModelDefinition,
+    candidate_definition: PortfolioCandidateDefinition,
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
@@ -266,8 +282,7 @@ def compare_portfolio_candidate(
 ) -> dict:
     return compare_portfolio_runs(
         closes=closes,
-        strategy_definitions=[strategy_definition],
-        model_definitions=[model_definition],
+        candidate_definitions=[candidate_definition],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         transaction_cost=transaction_cost,
@@ -289,8 +304,13 @@ def compare_portfolio_models(
 ) -> list[dict]:
     return compare_portfolio_runs(
         closes=closes,
-        strategy_definitions=[build_portfolio_strategy_definition("full_universe")],
-        model_definitions=model_definitions,
+        candidate_definitions=[
+            build_portfolio_candidate_definition(
+                build_portfolio_strategy_definition("full_universe"),
+                model_definition,
+            )
+            for model_definition in model_definitions
+        ],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         transaction_cost=transaction_cost,

@@ -1,18 +1,59 @@
 from __future__ import annotations
 
 from app.portfolio import (
-    build_portfolio_state,
+    build_portfolio_candidate_definition,
     build_portfolio_model_definition,
+    build_portfolio_state,
     build_portfolio_strategy_definition,
+)
+from app.study_models import BacktestConfig, DatasetSpec, ExecutionModelConfig, StudyDefinition
+
+
+FULL_UNIVERSE = build_portfolio_strategy_definition(
+    strategy_type="full_universe",
+    key="full_universe",
+    label="全資産",
+    description="全ETFを候補にして配分する",
+)
+MOMENTUM_TOP3 = build_portfolio_strategy_definition(
+    strategy_type="momentum_top3",
+    key="momentum_top3",
+    label="モメンタム上位3",
+    description="学習期間で強かった上位3ETFに絞って配分する",
+)
+
+EQUAL_WEIGHT = build_portfolio_model_definition(
+    model_type="equal_weight",
+    key="equal_weight",
+    label="等金額配分",
+    description="全ETFを同じ比率で持つ",
+)
+RISK_BUDGETING = build_portfolio_model_definition(
+    model_type="risk_budgeting",
+    key="risk_budgeting",
+    label="リスク予算配分",
+    description="各ETFのリスク寄与が近づくように配分する",
+)
+MINIMUM_VARIANCE = build_portfolio_model_definition(
+    model_type="minimum_variance",
+    key="minimum_variance",
+    label="最小分散",
+    description="全体の分散が最小になるように配分する",
+)
+HIERARCHICAL_RISK_PARITY = build_portfolio_model_definition(
+    model_type="hierarchical_risk_parity",
+    key="hierarchical_risk_parity",
+    label="HRP",
+    description="相関クラスタを使って階層的にリスクを分散する",
 )
 
 
-DEFAULT_DASHBOARD_CONFIG = {
-    "study_id": "etf_portfolio_models_10y",
-    "title": "マルチアセット戦略 x ポートフォリオ構築の比較",
-    "question": "株式、債券、コモディティ、不動産、暗号資産を含むユニバースで、10y を主期間に戦略と配分法を比較する",
-    "dataset_spec": {
-        "tickers": [
+DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
+    study_id="etf_portfolio_models_10y",
+    title="マルチアセット戦略 x ポートフォリオ構築の比較",
+    question="株式、債券、コモディティ、不動産、暗号資産を含むユニバースで、10y を主期間に戦略と配分法を比較する",
+    dataset_spec=DatasetSpec(
+        tickers=[
             "SPY",
             "QQQ",
             "IWM",
@@ -34,23 +75,23 @@ DEFAULT_DASHBOARD_CONFIG = {
             "BTC-USD",
             "ETH-USD",
         ],
-        "period": "10y",
-        "sanity_periods": ["3y"],
-        "frequency": "daily",
-    },
-    "execution_model": {
-        "entry": "train_once_then_periodic_rebalance",
-        "commission_pct": 0.1,
-        "slippage_pct": 0.0,
-        "rebalance_frequency": "monthly",
-    },
-    "backtest_config": {
-        "split_ratio": 0.7,
-        "initial_capital": 10_000,
-        "max_investment_ratio": 0.85,
-        "benchmark": "equal_weight_buy_and_hold_with_cash",
-    },
-    "portfolio_state": build_portfolio_state(
+        period="10y",
+        sanity_periods=["3y"],
+        frequency="daily",
+    ),
+    execution_model=ExecutionModelConfig(
+        entry="train_once_then_periodic_rebalance",
+        commission_pct=0.1,
+        slippage_pct=0.0,
+        rebalance_frequency="monthly",
+    ),
+    backtest_config=BacktestConfig(
+        split_ratio=0.7,
+        initial_capital=10_000,
+        max_investment_ratio=0.85,
+        benchmark="equal_weight_buy_and_hold_with_cash",
+    ),
+    portfolio_state=build_portfolio_state(
         current_weights={
             "SPY": 0.0425,
             "QQQ": 0.0425,
@@ -75,44 +116,14 @@ DEFAULT_DASHBOARD_CONFIG = {
         },
         cash_weight=0.15,
     ),
-    "strategy_definitions": [
-        build_portfolio_strategy_definition(
-            strategy_type="full_universe",
-            key="full_universe",
-            label="全資産",
-            description="全ETFを候補にして配分する",
-        ),
-        build_portfolio_strategy_definition(
-            strategy_type="momentum_top3",
-            key="momentum_top3",
-            label="モメンタム上位3",
-            description="学習期間で強かった上位3ETFに絞って配分する",
-        ),
+    candidate_definitions=[
+        build_portfolio_candidate_definition(FULL_UNIVERSE, EQUAL_WEIGHT),
+        build_portfolio_candidate_definition(FULL_UNIVERSE, RISK_BUDGETING),
+        build_portfolio_candidate_definition(FULL_UNIVERSE, MINIMUM_VARIANCE),
+        build_portfolio_candidate_definition(FULL_UNIVERSE, HIERARCHICAL_RISK_PARITY),
+        build_portfolio_candidate_definition(MOMENTUM_TOP3, EQUAL_WEIGHT),
+        build_portfolio_candidate_definition(MOMENTUM_TOP3, RISK_BUDGETING),
+        build_portfolio_candidate_definition(MOMENTUM_TOP3, MINIMUM_VARIANCE),
+        build_portfolio_candidate_definition(MOMENTUM_TOP3, HIERARCHICAL_RISK_PARITY),
     ],
-    "portfolio_models": [
-        build_portfolio_model_definition(
-            model_type="equal_weight",
-            key="equal_weight",
-            label="等金額配分",
-            description="全ETFを同じ比率で持つ",
-        ),
-        build_portfolio_model_definition(
-            model_type="risk_budgeting",
-            key="risk_budgeting",
-            label="リスク予算配分",
-            description="各ETFのリスク寄与が近づくように配分する",
-        ),
-        build_portfolio_model_definition(
-            model_type="minimum_variance",
-            key="minimum_variance",
-            label="最小分散",
-            description="全体の分散が最小になるように配分する",
-        ),
-        build_portfolio_model_definition(
-            model_type="hierarchical_risk_parity",
-            key="hierarchical_risk_parity",
-            label="HRP",
-            description="相関クラスタを使って階層的にリスクを分散する",
-        ),
-    ],
-}
+)

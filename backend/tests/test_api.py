@@ -155,6 +155,8 @@ def test_dashboard_endpoint(monkeypatch) -> None:
     assert payload["study"]["executionModel"]["commissionPct"] == 0.1
     assert payload["study"]["executionModel"]["rebalanceFrequency"] == "monthly"
     assert payload["study"]["backtestConfig"]["maxInvestmentPct"] == 85.0
+    assert payload["study"]["portfolioState"]["weights"][0]["asset"] == "CASH"
+    assert payload["study"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
     assert len(payload["study"]["strategyDefinitions"]) == 2
     assert len(payload["study"]["datasetSpec"]["tickers"]) == 20
     assert len(payload["study"]["portfolioModels"]) == 4

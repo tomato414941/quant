@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.portfolio import (
+    build_portfolio_state,
     build_portfolio_model_definition,
     build_portfolio_strategy_definition,
 )
@@ -49,6 +50,31 @@ DEFAULT_DASHBOARD_CONFIG = {
         "max_investment_ratio": 0.85,
         "benchmark": "equal_weight_buy_and_hold_with_cash",
     },
+    "portfolio_state": build_portfolio_state(
+        current_weights={
+            "SPY": 0.0425,
+            "QQQ": 0.0425,
+            "IWM": 0.0425,
+            "EFA": 0.0425,
+            "EEM": 0.0425,
+            "EWJ": 0.0425,
+            "EWZ": 0.0425,
+            "VNQ": 0.0425,
+            "TLT": 0.0425,
+            "IEF": 0.0425,
+            "LQD": 0.0425,
+            "HYG": 0.0425,
+            "TIP": 0.0425,
+            "GLD": 0.0425,
+            "SLV": 0.0425,
+            "DBC": 0.0425,
+            "USO": 0.0425,
+            "UUP": 0.0425,
+            "BTC-USD": 0.0425,
+            "ETH-USD": 0.0425,
+        },
+        cash_weight=0.15,
+    ),
     "strategy_definitions": [
         build_portfolio_strategy_definition(
             strategy_type="full_universe",

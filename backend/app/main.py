@@ -8,6 +8,7 @@ from app.market_data import SUPPORTED_PERIODS, fetch_market_prices, fetch_market
 from app.portfolio import (
     compare_portfolio_runs,
     serialize_portfolio_model_definition,
+    serialize_portfolio_state,
     serialize_portfolio_strategy_definition,
 )
 from app.strategy import (
@@ -301,6 +302,7 @@ def serialize_study(config: dict, dataset_metadata: dict[str, str]) -> dict:
             "maxInvestmentPct": round(config["backtest_config"]["max_investment_ratio"] * 100, 1),
             "benchmark": config["backtest_config"]["benchmark"],
         },
+        "portfolioState": serialize_portfolio_state(config["portfolio_state"]),
         "portfolioModels": [
             serialize_portfolio_model_definition(model_definition)
             for model_definition in config["portfolio_models"]
@@ -322,6 +324,7 @@ def build_portfolio_runs(config: dict, closes) -> list[dict]:
         transaction_cost=config["execution_model"]["commission_pct"] / 100,
         max_investment_ratio=config["backtest_config"]["max_investment_ratio"],
         rebalance_frequency=config["execution_model"].get("rebalance_frequency", "hold"),
+        portfolio_state=config.get("portfolio_state"),
     )
 
 

@@ -1,6 +1,7 @@
 import pandas as pd
 
 from app.portfolio import (
+    build_portfolio_state,
     build_portfolio_model_definition,
     build_portfolio_strategy_definition,
     compare_portfolio_runs,
@@ -51,6 +52,19 @@ def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
         transaction_cost=0.001,
         max_investment_ratio=0.8,
         rebalance_frequency="monthly",
+        portfolio_state=build_portfolio_state(
+            current_weights={
+                "SPY": 0.1,
+                "QQQ": 0.1,
+                "IWM": 0.1,
+                "EFA": 0.1,
+                "EEM": 0.1,
+                "TLT": 0.1,
+                "IEF": 0.1,
+                "LQD": 0.1,
+            },
+            cash_weight=0.2,
+        ),
     )
 
     assert [row["key"] for row in payload] == [

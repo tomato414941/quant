@@ -97,6 +97,12 @@ type StudyResult = {
     maxInvestmentPct: number
     benchmark: string
   }
+  portfolioState: {
+    weights: Array<{
+      asset: string
+      weightPct: number
+    }>
+  }
   strategyDefinitions: PortfolioStrategyDefinition[]
   portfolioModels: PortfolioModelDefinition[]
 }
@@ -147,6 +153,11 @@ function formatWeights(weights: PortfolioRun['weights']): string {
   const assetRows = positiveWeights.filter((row) => row.asset !== 'CASH').slice(0, 3)
   const rows = cashRow ? [...assetRows, cashRow] : assetRows
   return rows.map((row) => `${row.asset} ${row.weightPct.toFixed(1)}%`).join(' / ')
+}
+
+function formatPortfolioStateWeights(weights: StudyResult['portfolioState']['weights']): string {
+  const topRows = weights.filter((row) => row.weightPct > 0).slice(0, 5)
+  return topRows.map((row) => `${row.asset} ${row.weightPct.toFixed(1)}%`).join(' / ')
 }
 
 function formatRunLabel(run: PortfolioRun): string {
@@ -261,6 +272,12 @@ function App() {
                       <span className="metric-label">配分法数</span>
                       <strong className="metric-value metric-value-text">
                         {dashboard.study.portfolioModels.length}
+                      </strong>
+                    </div>
+                    <div className="metric">
+                      <span className="metric-label">現在ポートフォリオ</span>
+                      <strong className="metric-value metric-value-text">
+                        {formatPortfolioStateWeights(dashboard.study.portfolioState.weights)}
                       </strong>
                     </div>
                   </div>

@@ -51,6 +51,12 @@ class PortfolioModelDefinition:
     description: str
 
 
+@dataclass(frozen=True)
+class PortfolioState:
+    current_weights: dict[str, float]
+    cash_weight: float = 0.0
+
+
 def build_portfolio_strategy_definition(
     strategy_type: str,
     *,
@@ -117,6 +123,38 @@ def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrate
     }
 
 
+def build_portfolio_state(
+    *,
+    current_weights: dict[str, float],
+    cash_weight: float = 0.0,
+) -> PortfolioState:
+    normalized_weights = {
+        asset.strip().upper(): float(weight)
+        for asset, weight in current_weights.items()
+        if asset.strip()
+    }
+    if cash_weight < 0 or cash_weight > 1:
+        raise ValueError("Cash weight must be between 0 and 1.")
+    if any(weight < 0 for weight in normalized_weights.values()):
+        raise ValueError("Current weights must be non-negative.")
+    total_weight = sum(normalized_weights.values()) + cash_weight
+    if total_weight > 1.000001:
+        raise ValueError("Portfolio state weights must sum to 1 or less.")
+    return PortfolioState(current_weights=normalized_weights, cash_weight=float(cash_weight))
+
+
+def serialize_portfolio_state(portfolio_state: PortfolioState) -> dict:
+    rows = [
+        {"asset": asset, "weightPct": round(weight * 100, 2)}
+        for asset, weight in portfolio_state.current_weights.items()
+        if weight > 0
+    ]
+    if portfolio_state.cash_weight > 0:
+        rows.append({"asset": "CASH", "weightPct": round(portfolio_state.cash_weight * 100, 2)})
+    rows.sort(key=lambda item: item["weightPct"], reverse=True)
+    return {"weights": rows}
+
+
 def compare_portfolio_runs(
     closes: pd.DataFrame,
     strategy_definitions: list[PortfolioStrategyDefinition],
@@ -126,6 +164,7 @@ def compare_portfolio_runs(
     transaction_cost: float,
     max_investment_ratio: float = 1.0,
     rebalance_frequency: str = "hold",
+    portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
     if not strategy_definitions:
         raise ValueError("At least one portfolio strategy is required.")
@@ -153,6 +192,10 @@ def compare_portfolio_runs(
         index=returns.index,
         dtype="float64",
     )
+    initial_portfolio_weights = resolve_initial_weights(
+        universe_columns=returns.columns,
+        portfolio_state=portfolio_state,
+    )
 
     runs: list[dict] = []
     for strategy_definition in strategy_definitions:
@@ -163,6 +206,8 @@ def compare_portfolio_runs(
                 model_definition=model_definition,
                 universe_columns=returns.columns,
                 max_investment_ratio=max_investment_ratio,
+                previous_weights=initial_portfolio_weights,
+                transaction_cost=transaction_cost,
             )
             backtest = run_portfolio_backtest(
                 returns=returns,
@@ -177,6 +222,7 @@ def compare_portfolio_runs(
                 benchmark_returns=benchmark_returns,
                 transaction_cost=transaction_cost,
                 rebalance_frequency=rebalance_frequency,
+                portfolio_state=portfolio_state,
             )
 
             runs.append(
@@ -204,6 +250,7 @@ def compare_portfolio_models(
     transaction_cost: float,
     max_investment_ratio: float = 1.0,
     rebalance_frequency: str = "hold",
+    portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
     return compare_portfolio_runs(
         closes=closes,
@@ -214,6 +261,7 @@ def compare_portfolio_models(
         transaction_cost=transaction_cost,
         max_investment_ratio=max_investment_ratio,
         rebalance_frequency=rebalance_frequency,
+        portfolio_state=portfolio_state,
     )
 
 
@@ -245,11 +293,28 @@ def compute_portfolio_allocation(
     model_definition: PortfolioModelDefinition,
     universe_columns: pd.Index,
     max_investment_ratio: float,
+    previous_weights: np.ndarray | None,
+    transaction_cost: float,
 ) -> tuple[list[str], np.ndarray]:
     selected_assets = select_assets(history_returns, strategy_definition)
     strategy_returns = filter_positive_variance_assets(history_returns[selected_assets])
     selected_assets = list(strategy_returns.columns)
-    weights = fit_portfolio_model(strategy_returns, model_definition) * max_investment_ratio
+    selected_previous_weights = None
+    if previous_weights is not None:
+        previous_weight_map = {
+            str(asset): float(weight)
+            for asset, weight in zip(universe_columns, previous_weights, strict=True)
+        }
+        selected_previous_weights = np.asarray(
+            [previous_weight_map.get(asset, 0.0) for asset in selected_assets],
+            dtype="float64",
+        )
+    weights = fit_portfolio_model(
+        strategy_returns,
+        model_definition,
+        previous_weights=selected_previous_weights,
+        transaction_cost=transaction_cost,
+    ) * max_investment_ratio
     expanded_weights = expand_weights(
         universe_columns=universe_columns,
         selected_columns=strategy_returns.columns,
@@ -269,6 +334,9 @@ def filter_positive_variance_assets(returns: pd.DataFrame) -> pd.DataFrame:
 def fit_portfolio_model(
     returns: pd.DataFrame,
     model_definition: PortfolioModelDefinition,
+    *,
+    previous_weights: np.ndarray | None,
+    transaction_cost: float,
 ) -> np.ndarray:
     asset_count = len(returns.columns)
     if asset_count == 0:
@@ -277,15 +345,24 @@ def fit_portfolio_model(
     if model_definition.model_type == "equal_weight":
         weights = np.repeat(1 / asset_count, asset_count)
     elif model_definition.model_type == "risk_budgeting":
-        estimator = RiskBudgeting()
+        estimator = RiskBudgeting(
+            transaction_costs=transaction_cost,
+            previous_weights=previous_weights,
+        )
         estimator.fit(returns)
         weights = estimator.weights_
     elif model_definition.model_type == "minimum_variance":
-        estimator = MeanRisk()
+        estimator = MeanRisk(
+            transaction_costs=transaction_cost,
+            previous_weights=previous_weights,
+        )
         estimator.fit(returns)
         weights = estimator.weights_
     elif model_definition.model_type == "hierarchical_risk_parity":
-        estimator = HierarchicalRiskParity()
+        estimator = HierarchicalRiskParity(
+            transaction_costs=transaction_cost,
+            previous_weights=previous_weights,
+        )
         estimator.fit(returns)
         weights = estimator.weights_
     else:
@@ -311,6 +388,7 @@ def run_portfolio_backtest(
     benchmark_returns: pd.Series,
     transaction_cost: float,
     rebalance_frequency: str,
+    portfolio_state: PortfolioState | None,
 ) -> dict:
     portfolio_equity = initial_capital
     benchmark_equity = initial_capital
@@ -345,6 +423,8 @@ def run_portfolio_backtest(
                 model_definition=model_definition,
                 universe_columns=returns.columns,
                 max_investment_ratio=max_investment_ratio,
+                previous_weights=current_weights,
+                transaction_cost=transaction_cost,
             )
             trade_turnover = float(np.abs(rebalanced_weights - current_weights).sum())
             current_weights = rebalanced_weights
@@ -518,3 +598,16 @@ def should_rebalance(previous_date, current_date, rebalance_frequency: str) -> b
     if rebalance_frequency == "annual":
         return previous_timestamp.year != current_timestamp.year
     raise ValueError("Unsupported rebalance frequency.")
+
+
+def resolve_initial_weights(
+    *,
+    universe_columns: pd.Index,
+    portfolio_state: PortfolioState | None,
+) -> np.ndarray:
+    if portfolio_state is None:
+        return np.zeros(len(universe_columns), dtype="float64")
+    return np.asarray(
+        [portfolio_state.current_weights.get(str(asset), 0.0) for asset in universe_columns],
+        dtype="float64",
+    )

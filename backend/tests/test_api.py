@@ -171,25 +171,21 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
     assert payload["study"]["datasetSpec"]["alignedEndDate"] == "2025-01-07"
     assert payload["study"]["datasetSpec"]["rowCount"] == 7
-    assert len(payload["study"]["executionVariants"]) == 1
-    assert payload["study"]["executionVariants"][0]["commissionPct"] == 0.05
-    assert payload["study"]["executionVariants"][0]["rebalanceFrequency"] == "annual"
-    assert payload["study"]["backtestConfig"]["maxInvestmentPct"] == 100.0
-    assert payload["study"]["backtestConfig"]["maxWeightPct"] == 45.0
+    assert payload["study"]["evaluationAssumptions"]["costAssumptions"]["commissionPct"] == 0.05
+    assert payload["study"]["evaluationAssumptions"]["splitRatioPct"] == 70.0
     assert payload["study"]["portfolioState"]["weights"][0]["asset"] == "CASH"
     assert payload["study"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
-    assert len(payload["study"]["strategyDefinitions"]) == 14
-    assert payload["study"]["strategyDefinitions"][0]["universePolicy"]["label"]
-    assert payload["study"]["strategyDefinitions"][0]["scoreModel"]["label"]
-    assert "filterRules" in payload["study"]["strategyDefinitions"][0]
-    assert payload["study"]["strategyDefinitions"][0]["fallbackRule"]["label"]
+    assert len(payload["study"]["strategyDefinitions"]) == 22
+    assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["universePolicy"]["label"]
+    assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["scoreModel"]["label"]
+    assert "filterRules" in payload["study"]["strategyDefinitions"][0]["selectionDefinition"]
+    assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["fallbackRule"]["label"]
     assert len(payload["study"]["datasetSpec"]["tickers"]) == 20
-    assert len(payload["study"]["portfolioModels"]) == 6
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
-    assert payload["runs"][0]["strategy"]["label"] == "全資産"
-    assert payload["runs"][0]["portfolioModel"]["label"] == "等金額配分"
+    assert payload["runs"][0]["strategy"]["selectionDefinition"]["label"] == "全資産"
+    assert payload["runs"][0]["strategy"]["portfolioModel"]["label"] == "等金額配分"
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
-    assert payload["runs"][0]["executionModel"]["label"] == "年次"
+    assert payload["runs"][0]["strategy"]["executionPolicy"]["label"] == "年次"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == 44
     assert len(payload["sanityChecks"]) == 1
@@ -215,8 +211,7 @@ def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_pa
     config = copy.deepcopy(base_config)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
-    config.execution_variants = [config.execution_variants[0]]
-    config.candidate_definitions = [config.candidate_definitions[0]]
+    config.strategy_definitions = [config.strategy_definitions[0]]
     monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
 
     first_response = client.get("/api/dashboard")
@@ -227,7 +222,7 @@ def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_pa
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 1
 
-    config.candidate_definitions.append(copy.deepcopy(base_config.candidate_definitions[1]))
+    config.strategy_definitions.append(copy.deepcopy(base_config.strategy_definitions[1]))
 
     second_response = client.get("/api/dashboard")
 
@@ -243,8 +238,7 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
-    config.execution_variants = [config.execution_variants[0]]
-    config.candidate_definitions = [config.candidate_definitions[0]]
+    config.strategy_definitions = [config.strategy_definitions[0]]
     config.condition_variants = [
         ConditionVariant(
             key="baseline",
@@ -318,6 +312,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["recordCount"] == 5
     assert payload["records"][0]["strategyLabel"]
     assert payload["records"][0]["portfolioModelLabel"]
+    assert payload["records"][0]["commissionPct"] is not None
     assert payload["records"][0]["sharpeRatio"] is not None
     assert payload["records"][0]["generationMethod"] is None
 

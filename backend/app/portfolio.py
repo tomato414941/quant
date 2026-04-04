@@ -129,16 +129,34 @@ class PortfolioModelDefinition:
 
 
 @dataclass(frozen=True)
-class PortfolioState:
-    current_weights: dict[str, float]
-    cash_weight: float = 0.0
+class ExecutionPolicyDefinition:
+    key: str
+    label: str
+    entry: str
+    rebalance_frequency: str = "hold"
 
 
 @dataclass(frozen=True)
-class PortfolioCandidateDefinition:
+class RiskControlsDefinition:
+    max_investment_ratio: float
+    max_weight: float | None = None
+
+
+@dataclass(frozen=True)
+class StrategyDefinition:
     key: str
-    strategy_definition: PortfolioStrategyDefinition
-    model_definition: PortfolioModelDefinition
+    label: str
+    description: str
+    selection_definition: PortfolioStrategyDefinition
+    portfolio_model_definition: PortfolioModelDefinition
+    execution_policy_definition: ExecutionPolicyDefinition
+    risk_controls_definition: RiskControlsDefinition
+
+
+@dataclass(frozen=True)
+class PortfolioState:
+    current_weights: dict[str, float]
+    cash_weight: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -370,6 +388,73 @@ def serialize_portfolio_model_definition(model_definition: PortfolioModelDefinit
     }
 
 
+def build_execution_policy_definition(
+    *,
+    key: str,
+    label: str,
+    entry: str,
+    rebalance_frequency: str = "hold",
+) -> ExecutionPolicyDefinition:
+    if rebalance_frequency not in SUPPORTED_REBALANCE_FREQUENCIES:
+        raise ValueError("Unsupported rebalance frequency.")
+    return ExecutionPolicyDefinition(
+        key=key,
+        label=label,
+        entry=entry,
+        rebalance_frequency=rebalance_frequency,
+    )
+
+
+def build_risk_controls_definition(
+    *,
+    max_investment_ratio: float,
+    max_weight: float | None = None,
+) -> RiskControlsDefinition:
+    if max_investment_ratio <= 0 or max_investment_ratio > 1:
+        raise ValueError("Max investment ratio must be between 0 and 1.")
+    if max_weight is not None and (max_weight <= 0 or max_weight > 1):
+        raise ValueError("Max weight must be between 0 and 1.")
+    return RiskControlsDefinition(
+        max_investment_ratio=max_investment_ratio,
+        max_weight=max_weight,
+    )
+
+
+def build_strategy_definition(
+    *,
+    selection_definition: PortfolioStrategyDefinition,
+    portfolio_model_definition: PortfolioModelDefinition,
+    execution_policy_definition: ExecutionPolicyDefinition,
+    risk_controls_definition: RiskControlsDefinition,
+    key: str | None = None,
+    label: str | None = None,
+    description: str | None = None,
+) -> StrategyDefinition:
+    strategy_key = key or "__".join(
+        [
+            selection_definition.key,
+            portfolio_model_definition.key,
+            execution_policy_definition.key,
+        ]
+    )
+    strategy_label = label or " × ".join(
+        [
+            selection_definition.label,
+            portfolio_model_definition.label,
+            execution_policy_definition.label,
+        ]
+    )
+    return StrategyDefinition(
+        key=strategy_key,
+        label=strategy_label,
+        description=description or selection_definition.description,
+        selection_definition=selection_definition,
+        portfolio_model_definition=portfolio_model_definition,
+        execution_policy_definition=execution_policy_definition,
+        risk_controls_definition=risk_controls_definition,
+    )
+
+
 def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrategyDefinition) -> dict:
     return {
         "key": strategy_definition.key,
@@ -402,13 +487,41 @@ def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrate
     }
 
 
-def serialize_portfolio_candidate_definition(
-    candidate_definition: PortfolioCandidateDefinition,
-) -> dict:
+def serialize_execution_policy_definition(execution_policy_definition: ExecutionPolicyDefinition) -> dict:
     return {
-        "key": candidate_definition.key,
-        "strategy": serialize_portfolio_strategy_definition(candidate_definition.strategy_definition),
-        "portfolioModel": serialize_portfolio_model_definition(candidate_definition.model_definition),
+        "key": execution_policy_definition.key,
+        "label": execution_policy_definition.label,
+        "entry": execution_policy_definition.entry,
+        "rebalanceFrequency": execution_policy_definition.rebalance_frequency,
+    }
+
+
+def serialize_risk_controls_definition(risk_controls_definition: RiskControlsDefinition) -> dict:
+    return {
+        "maxInvestmentPct": round(risk_controls_definition.max_investment_ratio * 100, 1),
+        "maxWeightPct": round(risk_controls_definition.max_weight * 100, 1)
+        if risk_controls_definition.max_weight is not None
+        else None,
+    }
+
+
+def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
+    return {
+        "key": strategy_definition.key,
+        "label": strategy_definition.label,
+        "description": strategy_definition.description,
+        "selectionDefinition": serialize_portfolio_strategy_definition(
+            strategy_definition.selection_definition
+        ),
+        "portfolioModel": serialize_portfolio_model_definition(
+            strategy_definition.portfolio_model_definition
+        ),
+        "executionPolicy": serialize_execution_policy_definition(
+            strategy_definition.execution_policy_definition
+        ),
+        "riskControls": serialize_risk_controls_definition(
+            strategy_definition.risk_controls_definition
+        ),
     }
 
 
@@ -447,15 +560,15 @@ def serialize_asset_ranking_definition(
 
 
 def build_asset_ranking_definitions(
-    candidate_definitions: list[PortfolioCandidateDefinition],
+    strategy_definitions: list[StrategyDefinition],
 ) -> list[AssetRankingDefinition]:
     grouped: dict[
         tuple[str, str, tuple[str, ...], tuple[str, ...], str, tuple[tuple[str, float], ...]],
         list[PortfolioStrategyDefinition],
     ] = {}
 
-    for candidate_definition in candidate_definitions:
-        strategy_definition = candidate_definition.strategy_definition
+    for strategy in strategy_definitions:
+        strategy_definition = strategy.selection_definition
         if strategy_definition.score_model.key == "none":
             continue
         signature = (
@@ -516,19 +629,6 @@ def extract_ranking_score_parameters(
     return {}
 
 
-def build_portfolio_candidate_definition(
-    strategy_definition: PortfolioStrategyDefinition,
-    model_definition: PortfolioModelDefinition,
-    *,
-    key: str | None = None,
-) -> PortfolioCandidateDefinition:
-    return PortfolioCandidateDefinition(
-        key=key or f"{strategy_definition.key}__{model_definition.key}",
-        strategy_definition=strategy_definition,
-        model_definition=model_definition,
-    )
-
-
 def build_portfolio_state(
     *,
     current_weights: dict[str, float],
@@ -564,27 +664,18 @@ def serialize_portfolio_state(portfolio_state: PortfolioState) -> dict:
 def compare_portfolio_runs(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    candidate_definitions: list[PortfolioCandidateDefinition],
+    strategy_definitions: list[StrategyDefinition],
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
-    max_investment_ratio: float = 1.0,
-    max_weight: float | None = None,
-    rebalance_frequency: str = "hold",
     portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
-    if not candidate_definitions:
-        raise ValueError("At least one portfolio candidate is required.")
+    if not strategy_definitions:
+        raise ValueError("At least one strategy is required.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
     if transaction_cost < 0 or transaction_cost >= 1:
         raise ValueError("Transaction cost must be between 0 and 1.")
-    if max_investment_ratio <= 0 or max_investment_ratio > 1:
-        raise ValueError("Max investment ratio must be between 0 and 1.")
-    if max_weight is not None and (max_weight <= 0 or max_weight > 1):
-        raise ValueError("Max weight must be between 0 and 1.")
-    if rebalance_frequency not in SUPPORTED_REBALANCE_FREQUENCIES:
-        raise ValueError("Unsupported rebalance frequency.")
 
     returns = closes.pct_change().dropna()
     if len(returns) < 6:
@@ -593,7 +684,7 @@ def compare_portfolio_runs(
     split_index = compute_split_index(len(returns), split_ratio)
     train_returns = returns.iloc[:split_index]
     test_returns = returns.iloc[split_index:]
-    benchmark_weights = np.repeat(max_investment_ratio / len(returns.columns), len(returns.columns))
+    benchmark_weights = np.repeat(1.0 / len(returns.columns), len(returns.columns))
     benchmark_returns = pd.Series(
         returns.to_numpy(dtype="float64") @ benchmark_weights,
         index=returns.index,
@@ -605,17 +696,19 @@ def compare_portfolio_runs(
     )
 
     runs: list[dict] = []
-    for candidate_definition in candidate_definitions:
-        strategy_definition = candidate_definition.strategy_definition
-        model_definition = candidate_definition.model_definition
+    for strategy_definition in strategy_definitions:
+        selection_definition = strategy_definition.selection_definition
+        model_definition = strategy_definition.portfolio_model_definition
+        execution_policy = strategy_definition.execution_policy_definition
+        risk_controls = strategy_definition.risk_controls_definition
         initial_selected_assets, initial_weights = compute_portfolio_allocation(
             history_returns=train_returns,
             volume_history=volumes.loc[train_returns.index] if volumes is not None else None,
-            strategy_definition=strategy_definition,
+            strategy_definition=selection_definition,
             model_definition=model_definition,
             universe_columns=returns.columns,
-            max_investment_ratio=max_investment_ratio,
-            max_weight=max_weight,
+            max_investment_ratio=risk_controls.max_investment_ratio,
+            max_weight=risk_controls.max_weight,
             previous_weights=initial_portfolio_weights,
             transaction_cost=transaction_cost,
         )
@@ -624,25 +717,28 @@ def compare_portfolio_runs(
             volumes=volumes,
             split_index=split_index,
             split_ratio=split_ratio,
-            strategy_definition=strategy_definition,
+            strategy_definition=selection_definition,
             model_definition=model_definition,
             initial_weights=initial_weights,
             initial_selected_assets=initial_selected_assets,
-            max_investment_ratio=max_investment_ratio,
+            max_investment_ratio=risk_controls.max_investment_ratio,
             initial_capital=initial_capital,
             benchmark_returns=benchmark_returns,
             transaction_cost=transaction_cost,
-            max_weight=max_weight,
-            rebalance_frequency=rebalance_frequency,
+            max_weight=risk_controls.max_weight,
+            rebalance_frequency=execution_policy.rebalance_frequency,
             portfolio_state=portfolio_state,
         )
 
         runs.append(
             {
-                "key": candidate_definition.key,
-                "strategy": serialize_portfolio_strategy_definition(strategy_definition),
-                "portfolioModel": serialize_portfolio_model_definition(model_definition),
-                "weights": serialize_weights(returns.columns, backtest["latestWeights"], max_investment_ratio),
+                "key": strategy_definition.key,
+                "strategy": serialize_strategy_definition(strategy_definition),
+                "weights": serialize_weights(
+                    returns.columns,
+                    backtest["latestWeights"],
+                    risk_controls.max_investment_ratio,
+                ),
                 "selectedAssets": backtest["latestSelectedAssets"],
                 "summary": backtest["summary"]["portfolio"],
                 "benchmark": backtest["summary"]["benchmark"],
@@ -657,25 +753,19 @@ def compare_portfolio_runs(
 def compare_portfolio_candidate(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    candidate_definition: PortfolioCandidateDefinition,
+    strategy_definition: StrategyDefinition,
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
-    max_investment_ratio: float = 1.0,
-    max_weight: float | None = None,
-    rebalance_frequency: str = "hold",
     portfolio_state: PortfolioState | None = None,
 ) -> dict:
     return compare_portfolio_runs(
         closes=closes,
         volumes=volumes,
-        candidate_definitions=[candidate_definition],
+        strategy_definitions=[strategy_definition],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         transaction_cost=transaction_cost,
-        max_investment_ratio=max_investment_ratio,
-        max_weight=max_weight,
-        rebalance_frequency=rebalance_frequency,
         portfolio_state=portfolio_state,
     )[0]
 
@@ -687,27 +777,31 @@ def compare_portfolio_models(
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
-    max_investment_ratio: float = 1.0,
-    max_weight: float | None = None,
-    rebalance_frequency: str = "hold",
     portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
     return compare_portfolio_runs(
         closes=closes,
         volumes=volumes,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                model_definition,
+        strategy_definitions=[
+            build_strategy_definition(
+                selection_definition=build_portfolio_strategy_definition("full_universe"),
+                portfolio_model_definition=model_definition,
+                execution_policy_definition=build_execution_policy_definition(
+                    key="hold",
+                    label="保有",
+                    entry="hold",
+                    rebalance_frequency="hold",
+                ),
+                risk_controls_definition=build_risk_controls_definition(
+                    max_investment_ratio=1.0,
+                    max_weight=None,
+                ),
             )
             for model_definition in model_definitions
         ],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         transaction_cost=transaction_cost,
-        max_investment_ratio=max_investment_ratio,
-        max_weight=max_weight,
-        rebalance_frequency=rebalance_frequency,
         portfolio_state=portfolio_state,
     )
 

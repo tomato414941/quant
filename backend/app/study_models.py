@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.portfolio import PortfolioCandidateDefinition, PortfolioState
+from app.portfolio import PortfolioState, StrategyDefinition
 
 
 @dataclass
@@ -14,22 +14,17 @@ class DatasetSpec:
 
 
 @dataclass
-class ExecutionModelConfig:
-    key: str
-    label: str
-    entry: str
+class CostAssumptions:
     commission_pct: float
-    slippage_pct: float
-    rebalance_frequency: str = "hold"
+    slippage_pct: float = 0.0
 
 
 @dataclass
-class BacktestConfig:
+class EvaluationAssumptions:
     split_ratio: float
     initial_capital: float
-    max_investment_ratio: float
     benchmark: str
-    max_weight: float | None = None
+    cost_assumptions: CostAssumptions
 
 
 @dataclass
@@ -47,9 +42,8 @@ class StudyDefinition:
     title: str
     question: str
     dataset_spec: DatasetSpec
-    execution_variants: list[ExecutionModelConfig]
-    backtest_config: BacktestConfig
+    evaluation_assumptions: EvaluationAssumptions
     portfolio_state: PortfolioState
-    candidate_definitions: list[PortfolioCandidateDefinition]
+    strategy_definitions: list[StrategyDefinition]
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"

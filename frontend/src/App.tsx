@@ -12,7 +12,7 @@ type StrategyComponent = {
   label: string
 }
 
-type PortfolioStrategyDefinition = {
+type SelectionDefinition = {
   label: string
   description: string
   featureInputs: string[]
@@ -26,9 +26,21 @@ type PortfolioModelDefinition = {
   label: string
 }
 
-type ExecutionModel = {
+type ExecutionPolicy = {
   label: string
-  commissionPct: number
+}
+
+type RiskControls = {
+  maxInvestmentPct: number
+  maxWeightPct: number | null
+}
+
+type StrategyDefinition = {
+  label: string
+  selectionDefinition: SelectionDefinition
+  portfolioModel: PortfolioModelDefinition
+  executionPolicy: ExecutionPolicy
+  riskControls: RiskControls
 }
 
 type SplitSegment = {
@@ -37,9 +49,7 @@ type SplitSegment = {
 
 type PortfolioRun = {
   key: string
-  strategy: PortfolioStrategyDefinition
-  portfolioModel: PortfolioModelDefinition
-  executionModel: ExecutionModel
+  strategy: StrategyDefinition
   selectedAssets: string[]
   weights: Array<{
     asset: string
@@ -57,10 +67,12 @@ type DashboardResult = {
       period: string
       tickers: string[]
     }
-    backtestConfig: {
-      maxInvestmentPct: number
-      maxWeightPct: number | null
+    evaluationAssumptions: {
+      splitRatioPct: number
       benchmark: string
+      costAssumptions: {
+        commissionPct: number
+      }
     }
   }
   runs: PortfolioRun[]
@@ -85,6 +97,10 @@ function formatBenchmarkLabel(value: string): string {
   return value
 }
 
+function formatRiskControls(maxInvestmentPct: number, maxWeightPct: number | null): string {
+  return `${maxInvestmentPct.toFixed(0)}%投資 / ${formatWeightCap(maxWeightPct)}`
+}
+
 function formatScoreParameters(parameters: Record<string, number>): string {
   const entries = Object.entries(parameters)
   if (entries.length === 0) {
@@ -100,14 +116,6 @@ function formatFilters(filters: StrategyComponent[]): string {
   }
 
   return filters.map((filter) => filter.label).join(' / ')
-}
-
-function formatWeights(weights: PortfolioRun['weights']): string {
-  return weights
-    .filter((row) => row.weightPct > 0)
-    .slice(0, 4)
-    .map((row) => `${row.asset} ${row.weightPct.toFixed(1)}%`)
-    .join(' / ')
 }
 
 function App() {
@@ -161,8 +169,8 @@ function App() {
     return (
       <main className="decision-shell">
         <section className="decision-card">
-          <p className="decision-kicker">Decision</p>
-          <h1>現在の暫定結論</h1>
+          <p className="decision-kicker">Strategy</p>
+          <h1>現在の最有力 Strategy</h1>
           <p className="decision-summary">比較実験を読み込んでいます。</p>
         </section>
       </main>
@@ -173,8 +181,8 @@ function App() {
     return (
       <main className="decision-shell">
         <section className="decision-card">
-          <p className="decision-kicker">Decision</p>
-          <h1>現在の暫定結論</h1>
+          <p className="decision-kicker">Strategy</p>
+          <h1>現在の最有力 Strategy</h1>
           <p className="decision-summary error-text">{error ?? '結果を取得できませんでした。'}</p>
         </section>
       </main>
@@ -184,80 +192,106 @@ function App() {
   return (
     <main className="decision-shell">
       <section className="decision-card">
-        <p className="decision-kicker">Decision</p>
-        <h1>現在の暫定結論</h1>
+        <p className="decision-kicker">Strategy</p>
+        <h1>現在の最有力 Strategy</h1>
 
         <div className="decision-highlight">
-          <h2>{bestRun.strategy.label} × {bestRun.portfolioModel.label}</h2>
+          <h2>
+            {bestRun.strategy.label}
+          </h2>
         </div>
 
         <div className="decision-metrics">
           <article>
-            <span>Sharpe</span>
+            <span>シャープレシオ</span>
             <strong>{bestRun.summary.sharpeRatio.toFixed(2)}</strong>
           </article>
           <article>
-            <span>Total Return</span>
+            <span>総リターン</span>
             <strong>{formatPercent(bestRun.summary.totalReturnPct)}</strong>
           </article>
           <article>
-            <span>Max Drawdown</span>
+            <span>最大ドローダウン</span>
             <strong>{formatPercent(-bestRun.summary.maxDrawdownPct)}</strong>
           </article>
           <article>
-            <span>Test Return</span>
+            <span>検証リターン</span>
             <strong>{formatPercent(bestRun.splitAnalysis.test.portfolio.totalReturnPct)}</strong>
           </article>
         </div>
 
-        <dl className="decision-details">
-          <div>
-            <dt>投資対象</dt>
-            <dd>{dashboard.study.datasetSpec.tickers.length}資産のマルチアセット</dd>
-          </div>
-          <div>
-            <dt>評価期間</dt>
-            <dd>{dashboard.study.datasetSpec.period}</dd>
-          </div>
-          <div>
-            <dt>執行条件</dt>
-            <dd>
-              {bestRun.executionModel.label} / {dashboard.study.backtestConfig.maxInvestmentPct.toFixed(0)}%投資 / {formatWeightCap(dashboard.study.backtestConfig.maxWeightPct)} / {bestRun.executionModel.commissionPct.toFixed(2)}%手数料
-            </dd>
-          </div>
-          <div>
-            <dt>ランキング</dt>
-            <dd>{bestRun.strategy.scoreModel.label}</dd>
-          </div>
-          <div>
-            <dt>特徴量</dt>
-            <dd>{bestRun.strategy.featureInputs.join(' + ')}</dd>
-          </div>
-          <div>
-            <dt>スコア係数</dt>
-            <dd>{formatScoreParameters(bestRun.strategy.scoreParameters)}</dd>
-          </div>
-          <div>
-            <dt>フィルタ</dt>
-            <dd>{formatFilters(bestRun.strategy.filterRules)}</dd>
-          </div>
-          <div>
-            <dt>候補資産</dt>
-            <dd>{bestRun.selectedAssets.join(', ')}</dd>
-          </div>
-          <div>
-            <dt>直近ウェイト</dt>
-            <dd>{formatWeights(bestRun.weights)}</dd>
-          </div>
-          <div>
-            <dt>Turnover</dt>
-            <dd>{formatPercent(bestRun.summary.turnoverPct)}</dd>
-          </div>
-          <div>
-            <dt>比較基準</dt>
-            <dd>{formatBenchmarkLabel(dashboard.study.backtestConfig.benchmark)}</dd>
-          </div>
-        </dl>
+        <section className="decision-section">
+          <h3>Strategyの構成</h3>
+          <dl className="decision-details">
+            <div>
+              <dt>投資対象</dt>
+              <dd>{bestRun.strategy.selectionDefinition.universePolicy.label}</dd>
+            </div>
+            <div>
+              <dt>ランキングモデル</dt>
+              <dd>{bestRun.strategy.selectionDefinition.scoreModel.label}</dd>
+            </div>
+            <div>
+              <dt>特徴量</dt>
+              <dd>{bestRun.strategy.selectionDefinition.featureInputs.join(' + ')}</dd>
+            </div>
+            <div>
+              <dt>ランキング係数</dt>
+              <dd>{formatScoreParameters(bestRun.strategy.selectionDefinition.scoreParameters)}</dd>
+            </div>
+            <div>
+              <dt>フィルタ</dt>
+              <dd>{formatFilters(bestRun.strategy.selectionDefinition.filterRules)}</dd>
+            </div>
+            <div>
+              <dt>ポートフォリオモデル</dt>
+              <dd>{bestRun.strategy.portfolioModel.label}</dd>
+            </div>
+            <div>
+              <dt>執行方針</dt>
+              <dd>{bestRun.strategy.executionPolicy.label}</dd>
+            </div>
+            <div>
+              <dt>リスク制御</dt>
+              <dd>
+                {formatRiskControls(
+                  bestRun.strategy.riskControls.maxInvestmentPct,
+                  bestRun.strategy.riskControls.maxWeightPct,
+                )}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="decision-section">
+          <h3>この評価の前提</h3>
+          <dl className="decision-details">
+            <div>
+              <dt>評価期間</dt>
+              <dd>{dashboard.study.datasetSpec.period}</dd>
+            </div>
+            <div>
+              <dt>資産数</dt>
+              <dd>{dashboard.study.datasetSpec.tickers.length}資産</dd>
+            </div>
+            <div>
+              <dt>手数料前提</dt>
+              <dd>{dashboard.study.evaluationAssumptions.costAssumptions.commissionPct.toFixed(2)}%</dd>
+            </div>
+            <div>
+              <dt>分割</dt>
+              <dd>学習 {dashboard.study.evaluationAssumptions.splitRatioPct.toFixed(1)}% / 検証 {(100 - dashboard.study.evaluationAssumptions.splitRatioPct).toFixed(1)}%</dd>
+            </div>
+            <div>
+              <dt>比較基準</dt>
+              <dd>{formatBenchmarkLabel(dashboard.study.evaluationAssumptions.benchmark)}</dd>
+            </div>
+            <div>
+              <dt>直近Turnover</dt>
+              <dd>{formatPercent(bestRun.summary.turnoverPct)}</dd>
+            </div>
+          </dl>
+        </section>
       </section>
     </main>
   )

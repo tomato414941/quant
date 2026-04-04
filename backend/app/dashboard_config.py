@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from app.portfolio import (
-    build_portfolio_candidate_definition,
+    build_execution_policy_definition,
     build_portfolio_model_definition,
     build_portfolio_state,
     build_portfolio_strategy_definition,
+    build_risk_controls_definition,
+    build_strategy_definition,
 )
 from app.study_models import (
-    BacktestConfig,
+    CostAssumptions,
     ConditionVariant,
     DatasetSpec,
-    ExecutionModelConfig,
+    EvaluationAssumptions,
     StudyDefinition,
 )
 
@@ -192,6 +194,19 @@ def build_condition_variants() -> list[ConditionVariant]:
     return variants
 
 
+ANNUAL_EXECUTION_POLICY = build_execution_policy_definition(
+    key="annual",
+    label="年次",
+    entry="train_once_then_periodic_rebalance",
+    rebalance_frequency="annual",
+)
+
+DEFAULT_RISK_CONTROLS = build_risk_controls_definition(
+    max_investment_ratio=1.0,
+    max_weight=0.45,
+)
+
+
 DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
     study_id="etf_portfolio_models_10y",
     title="マルチアセット戦略 x ポートフォリオ構築の比較",
@@ -223,22 +238,14 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
         sanity_periods=["3y"],
         frequency="daily",
     ),
-    execution_variants=[
-        ExecutionModelConfig(
-            key="annual",
-            label="年次",
-            entry="train_once_then_periodic_rebalance",
-            commission_pct=0.05,
-            slippage_pct=0.0,
-            rebalance_frequency="annual",
-        ),
-    ],
-    backtest_config=BacktestConfig(
+    evaluation_assumptions=EvaluationAssumptions(
         split_ratio=0.7,
         initial_capital=10_000,
-        max_investment_ratio=1.0,
         benchmark="equal_weight_buy_and_hold_with_cash",
-        max_weight=0.45,
+        cost_assumptions=CostAssumptions(
+            commission_pct=0.05,
+            slippage_pct=0.0,
+        ),
     ),
     portfolio_state=build_portfolio_state(
         current_weights={
@@ -265,37 +272,138 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
         },
         cash_weight=0.15,
     ),
-    candidate_definitions=[
-        build_portfolio_candidate_definition(FULL_UNIVERSE, EQUAL_WEIGHT),
-        build_portfolio_candidate_definition(FULL_UNIVERSE, RISK_BUDGETING),
-        build_portfolio_candidate_definition(FULL_UNIVERSE, MINIMUM_VARIANCE),
-        build_portfolio_candidate_definition(FULL_UNIVERSE, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, MEAN_RISK_UTILITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP, MEAN_RISK_UTILITY_CONSERVATIVE),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(FULL_UNIVERSE_MOMENTUM_TILT_STRONG, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(MOMENTUM_TOP3, EQUAL_WEIGHT),
-        build_portfolio_candidate_definition(MOMENTUM_TOP3, RISK_BUDGETING),
-        build_portfolio_candidate_definition(MOMENTUM_TOP3, MINIMUM_VARIANCE),
-        build_portfolio_candidate_definition(MOMENTUM_TOP3, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(DUAL_MOMENTUM_TOP3, HIERARCHICAL_RISK_PARITY),
-        build_portfolio_candidate_definition(
-            POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE,
-            HIERARCHICAL_RISK_PARITY,
+    strategy_definitions=[
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE,
+            portfolio_model_definition=EQUAL_WEIGHT,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
-        build_portfolio_candidate_definition(
-            TRAILING_MOMENTUM_LOW_VOL_UNIVERSE,
-            HIERARCHICAL_RISK_PARITY,
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE,
+            portfolio_model_definition=RISK_BUDGETING,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
-        build_portfolio_candidate_definition(
-            POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE,
-            HIERARCHICAL_RISK_PARITY,
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE,
+            portfolio_model_definition=MINIMUM_VARIANCE,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+            portfolio_model_definition=MEAN_RISK_UTILITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+            portfolio_model_definition=MEAN_RISK_UTILITY_CONSERVATIVE,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_STRONG,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=MOMENTUM_TOP3,
+            portfolio_model_definition=EQUAL_WEIGHT,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=MOMENTUM_TOP3,
+            portfolio_model_definition=RISK_BUDGETING,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=MOMENTUM_TOP3,
+            portfolio_model_definition=MINIMUM_VARIANCE,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=MOMENTUM_TOP3,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=DUAL_MOMENTUM_TOP3,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=TRAILING_MOMENTUM_LOW_VOL_UNIVERSE,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            selection_definition=POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
     ],
     condition_variants=build_condition_variants(),

@@ -99,6 +99,19 @@
   margin: 22px 0 0;
 }
 
+.decision-section {
+  margin-top: 24px;
+}
+
+.decision-section h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
 .decision-details div {
   display: grid;
   gap: 4px;

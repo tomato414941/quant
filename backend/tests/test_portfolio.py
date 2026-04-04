@@ -1,15 +1,41 @@
 import pandas as pd
 
 from app.portfolio import (
-    build_portfolio_candidate_definition,
-    build_portfolio_state,
+    build_execution_policy_definition,
     build_portfolio_model_definition,
+    build_portfolio_state,
     build_portfolio_strategy_definition,
+    build_risk_controls_definition,
+    build_strategy_definition,
     compare_portfolio_runs,
 )
 
 
-def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
+def make_strategy(
+    strategy_type: str,
+    model_type: str,
+    *,
+    rebalance_frequency: str = "annual",
+    max_investment_ratio: float = 1.0,
+    max_weight: float | None = None,
+):
+    return build_strategy_definition(
+        selection_definition=build_portfolio_strategy_definition(strategy_type),
+        portfolio_model_definition=build_portfolio_model_definition(model_type),
+        execution_policy_definition=build_execution_policy_definition(
+            key=rebalance_frequency,
+            label="年次" if rebalance_frequency == "annual" else "月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_frequency=rebalance_frequency,
+        ),
+        risk_controls_definition=build_risk_controls_definition(
+            max_investment_ratio=max_investment_ratio,
+            max_weight=max_weight,
+        ),
+    )
+
+
+def test_compare_portfolio_runs_returns_strategy_combinations() -> None:
     closes = pd.DataFrame(
         {
             "SPY": [100, 101, 103, 102, 104, 106, 107],
@@ -39,45 +65,34 @@ def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
     payload = compare_portfolio_runs(
         closes=closes,
         volumes=None,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                build_portfolio_model_definition("equal_weight"),
+        strategy_definitions=[
+            make_strategy("full_universe", "equal_weight", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy("full_universe", "risk_budgeting", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy("full_universe", "minimum_variance", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy(
+                "full_universe",
+                "hierarchical_risk_parity",
+                rebalance_frequency="monthly",
+                max_investment_ratio=0.8,
             ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                build_portfolio_model_definition("risk_budgeting"),
+            make_strategy("momentum_top3", "equal_weight", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy("momentum_top3", "risk_budgeting", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy(
+                "momentum_top3",
+                "minimum_variance",
+                rebalance_frequency="monthly",
+                max_investment_ratio=0.8,
             ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                build_portfolio_model_definition("minimum_variance"),
-            ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                build_portfolio_model_definition("hierarchical_risk_parity"),
-            ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("momentum_top3"),
-                build_portfolio_model_definition("equal_weight"),
-            ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("momentum_top3"),
-                build_portfolio_model_definition("risk_budgeting"),
-            ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("momentum_top3"),
-                build_portfolio_model_definition("minimum_variance"),
-            ),
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("momentum_top3"),
-                build_portfolio_model_definition("hierarchical_risk_parity"),
+            make_strategy(
+                "momentum_top3",
+                "hierarchical_risk_parity",
+                rebalance_frequency="monthly",
+                max_investment_ratio=0.8,
             ),
         ],
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
-        max_investment_ratio=0.8,
-        rebalance_frequency="monthly",
         portfolio_state=build_portfolio_state(
             current_weights={
                 "SPY": 0.1,
@@ -94,14 +109,14 @@ def test_compare_portfolio_runs_returns_strategy_model_combinations() -> None:
     )
 
     assert [row["key"] for row in payload] == [
-        "full_universe__equal_weight",
-        "full_universe__risk_budgeting",
-        "full_universe__minimum_variance",
-        "full_universe__hierarchical_risk_parity",
-        "momentum_top3__equal_weight",
-        "momentum_top3__risk_budgeting",
-        "momentum_top3__minimum_variance",
-        "momentum_top3__hierarchical_risk_parity",
+        "full_universe__equal_weight__monthly",
+        "full_universe__risk_budgeting__monthly",
+        "full_universe__minimum_variance__monthly",
+        "full_universe__hierarchical_risk_parity__monthly",
+        "momentum_top3__equal_weight__monthly",
+        "momentum_top3__risk_budgeting__monthly",
+        "momentum_top3__minimum_variance__monthly",
+        "momentum_top3__hierarchical_risk_parity__monthly",
     ]
     assert any(row["asset"] == "CASH" and row["weightPct"] == 20.0 for row in payload[0]["weights"])
     assert payload[0]["summary"]["turnoverPct"] >= 80.0
@@ -129,17 +144,17 @@ def test_dual_momentum_can_fall_back_to_cash() -> None:
     payload = compare_portfolio_runs(
         closes=closes,
         volumes=None,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("dual_momentum_top3"),
-                build_portfolio_model_definition("hierarchical_risk_parity"),
+        strategy_definitions=[
+            make_strategy(
+                "dual_momentum_top3",
+                "hierarchical_risk_parity",
+                rebalance_frequency="monthly",
+                max_investment_ratio=0.85,
             )
         ],
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
-        max_investment_ratio=0.85,
-        rebalance_frequency="monthly",
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
 
@@ -171,18 +186,17 @@ def test_compare_portfolio_runs_respects_max_weight_cap() -> None:
     payload = compare_portfolio_runs(
         closes=closes,
         volumes=None,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                build_portfolio_model_definition("equal_weight"),
+        strategy_definitions=[
+            make_strategy(
+                "full_universe",
+                "equal_weight",
+                rebalance_frequency="monthly",
+                max_weight=0.2,
             )
         ],
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
-        max_investment_ratio=1.0,
-        max_weight=0.2,
-        rebalance_frequency="monthly",
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
 
@@ -215,17 +229,10 @@ def test_trailing_momentum_low_vol_strategy_prefers_recent_winners() -> None:
     payload = compare_portfolio_runs(
         closes=closes,
         volumes=None,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("trailing_momentum_low_vol_universe"),
-                build_portfolio_model_definition("hierarchical_risk_parity"),
-            )
-        ],
+        strategy_definitions=[make_strategy("trailing_momentum_low_vol_universe", "hierarchical_risk_parity")],
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
-        max_investment_ratio=1.0,
-        rebalance_frequency="annual",
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
 
@@ -254,33 +261,19 @@ def test_full_universe_momentum_tilt_overweights_stronger_assets() -> None:
     baseline_payload = compare_portfolio_runs(
         closes=closes,
         volumes=None,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe"),
-                build_portfolio_model_definition("hierarchical_risk_parity"),
-            )
-        ],
+        strategy_definitions=[make_strategy("full_universe", "hierarchical_risk_parity")],
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
-        max_investment_ratio=1.0,
-        rebalance_frequency="annual",
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
     tilted_payload = compare_portfolio_runs(
         closes=closes,
         volumes=None,
-        candidate_definitions=[
-            build_portfolio_candidate_definition(
-                build_portfolio_strategy_definition("full_universe_momentum_tilt"),
-                build_portfolio_model_definition("hierarchical_risk_parity"),
-            )
-        ],
+        strategy_definitions=[make_strategy("full_universe_momentum_tilt", "hierarchical_risk_parity")],
         initial_capital=10_000,
         split_ratio=0.6,
         transaction_cost=0.001,
-        max_investment_ratio=1.0,
-        rebalance_frequency="annual",
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
 

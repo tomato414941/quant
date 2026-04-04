@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v5"
+RUN_STORE_LOGIC_VERSION = "v6"
 
 
 @dataclass(frozen=True)
@@ -102,10 +102,9 @@ def build_run_cache_key(run_definition: dict) -> str:
 def build_run_definition(
     *,
     run_kind: str,
-    candidate: dict,
+    strategy: dict,
     dataset_spec: dict,
-    execution_model: dict,
-    backtest_config: dict,
+    evaluation_assumptions: dict,
     portfolio_state: dict,
     dataset_metadata: dict,
     generation: dict | None = None,
@@ -113,18 +112,19 @@ def build_run_definition(
     run_definition = {
         "logicVersion": RUN_STORE_LOGIC_VERSION,
         "runKind": run_kind,
-        "candidate": candidate,
-        "datasetSpec": {
-            "tickers": dataset_spec["tickers"],
-            "period": dataset_spec["period"],
-            "frequency": dataset_spec["frequency"],
-            "alignedStartDate": dataset_metadata["aligned_start_date"],
-            "alignedEndDate": dataset_metadata["aligned_end_date"],
-            "rowCount": dataset_metadata["row_count"],
+        "strategy": strategy,
+        "assumptions": {
+            "datasetSpec": {
+                "tickers": dataset_spec["tickers"],
+                "period": dataset_spec["period"],
+                "frequency": dataset_spec["frequency"],
+                "alignedStartDate": dataset_metadata["aligned_start_date"],
+                "alignedEndDate": dataset_metadata["aligned_end_date"],
+                "rowCount": dataset_metadata["row_count"],
+            },
+            "evaluation": evaluation_assumptions,
+            "portfolioState": portfolio_state,
         },
-        "executionModel": execution_model,
-        "backtestConfig": backtest_config,
-        "portfolioState": portfolio_state,
     }
     if generation is not None:
         run_definition["generation"] = generation

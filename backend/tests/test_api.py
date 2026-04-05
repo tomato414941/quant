@@ -396,9 +396,9 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
-    assert payload["resultCount"] == 12
+    assert payload["resultCount"] == 17
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 12
+    assert payload["runStoreSummary"]["computedRunCount"] == 17
     assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
@@ -407,5 +407,5 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 12
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 17
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0

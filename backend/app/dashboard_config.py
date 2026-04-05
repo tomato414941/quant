@@ -55,12 +55,47 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M = build_portfolio_strategy_definition(
     description="全ETFを候補に残しつつ、6ヶ月モメンタムの上位優遇傾斜で重みを調整する",
     score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 126},
 )
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_9m",
+    label="全資産モメンタム傾斜 上位優遇 9ヶ月",
+    description="全ETFを候補に残しつつ、9ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 189},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_8M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_8m",
+    label="全資産モメンタム傾斜 上位優遇 8ヶ月",
+    description="全ETFを候補に残しつつ、8ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 168},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_10M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_10m",
+    label="全資産モメンタム傾斜 上位優遇 10ヶ月",
+    description="全ETFを候補に残しつつ、10ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 210},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_11M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_11m",
+    label="全資産モメンタム傾斜 上位優遇 11ヶ月",
+    description="全ETFを候補に残しつつ、11ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 231},
+)
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_3m",
     label="全資産モメンタム傾斜 上位優遇 3ヶ月",
     description="全ETFを候補に残しつつ、3ヶ月モメンタムの上位優遇傾斜で重みを調整する",
     score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 63},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_15m",
+    label="全資産モメンタム傾斜 上位優遇 15ヶ月",
+    description="全ETFを候補に残しつつ、15ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 315},
 )
 FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_low_vol_tilt",
@@ -413,6 +448,42 @@ DEFAULT_COMPARISON_CONFIG = ComparisonDefinition(
             hypothesis="全資産を残した6ヶ月モメンタムの上位優遇傾斜は、中期の強さを取り込みやすい",
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo9-top035-hrp-ann",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した9ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo8-top035-hrp-ann",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_8M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した8ヶ月モメンタムの上位優遇傾斜は、中期寄りの強さを取り込みやすい",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo10-top035-hrp-ann",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_10M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した10ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo11-top035-hrp-ann",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_11M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した11ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
+        ),
+        build_strategy_definition(
             strategy_id="stg-fu-momo3-top035-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M,
@@ -420,6 +491,15 @@ DEFAULT_COMPARISON_CONFIG = ComparisonDefinition(
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
             hypothesis="全資産を残した3ヶ月モメンタムの上位優遇傾斜は、短期の強さを取り込みやすい",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo15-top035-hrp-ann",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した15ヶ月モメンタムの上位優遇傾斜は、より長いトレンドを取り込みやすい",
         ),
         build_strategy_definition(
             strategy_id="stg-fu-momolv7030-top025-hrp-ann",

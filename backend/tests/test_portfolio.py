@@ -10,6 +10,7 @@ from app.portfolio import (
     build_strategy_definition,
     compare_portfolio_runs,
     compute_strategy_score_series,
+    should_rebalance,
 )
 
 
@@ -48,7 +49,7 @@ def make_strategy(
         portfolio_model_definition=build_portfolio_model_definition(model_type),
         execution_policy_definition=build_execution_policy_definition(
             key=rebalance_frequency,
-            label="年次" if rebalance_frequency == "annual" else "月次",
+            label="年次" if rebalance_frequency == "annual" else "日次" if rebalance_frequency == "daily" else "月次",
             entry="train_once_then_periodic_rebalance",
             rebalance_frequency=rebalance_frequency,
         ),
@@ -343,3 +344,77 @@ def test_momentum_window_days_changes_ranking_scores() -> None:
     assert long_scores is not None
     assert short_scores["QQQ"] > short_scores["SPY"]
     assert long_scores["SPY"] > long_scores["QQQ"]
+
+
+def test_should_rebalance_supports_daily_frequency() -> None:
+    assert should_rebalance("2025-01-01", "2025-01-02", "daily") is True
+    assert should_rebalance("2025-01-01", "2025-01-01", "daily") is False
+
+
+def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 102, 103, 104, 105, 106],
+            "QQQ": [100, 101, 102, 103, 104, 105, 106],
+        },
+        index=[
+            "2025-01-01",
+            "2025-01-02",
+            "2025-01-03",
+            "2025-01-04",
+            "2025-01-05",
+            "2025-01-06",
+            "2025-01-07",
+        ],
+    )
+
+    strategy = build_strategy_definition(
+        investment_universe_definition=build_investment_universe_definition(
+            tickers=["SPY", "QQQ"],
+            key="test_universe_small",
+            label="Test universe small",
+        ),
+        selection_definition=build_portfolio_strategy_definition("full_universe"),
+        portfolio_model_definition=build_portfolio_model_definition("equal_weight"),
+        execution_policy_definition=build_execution_policy_definition(
+            key="hold",
+            label="保有",
+            entry="hold",
+            rebalance_frequency="hold",
+        ),
+        risk_controls_definition=build_risk_controls_definition(max_investment_ratio=1.0),
+    )
+
+    flat_payload = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategy_definitions=[strategy],
+        initial_capital=10_000,
+        split_ratio=0.6,
+        cost_model={
+            "kind": "flat_cost",
+            "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
+            "perAssetOverrides": {},
+        },
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+    )
+    asset_specific_payload = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategy_definitions=[strategy],
+        initial_capital=10_000,
+        split_ratio=0.6,
+        cost_model={
+            "kind": "asset_specific_linear_cost",
+            "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
+            "perAssetOverrides": {
+                "SPY": {"commissionPct": 0.5, "slippagePct": 0.0},
+            },
+        },
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+    )
+
+    assert (
+        asset_specific_payload[0]["summary"]["totalReturnPct"]
+        < flat_payload[0]["summary"]["totalReturnPct"]
+    )

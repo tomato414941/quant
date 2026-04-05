@@ -11,13 +11,14 @@ from app.portfolio import (
 )
 from app.comparison_models import (
     ComparisonDefinition,
-    CostAssumptions,
     ConditionVariant,
     DatasetSpec,
     EvaluationContext,
     EvaluationSettings,
     RunInputDefinition,
     SelectionPolicy,
+    build_asset_specific_linear_cost_model_definition,
+    build_cost_model_definition,
 )
 
 
@@ -89,6 +90,20 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M = build_portfolio_strategy_definition(
     label="全資産モメンタム傾斜 上位優遇 3ヶ月",
     description="全ETFを候補に残しつつ、3ヶ月モメンタムの上位優遇傾斜で重みを調整する",
     score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 63},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_1M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_1m",
+    label="全資産モメンタム傾斜 上位優遇 1ヶ月",
+    description="全ETFを候補に残しつつ、1ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 21},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_2m",
+    label="全資産モメンタム傾斜 上位優遇 2ヶ月",
+    description="全ETFを候補に残しつつ、2ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 42},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
@@ -271,6 +286,64 @@ ETF_ONLY_INVESTMENT_UNIVERSE = build_investment_universe_definition(
 )
 
 
+def build_multi_asset_daily_cost_model_preset(preset: str):
+    if preset == "realistic_v1":
+        return build_asset_specific_linear_cost_model_definition(
+            default_commission_pct=0.05,
+            default_slippage_pct=0.02,
+            per_asset_overrides={
+                "SPY": {"commissionPct": 0.02, "slippagePct": 0.01},
+                "QQQ": {"commissionPct": 0.02, "slippagePct": 0.01},
+                "IWM": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "EFA": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "EEM": {"commissionPct": 0.04, "slippagePct": 0.03},
+                "EWJ": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "EWZ": {"commissionPct": 0.05, "slippagePct": 0.05},
+                "VNQ": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "TLT": {"commissionPct": 0.02, "slippagePct": 0.01},
+                "IEF": {"commissionPct": 0.02, "slippagePct": 0.01},
+                "LQD": {"commissionPct": 0.02, "slippagePct": 0.02},
+                "HYG": {"commissionPct": 0.03, "slippagePct": 0.03},
+                "TIP": {"commissionPct": 0.02, "slippagePct": 0.02},
+                "GLD": {"commissionPct": 0.03, "slippagePct": 0.03},
+                "SLV": {"commissionPct": 0.04, "slippagePct": 0.04},
+                "DBC": {"commissionPct": 0.05, "slippagePct": 0.05},
+                "USO": {"commissionPct": 0.06, "slippagePct": 0.06},
+                "UUP": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "BTC-USD": {"commissionPct": 0.10, "slippagePct": 0.15},
+                "ETH-USD": {"commissionPct": 0.10, "slippagePct": 0.15},
+            },
+        )
+    if preset == "strict_v1":
+        return build_asset_specific_linear_cost_model_definition(
+            default_commission_pct=0.08,
+            default_slippage_pct=0.05,
+            per_asset_overrides={
+                "SPY": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "QQQ": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "IWM": {"commissionPct": 0.05, "slippagePct": 0.05},
+                "EFA": {"commissionPct": 0.05, "slippagePct": 0.04},
+                "EEM": {"commissionPct": 0.06, "slippagePct": 0.06},
+                "EWJ": {"commissionPct": 0.05, "slippagePct": 0.04},
+                "EWZ": {"commissionPct": 0.08, "slippagePct": 0.08},
+                "VNQ": {"commissionPct": 0.05, "slippagePct": 0.04},
+                "TLT": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "IEF": {"commissionPct": 0.03, "slippagePct": 0.02},
+                "LQD": {"commissionPct": 0.04, "slippagePct": 0.04},
+                "HYG": {"commissionPct": 0.05, "slippagePct": 0.05},
+                "TIP": {"commissionPct": 0.04, "slippagePct": 0.04},
+                "GLD": {"commissionPct": 0.05, "slippagePct": 0.05},
+                "SLV": {"commissionPct": 0.06, "slippagePct": 0.06},
+                "DBC": {"commissionPct": 0.08, "slippagePct": 0.08},
+                "USO": {"commissionPct": 0.10, "slippagePct": 0.10},
+                "UUP": {"commissionPct": 0.05, "slippagePct": 0.04},
+                "BTC-USD": {"commissionPct": 0.20, "slippagePct": 0.25},
+                "ETH-USD": {"commissionPct": 0.20, "slippagePct": 0.25},
+            },
+        )
+    raise ValueError("Unsupported multi-asset daily cost model preset.")
+
+
 def build_condition_variants() -> list[ConditionVariant]:
     variants: list[ConditionVariant] = []
     commission_values = [0.05, 0.1, 0.2]
@@ -307,6 +380,13 @@ ANNUAL_EXECUTION_POLICY = build_execution_policy_definition(
     label="年次",
     entry="train_once_then_periodic_rebalance",
     rebalance_frequency="annual",
+)
+
+DAILY_EXECUTION_POLICY = build_execution_policy_definition(
+    key="daily",
+    label="日次",
+    entry="train_once_then_periodic_rebalance",
+    rebalance_frequency="daily",
 )
 
 HOLD_EXECUTION_POLICY = build_execution_policy_definition(
@@ -376,7 +456,7 @@ DEFAULT_COMPARISON_CONFIG = ComparisonDefinition(
                 split_ratio=0.7,
                 initial_capital=10_000,
             ),
-            cost_assumptions=CostAssumptions(
+            cost_model_definition=build_cost_model_definition(
                 commission_pct=0.05,
                 slippage_pct=0.0,
             ),
@@ -500,6 +580,60 @@ DEFAULT_COMPARISON_CONFIG = ComparisonDefinition(
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
             hypothesis="全資産を残した15ヶ月モメンタムの上位優遇傾斜は、より長いトレンドを取り込みやすい",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-hrp-day",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=DAILY_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産 HRP を日次で組み直すと、短期のリスク変化に追従できる可能性がある",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo1-top035-hrp-day",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_1M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=DAILY_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した1ヶ月モメンタムの日次実行は、短期の強さを素早く取り込める可能性がある",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo2-top035-hrp-day",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=DAILY_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した2ヶ月モメンタムの日次実行は、短期ノイズと追従性のバランスを取りやすい",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo3-top035-hrp-day",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=DAILY_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した3ヶ月モメンタムの日次実行は、短中期の強さを日次で反映できる",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo6-top035-hrp-day",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=DAILY_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した6ヶ月モメンタムの日次実行は、中期トレンドをより高頻度に反映できる",
+        ),
+        build_strategy_definition(
+            strategy_id="stg-fu-momo9-top035-hrp-day",
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=DAILY_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した9ヶ月モメンタムの日次実行は、中長期の強さを日次で反映できる",
         ),
         build_strategy_definition(
             strategy_id="stg-fu-momolv7030-top025-hrp-ann",

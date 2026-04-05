@@ -12,9 +12,41 @@ class DatasetSpec:
 
 
 @dataclass
-class CostAssumptions:
-    commission_pct: float
-    slippage_pct: float = 0.0
+class CostModelDefinition:
+    kind: str
+    parameters: dict[str, float]
+    per_asset_overrides: dict[str, dict[str, float]] = field(default_factory=dict)
+
+
+def build_cost_model_definition(
+    *,
+    kind: str = "flat_cost",
+    commission_pct: float,
+    slippage_pct: float = 0.0,
+    per_asset_overrides: dict[str, dict[str, float]] | None = None,
+) -> CostModelDefinition:
+    return CostModelDefinition(
+        kind=kind,
+        parameters={
+            "commissionPct": commission_pct,
+            "slippagePct": slippage_pct,
+        },
+        per_asset_overrides=per_asset_overrides or {},
+    )
+
+
+def build_asset_specific_linear_cost_model_definition(
+    *,
+    default_commission_pct: float,
+    default_slippage_pct: float = 0.0,
+    per_asset_overrides: dict[str, dict[str, float]] | None = None,
+) -> CostModelDefinition:
+    return build_cost_model_definition(
+        kind="asset_specific_linear_cost",
+        commission_pct=default_commission_pct,
+        slippage_pct=default_slippage_pct,
+        per_asset_overrides=per_asset_overrides,
+    )
 
 
 @dataclass
@@ -26,7 +58,7 @@ class EvaluationSettings:
 @dataclass
 class EvaluationContext:
     evaluation_settings: EvaluationSettings
-    cost_assumptions: CostAssumptions
+    cost_model_definition: CostModelDefinition
 
 
 @dataclass

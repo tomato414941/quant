@@ -25,7 +25,7 @@ PORTFOLIO_MODEL_LABELS = {
     "mean_risk_utility": "MeanRisk効用最大化",
     "mean_risk_utility_conservative": "MeanRisk効用最大化 弱",
 }
-SUPPORTED_REBALANCE_FREQUENCIES = {"hold", "monthly", "quarterly", "annual"}
+SUPPORTED_REBALANCE_FREQUENCIES = {"hold", "daily", "monthly", "quarterly", "annual"}
 SUPPORTED_PORTFOLIO_STRATEGIES = {
     "full_universe",
     "full_universe_momentum_tilt",
@@ -839,21 +839,68 @@ def serialize_portfolio_state(portfolio_state: PortfolioState) -> dict:
     return {"weights": rows}
 
 
+def build_flat_cost_model(*, commission_pct: float, slippage_pct: float = 0.0) -> dict:
+    return {
+        "kind": "flat_cost",
+        "parameters": {
+            "commissionPct": float(commission_pct),
+            "slippagePct": float(slippage_pct),
+        },
+        "perAssetOverrides": {},
+    }
+
+
+def cost_rate_from_parameters(parameters: dict[str, float]) -> float:
+    commission_pct = float(parameters.get("commissionPct", 0.0))
+    slippage_pct = float(parameters.get("slippagePct", 0.0))
+    return (commission_pct + slippage_pct) / 100
+
+
+def resolve_cost_model_rates(
+    *,
+    universe_columns: pd.Index,
+    cost_model: dict,
+) -> tuple[float, np.ndarray]:
+    kind = cost_model.get("kind", "flat_cost")
+    parameters = cost_model.get("parameters", {})
+    default_rate = cost_rate_from_parameters(parameters)
+    rates = np.repeat(default_rate, len(universe_columns)).astype("float64")
+
+    if kind == "flat_cost":
+        return default_rate, rates
+    if kind != "asset_specific_linear_cost":
+        raise ValueError("Unsupported cost model.")
+
+    overrides = cost_model.get("perAssetOverrides", {})
+    for index, asset in enumerate(universe_columns):
+        override = overrides.get(str(asset))
+        if not override:
+            continue
+        rates[index] = cost_rate_from_parameters(override)
+
+    return default_rate, rates
+
+
 def compare_portfolio_runs(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
     strategy_definitions: list[StrategyDefinition],
     initial_capital: float,
     split_ratio: float,
-    transaction_cost: float,
+    cost_model: dict | None = None,
+    transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
     if not strategy_definitions:
         raise ValueError("At least one strategy is required.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
-    if transaction_cost < 0 or transaction_cost >= 1:
-        raise ValueError("Transaction cost must be between 0 and 1.")
+    if cost_model is None:
+        if transaction_cost is None:
+            raise ValueError("Either cost_model or transaction_cost must be provided.")
+        if transaction_cost < 0 or transaction_cost >= 1:
+            raise ValueError("Transaction cost must be between 0 and 1.")
+        cost_model = build_flat_cost_model(commission_pct=transaction_cost * 100, slippage_pct=0.0)
 
     runs: list[dict] = []
     for strategy_definition in strategy_definitions:
@@ -870,6 +917,10 @@ def compare_portfolio_runs(
         returns = strategy_closes.pct_change().dropna()
         if len(returns) < 6:
             raise ValueError("At least 6 return rows are required for portfolio comparison.")
+        default_transaction_cost, asset_transaction_costs = resolve_cost_model_rates(
+            universe_columns=returns.columns,
+            cost_model=cost_model,
+        )
 
         split_index = compute_split_index(len(returns), split_ratio)
         train_returns = returns.iloc[:split_index]
@@ -891,7 +942,7 @@ def compare_portfolio_runs(
             max_investment_ratio=risk_controls.max_investment_ratio,
             max_weight=risk_controls.max_weight,
             previous_weights=initial_portfolio_weights,
-            transaction_cost=transaction_cost,
+            transaction_cost=default_transaction_cost,
         )
         backtest = run_portfolio_backtest(
             returns=returns,
@@ -904,7 +955,8 @@ def compare_portfolio_runs(
             initial_selected_assets=initial_selected_assets,
             max_investment_ratio=risk_controls.max_investment_ratio,
             initial_capital=initial_capital,
-            transaction_cost=transaction_cost,
+            transaction_cost=default_transaction_cost,
+            asset_transaction_costs=asset_transaction_costs,
             max_weight=risk_controls.max_weight,
             rebalance_frequency=execution_policy.rebalance_frequency,
         )
@@ -936,7 +988,8 @@ def evaluate_strategy_run(
     strategy_definition: StrategyDefinition,
     initial_capital: float,
     split_ratio: float,
-    transaction_cost: float,
+    cost_model: dict | None = None,
+    transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
 ) -> dict:
     return compare_portfolio_runs(
@@ -945,6 +998,7 @@ def evaluate_strategy_run(
         strategy_definitions=[strategy_definition],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
+        cost_model=cost_model,
         transaction_cost=transaction_cost,
         portfolio_state=portfolio_state,
     )[0]
@@ -1539,6 +1593,7 @@ def run_portfolio_backtest(
     max_investment_ratio: float,
     initial_capital: float,
     transaction_cost: float,
+    asset_transaction_costs: np.ndarray,
     max_weight: float | None,
     rebalance_frequency: str,
 ) -> dict:
@@ -1558,8 +1613,10 @@ def run_portfolio_backtest(
 
     for index, (date, row) in enumerate(returns.iterrows()):
         trade_turnover = 0.0
+        trade_cost = 0.0
         if index == 0:
             trade_turnover = float(np.abs(current_weights).sum())
+            trade_cost = float(np.dot(np.abs(current_weights), asset_transaction_costs))
         elif index > split_index and should_rebalance(
             previous_date=returns.index[index - 1],
             current_date=date,
@@ -1576,13 +1633,15 @@ def run_portfolio_backtest(
                 previous_weights=current_weights,
                 transaction_cost=transaction_cost,
             )
-            trade_turnover = float(np.abs(rebalanced_weights - current_weights).sum())
+            weight_delta = np.abs(rebalanced_weights - current_weights)
+            trade_turnover = float(weight_delta.sum())
+            trade_cost = float(np.dot(weight_delta, asset_transaction_costs))
             current_weights = rebalanced_weights
             latest_weights = rebalanced_weights.copy()
             latest_selected_assets = list(current_selected_assets)
 
         portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), current_weights))
-        portfolio_return -= transaction_cost * trade_turnover
+        portfolio_return -= trade_cost
 
         portfolio_equity *= 1 + portfolio_return
         portfolio_returns.append(portfolio_return)
@@ -1716,6 +1775,8 @@ def should_rebalance(previous_date, current_date, rebalance_frequency: str) -> b
 
     previous_timestamp = pd.Timestamp(previous_date)
     current_timestamp = pd.Timestamp(current_date)
+    if rebalance_frequency == "daily":
+        return previous_timestamp.normalize() != current_timestamp.normalize()
     if rebalance_frequency == "monthly":
         return previous_timestamp.month != current_timestamp.month or previous_timestamp.year != current_timestamp.year
     if rebalance_frequency == "quarterly":

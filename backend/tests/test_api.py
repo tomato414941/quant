@@ -151,7 +151,8 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         == "2025-01-07"
     )
     assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
-    assert payload["comparison"]["runInput"]["evaluationContext"]["costAssumptions"]["commissionPct"] == 0.05
+    assert payload["comparison"]["runInput"]["evaluationContext"]["costModel"]["kind"] == "flat_cost"
+    assert payload["comparison"]["runInput"]["evaluationContext"]["costModel"]["parameters"]["commissionPct"] == 0.05
     assert (
         payload["comparison"]["runInput"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"]
         == 70.0
@@ -355,13 +356,15 @@ def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
     payload = response.json()
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["generation"]["method"] == "parameter_sweep"
-    assert payload["generation"]["batchKey"] == "local_tilt_search_v1"
+    assert payload["generation"]["batchKey"] == "local_tilt_search_9m_v1"
+    assert payload["generation"]["spec"]["families"][0]["windowDays"] == 189
     assert payload["generation"]["spec"]["parameterGrid"]["tiltStrength"] == [0.15, 0.2, 0.25, 0.3, 0.35]
     assert payload["resultCount"] == 125
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == 125
     assert payload["results"][0]["family"]["label"]
     assert payload["results"][0]["parameterSet"]["tiltStrength"] in [0.15, 0.2, 0.25, 0.3, 0.35]
+    assert payload["results"][0]["parameterSet"]["windowDays"] == 189
     assert payload["results"][0]["parameterSet"]["maxWeightPct"] in [40.0, 42.5, 45.0, 47.5, 50.0]
     assert payload["results"][0]["summary"]["sharpeRatio"] is not None
 
@@ -396,9 +399,9 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
-    assert payload["resultCount"] == 17
+    assert payload["resultCount"] == 19
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 17
+    assert payload["runStoreSummary"]["computedRunCount"] == 19
     assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
@@ -407,5 +410,5 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 17
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 19
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0

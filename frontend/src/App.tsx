@@ -128,9 +128,13 @@ type DashboardResult = {
           splitRatioPct: number
           initialCapital: number
         }
-        costAssumptions: {
-          commissionPct: number
-          slippagePct: number
+        costModel: {
+          kind: string
+          parameters: {
+            commissionPct: number
+            slippagePct: number
+          }
+          perAssetOverrides: Record<string, Record<string, number>>
         }
       }
     }
@@ -611,15 +615,19 @@ function App() {
                     )}
                   />
                   <DataListRow
-                    label="costAssumptions.commissionPct"
+                    label="costModel.kind"
+                    value={dashboard.comparison.runInput.evaluationContext.costModel.kind}
+                  />
+                  <DataListRow
+                    label="costModel.parameters.commissionPct"
                     value={formatMetricValue(
-                      dashboard.comparison.runInput.evaluationContext.costAssumptions.commissionPct,
+                      dashboard.comparison.runInput.evaluationContext.costModel.parameters.commissionPct,
                     )}
                   />
                   <DataListRow
-                    label="costAssumptions.slippagePct"
+                    label="costModel.parameters.slippagePct"
                     value={formatMetricValue(
-                      dashboard.comparison.runInput.evaluationContext.costAssumptions.slippagePct,
+                      dashboard.comparison.runInput.evaluationContext.costModel.parameters.slippagePct,
                     )}
                   />
                 </dl>

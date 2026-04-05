@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v11"
+RUN_STORE_LOGIC_VERSION = "v12"
 
 
 @dataclass(frozen=True)
@@ -121,7 +121,7 @@ def build_run_definition(
                 "rowCount": dataset_metadata["row_count"],
             },
             "evaluationSettings": evaluation_context["evaluationSettings"],
-            "costAssumptions": evaluation_context["costAssumptions"],
+            "costModel": evaluation_context["costModel"],
         },
         "runInput": {
             "portfolioState": portfolio_state,

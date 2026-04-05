@@ -237,7 +237,7 @@ def generate_parameter_sweep_runs_payload(
         "comparison": serialize_comparison(comparison, metadata),
         "generation": {
             "method": "parameter_sweep",
-            "batchKey": "local_tilt_search_v1",
+            "batchKey": "local_tilt_search_9m_v1",
             "spec": build_parameter_sweep_generation_spec(),
         },
         "resultCount": len(results),
@@ -269,10 +269,14 @@ def serialize_dataset_context(
     }
 
 
-def serialize_cost_assumptions(evaluation_context: EvaluationContext) -> dict:
+def serialize_cost_model(evaluation_context: EvaluationContext) -> dict:
     return {
-        "commissionPct": round(evaluation_context.cost_assumptions.commission_pct, 3),
-        "slippagePct": round(evaluation_context.cost_assumptions.slippage_pct, 3),
+        "kind": evaluation_context.cost_model_definition.kind,
+        "parameters": {
+            key: round(value, 3)
+            for key, value in evaluation_context.cost_model_definition.parameters.items()
+        },
+        "perAssetOverrides": evaluation_context.cost_model_definition.per_asset_overrides,
     }
 
 
@@ -298,7 +302,7 @@ def serialize_evaluation_context(
             period_override=period_override,
         ),
         "evaluationSettings": serialize_evaluation_settings(comparison.run_input.evaluation_context),
-        "costAssumptions": serialize_cost_assumptions(comparison.run_input.evaluation_context),
+        "costModel": serialize_cost_model(comparison.run_input.evaluation_context),
     }
 
 
@@ -360,7 +364,7 @@ def compact_run_record(record: dict) -> dict:
     strategy = run_definition.get("strategy", {})
     evaluation_context = run_definition.get("evaluationContext", {})
     evaluation_settings = evaluation_context.get("evaluationSettings", {})
-    cost_assumptions = evaluation_context.get("costAssumptions", {})
+    cost_model = evaluation_context.get("costModel", {})
     dataset_context = evaluation_context.get("datasetContext", {})
     summary = result.get("summary", {})
     portfolio_summary = summary.get("portfolio", summary)
@@ -382,7 +386,8 @@ def compact_run_record(record: dict) -> dict:
         "period": dataset_context.get("period"),
         "maxInvestmentPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxInvestmentPct"),
         "maxWeightPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxWeightPct"),
-        "commissionPct": cost_assumptions.get("commissionPct"),
+        "costModelKind": cost_model.get("kind"),
+        "commissionPct": cost_model.get("parameters", {}).get("commissionPct"),
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
         "totalReturnPct": portfolio_summary.get("totalReturnPct"),
         "maxDrawdownPct": portfolio_summary.get("maxDrawdownPct"),
@@ -433,7 +438,7 @@ def build_strategy_runs(
             strategy_definition=strategy_definition,
             initial_capital=comparison.run_input.evaluation_context.evaluation_settings.initial_capital,
             split_ratio=comparison.run_input.evaluation_context.evaluation_settings.split_ratio,
-            transaction_cost=comparison.run_input.evaluation_context.cost_assumptions.commission_pct / 100,
+            cost_model=serialize_cost_model(comparison.run_input.evaluation_context),
             portfolio_state=comparison.run_input.portfolio_state,
         )
         run_store.save(run_definition, run)
@@ -473,9 +478,12 @@ def build_condition_sweep_runs(
             )
             effective_evaluation_context = replace(
                 comparison.run_input.evaluation_context,
-                cost_assumptions=replace(
-                    comparison.run_input.evaluation_context.cost_assumptions,
-                    commission_pct=condition_variant.commission_pct,
+                cost_model_definition=replace(
+                    comparison.run_input.evaluation_context.cost_model_definition,
+                    parameters={
+                        **comparison.run_input.evaluation_context.cost_model_definition.parameters,
+                        "commissionPct": condition_variant.commission_pct,
+                    },
                 ),
             )
             serialized_strategy = serialize_strategy_definition(effective_strategy)
@@ -485,7 +493,7 @@ def build_condition_sweep_runs(
                     dataset_metadata,
                     period_override=dataset_period,
                 ),
-                "costAssumptions": serialize_cost_assumptions(effective_evaluation_context),
+                "costModel": serialize_cost_model(effective_evaluation_context),
             }
             serialized_condition_variant = serialize_condition_variant(condition_variant)
             run_definition = build_run_definition(
@@ -508,7 +516,7 @@ def build_condition_sweep_runs(
                 strategy_definition=effective_strategy,
                 initial_capital=effective_evaluation_context.evaluation_settings.initial_capital,
                 split_ratio=effective_evaluation_context.evaluation_settings.split_ratio,
-                transaction_cost=effective_evaluation_context.cost_assumptions.commission_pct / 100,
+                cost_model=serialize_cost_model(effective_evaluation_context),
                 portfolio_state=comparison.run_input.portfolio_state,
             )
             compact_run = compact_condition_sweep_run(
@@ -616,22 +624,24 @@ def build_parameter_sweep_runs(
     computed_run_count = 0
     generation = {
         "method": "parameter_sweep",
-        "batchKey": "local_tilt_search_v1",
+        "batchKey": "local_tilt_search_9m_v1",
         "spec": build_parameter_sweep_generation_spec(),
     }
 
     family_specs = [
         {
-            "familyKey": "momentum_top",
-            "familyLabel": "全資産モメンタム傾斜 上位優遇",
+            "familyKey": "momentum_top_9m",
+            "familyLabel": "全資産モメンタム傾斜 上位優遇 9ヶ月",
             "strategyType": "full_universe_momentum_tilt",
             "macroWeights": [None],
+            "windowDays": 189,
         },
         {
-            "familyKey": "momentum_macro_top",
-            "familyLabel": "全資産モメンタムマクロ傾斜 上位優遇",
+            "familyKey": "momentum_macro_top_9m",
+            "familyLabel": "全資産モメンタムマクロ傾斜 上位優遇 9ヶ月",
             "strategyType": "full_universe_momentum_macro_tilt",
             "macroWeights": [0.05, 0.10, 0.15, 0.20],
+            "windowDays": 189,
         },
     ]
     tilt_strengths = [0.15, 0.20, 0.25, 0.30, 0.35]
@@ -644,7 +654,7 @@ def build_parameter_sweep_runs(
                     score_parameters = {
                         "tilt_strength": tilt_strength,
                         "tilt_shape": 1.0,
-                        "window_days": 252,
+                        "window_days": family_spec["windowDays"],
                     }
                     if macro_weight is not None:
                         score_parameters["momentum_weight"] = round(1.0 - macro_weight, 2)
@@ -704,7 +714,7 @@ def build_parameter_sweep_runs(
                         strategy_definition=effective_strategy,
                         initial_capital=base_evaluation_context.evaluation_settings.initial_capital,
                         split_ratio=base_evaluation_context.evaluation_settings.split_ratio,
-                        transaction_cost=base_evaluation_context.cost_assumptions.commission_pct / 100,
+                        cost_model=serialize_cost_model(base_evaluation_context),
                         portfolio_state=comparison.run_input.portfolio_state,
                     )
                     compact_run = compact_parameter_sweep_run(
@@ -714,6 +724,7 @@ def build_parameter_sweep_runs(
                         tilt_strength=tilt_strength,
                         macro_weight=macro_weight,
                         max_weight=max_weight,
+                        window_days=family_spec["windowDays"],
                         strategy=serialized_strategy,
                     )
                     run_store.save(run_definition, compact_run)
@@ -759,6 +770,7 @@ def compact_parameter_sweep_run(
     tilt_strength: float,
     macro_weight: float | None,
     max_weight: float,
+    window_days: int,
     strategy: dict,
 ) -> dict:
     return {
@@ -775,6 +787,7 @@ def compact_parameter_sweep_run(
         "parameterSet": {
             "tiltStrength": tilt_strength,
             "macroWeight": macro_weight,
+            "windowDays": window_days,
             "maxWeightPct": round(max_weight * 100, 1),
         },
         "strategy": strategy,
@@ -789,14 +802,16 @@ def build_parameter_sweep_generation_spec() -> dict:
     return {
         "families": [
             {
-                "key": "momentum_top",
+                "key": "momentum_top_9m",
                 "strategyType": "full_universe_momentum_tilt",
                 "tiltShape": "top_favored",
+                "windowDays": 189,
             },
             {
-                "key": "momentum_macro_top",
+                "key": "momentum_macro_top_9m",
                 "strategyType": "full_universe_momentum_macro_tilt",
                 "tiltShape": "top_favored",
+                "windowDays": 189,
             },
         ],
         "parameterGrid": {

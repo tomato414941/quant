@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app import main as main_module
 from app.comparison_models import ConditionVariant
 from app.main import app
+from app.portfolio import build_asset_ranking_definitions
 
 
 client = TestClient(app)
@@ -134,27 +135,32 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
 
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["comparison"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
-    assert payload["comparison"]["runInput"]["evaluationContext"]["kind"] == "evaluation_context"
-    assert payload["comparison"]["runInput"]["evaluationContext"]["schemaVersion"] == "v1"
-    assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["source"] == "test"
-    assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["period"] == "10y"
+    assert payload["comparison"]["executionAssumptions"]["kind"] == "close_execution_assumptions"
+    assert payload["comparison"]["executionAssumptions"]["parameters"]["fillPrice"] == "close"
+    assert payload["comparison"]["executionAssumptions"]["costModel"]["kind"] == "flat_cost"
     assert (
-        payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["sanityPeriods"]
+        payload["comparison"]["executionAssumptions"]["costModel"]["parameters"]["commissionPct"]
+        == 0.05
+    )
+    assert payload["comparison"]["evaluationSpec"]["kind"] == "evaluation_spec"
+    assert payload["comparison"]["evaluationSpec"]["schemaVersion"] == "v1"
+    assert payload["comparison"]["evaluationSpec"]["datasetContext"]["source"] == "test"
+    assert payload["comparison"]["evaluationSpec"]["datasetContext"]["period"] == "10y"
+    assert (
+        payload["comparison"]["evaluationSpec"]["datasetContext"]["sanityPeriods"]
         == ["3y"]
     )
     assert (
-        payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["alignedStartDate"]
+        payload["comparison"]["evaluationSpec"]["datasetContext"]["alignedStartDate"]
         == "2025-01-01"
     )
     assert (
-        payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["alignedEndDate"]
+        payload["comparison"]["evaluationSpec"]["datasetContext"]["alignedEndDate"]
         == "2025-01-07"
     )
-    assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
-    assert payload["comparison"]["runInput"]["evaluationContext"]["costModel"]["kind"] == "flat_cost"
-    assert payload["comparison"]["runInput"]["evaluationContext"]["costModel"]["parameters"]["commissionPct"] == 0.05
+    assert payload["comparison"]["evaluationSpec"]["datasetContext"]["rowCount"] == 7
     assert (
-        payload["comparison"]["runInput"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"]
+        payload["comparison"]["evaluationSpec"]["evaluationSettings"]["splitRatioPct"]
         == 70.0
     )
     assert payload["comparison"]["runInput"]["portfolioState"]["weights"][0]["asset"] == "CASH"
@@ -168,6 +174,10 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
     assert payload["comparison"]["candidateStrategies"][0]["schemaVersion"] == "v1"
     assert payload["comparison"]["candidateStrategies"][0]["components"]["core"]["investmentUniverse"]["label"]
+    assert (
+        payload["comparison"]["candidateStrategies"][0]["components"]["core"]["executionPolicy"]["rebalanceFrequency"]
+        == "annual"
+    )
     assert (
         payload["comparison"]["candidateStrategies"][0]["components"]["optional"]["assetRankingModel"]
         is None
@@ -203,7 +213,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert (
-        payload["sanityChecks"][0]["evaluationContext"]["datasetContext"]["alignedStartDate"]
+        payload["sanityChecks"][0]["evaluationSpec"]["datasetContext"]["alignedStartDate"]
         == "2025-01-01"
     )
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
@@ -398,10 +408,11 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    expected_ranking_count = len(build_asset_ranking_definitions(config.candidate_strategy_definitions))
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
-    assert payload["resultCount"] == 19
+    assert payload["resultCount"] == expected_ranking_count
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 19
+    assert payload["runStoreSummary"]["computedRunCount"] == expected_ranking_count
     assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
@@ -410,5 +421,5 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 19
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == expected_ranking_count
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0

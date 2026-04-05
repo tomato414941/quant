@@ -18,6 +18,14 @@ class CostModelDefinition:
     per_asset_overrides: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
+@dataclass
+class ExecutionAssumptionsDefinition:
+    kind: str
+    label: str
+    parameters: dict[str, str | float | bool]
+    cost_model_definition: CostModelDefinition
+
+
 def build_cost_model_definition(
     *,
     kind: str = "flat_cost",
@@ -49,6 +57,21 @@ def build_asset_specific_linear_cost_model_definition(
     )
 
 
+def build_execution_assumptions_definition(
+    *,
+    kind: str = "close_execution_assumptions",
+    label: str,
+    parameters: dict[str, str | float | bool] | None = None,
+    cost_model_definition: CostModelDefinition,
+) -> ExecutionAssumptionsDefinition:
+    return ExecutionAssumptionsDefinition(
+        kind=kind,
+        label=label,
+        parameters=parameters or {},
+        cost_model_definition=cost_model_definition,
+    )
+
+
 @dataclass
 class EvaluationSettings:
     split_ratio: float
@@ -56,15 +79,13 @@ class EvaluationSettings:
 
 
 @dataclass
-class EvaluationContext:
+class EvaluationSpec:
     evaluation_settings: EvaluationSettings
-    cost_model_definition: CostModelDefinition
 
 
 @dataclass
 class RunInputDefinition:
     portfolio_state: PortfolioState
-    evaluation_context: EvaluationContext
 
 
 @dataclass
@@ -90,6 +111,8 @@ class ComparisonDefinition:
     question: str
     dataset_spec: DatasetSpec
     run_input: RunInputDefinition
+    execution_assumptions_definition: ExecutionAssumptionsDefinition
+    evaluation_spec: EvaluationSpec
     selection_policy: SelectionPolicy
     candidate_strategy_definitions: list[StrategyDefinition]
     reference_strategy_definitions: list[StrategyDefinition] = field(default_factory=list)

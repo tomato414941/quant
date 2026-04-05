@@ -1,7 +1,6 @@
 import pandas as pd
 
 from app.portfolio import (
-    build_execution_policy_definition,
     build_investment_universe_definition,
     build_portfolio_model_definition,
     build_portfolio_state,
@@ -14,11 +13,25 @@ from app.portfolio import (
 )
 
 
+def make_execution_assumptions() -> dict:
+    return {
+        "kind": "close_execution_assumptions",
+        "label": "終値約定",
+        "parameters": {
+            "fillPrice": "close",
+        },
+        "costModel": {
+            "kind": "flat_cost",
+            "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
+            "perAssetOverrides": {},
+        },
+    }
+
+
 def make_strategy(
     strategy_type: str,
     model_type: str,
     *,
-    rebalance_frequency: str = "annual",
     max_investment_ratio: float = 1.0,
     max_weight: float | None = None,
     score_parameters: dict[str, float] | None = None,
@@ -47,12 +60,6 @@ def make_strategy(
             score_parameters=score_parameters,
         ),
         portfolio_model_definition=build_portfolio_model_definition(model_type),
-        execution_policy_definition=build_execution_policy_definition(
-            key=rebalance_frequency,
-            label="年次" if rebalance_frequency == "annual" else "日次" if rebalance_frequency == "daily" else "月次",
-            entry="train_once_then_periodic_rebalance",
-            rebalance_frequency=rebalance_frequency,
-        ),
         risk_controls_definition=build_risk_controls_definition(
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
@@ -91,32 +98,30 @@ def test_compare_portfolio_runs_returns_strategy_combinations() -> None:
         closes=closes,
         volumes=None,
         strategy_definitions=[
-            make_strategy("full_universe", "equal_weight", rebalance_frequency="monthly", max_investment_ratio=0.8),
-            make_strategy("full_universe", "risk_budgeting", rebalance_frequency="monthly", max_investment_ratio=0.8),
-            make_strategy("full_universe", "minimum_variance", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy("full_universe", "equal_weight", max_investment_ratio=0.8),
+            make_strategy("full_universe", "risk_budgeting", max_investment_ratio=0.8),
+            make_strategy("full_universe", "minimum_variance", max_investment_ratio=0.8),
             make_strategy(
                 "full_universe",
                 "hierarchical_risk_parity",
-                rebalance_frequency="monthly",
                 max_investment_ratio=0.8,
             ),
-            make_strategy("momentum_top3", "equal_weight", rebalance_frequency="monthly", max_investment_ratio=0.8),
-            make_strategy("momentum_top3", "risk_budgeting", rebalance_frequency="monthly", max_investment_ratio=0.8),
+            make_strategy("momentum_top3", "equal_weight", max_investment_ratio=0.8),
+            make_strategy("momentum_top3", "risk_budgeting", max_investment_ratio=0.8),
             make_strategy(
                 "momentum_top3",
                 "minimum_variance",
-                rebalance_frequency="monthly",
                 max_investment_ratio=0.8,
             ),
             make_strategy(
                 "momentum_top3",
                 "hierarchical_risk_parity",
-                rebalance_frequency="monthly",
                 max_investment_ratio=0.8,
             ),
         ],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
         transaction_cost=0.001,
         portfolio_state=build_portfolio_state(
             current_weights={
@@ -134,14 +139,14 @@ def test_compare_portfolio_runs_returns_strategy_combinations() -> None:
     )
 
     assert [row["key"] for row in payload] == [
-        "full_universe__equal_weight__monthly",
-        "full_universe__risk_budgeting__monthly",
-        "full_universe__minimum_variance__monthly",
-        "full_universe__hierarchical_risk_parity__monthly",
-        "momentum_top3__equal_weight__monthly",
-        "momentum_top3__risk_budgeting__monthly",
-        "momentum_top3__minimum_variance__monthly",
-        "momentum_top3__hierarchical_risk_parity__monthly",
+        "full_universe__equal_weight",
+        "full_universe__risk_budgeting",
+        "full_universe__minimum_variance",
+        "full_universe__hierarchical_risk_parity",
+        "momentum_top3__equal_weight",
+        "momentum_top3__risk_budgeting",
+        "momentum_top3__minimum_variance",
+        "momentum_top3__hierarchical_risk_parity",
     ]
     assert any(row["asset"] == "CASH" and row["weightPct"] == 20.0 for row in payload[0]["weights"])
     assert payload[0]["summary"]["turnoverPct"] >= 80.0
@@ -173,12 +178,12 @@ def test_dual_momentum_can_fall_back_to_cash() -> None:
             make_strategy(
                 "dual_momentum_top3",
                 "hierarchical_risk_parity",
-                rebalance_frequency="monthly",
                 max_investment_ratio=0.85,
             )
         ],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
         transaction_cost=0.001,
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
@@ -215,12 +220,12 @@ def test_compare_portfolio_runs_respects_max_weight_cap() -> None:
             make_strategy(
                 "full_universe",
                 "equal_weight",
-                rebalance_frequency="monthly",
                 max_weight=0.2,
             )
         ],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
         transaction_cost=0.001,
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
@@ -257,6 +262,7 @@ def test_trailing_momentum_low_vol_strategy_prefers_recent_winners() -> None:
         strategy_definitions=[make_strategy("trailing_momentum_low_vol_universe", "hierarchical_risk_parity")],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
         transaction_cost=0.001,
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
@@ -289,6 +295,7 @@ def test_full_universe_momentum_tilt_overweights_stronger_assets() -> None:
         strategy_definitions=[make_strategy("full_universe", "hierarchical_risk_parity")],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
         transaction_cost=0.001,
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
@@ -298,6 +305,7 @@ def test_full_universe_momentum_tilt_overweights_stronger_assets() -> None:
         strategy_definitions=[make_strategy("full_universe_momentum_tilt", "hierarchical_risk_parity")],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
         transaction_cost=0.001,
         portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
     )
@@ -376,12 +384,6 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         ),
         selection_definition=build_portfolio_strategy_definition("full_universe"),
         portfolio_model_definition=build_portfolio_model_definition("equal_weight"),
-        execution_policy_definition=build_execution_policy_definition(
-            key="hold",
-            label="保有",
-            entry="hold",
-            rebalance_frequency="hold",
-        ),
         risk_controls_definition=build_risk_controls_definition(max_investment_ratio=1.0),
     )
 
@@ -391,6 +393,16 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         strategy_definitions=[strategy],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions={
+            "kind": "close_execution_assumptions",
+            "label": "終値約定",
+            "parameters": {"entry": "hold", "rebalanceFrequency": "hold"},
+            "costModel": {
+                "kind": "flat_cost",
+                "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
+                "perAssetOverrides": {},
+            },
+        },
         cost_model={
             "kind": "flat_cost",
             "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
@@ -404,6 +416,18 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         strategy_definitions=[strategy],
         initial_capital=10_000,
         split_ratio=0.6,
+        execution_assumptions={
+            "kind": "close_execution_assumptions",
+            "label": "終値約定",
+            "parameters": {"entry": "hold", "rebalanceFrequency": "hold"},
+            "costModel": {
+                "kind": "asset_specific_linear_cost",
+                "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
+                "perAssetOverrides": {
+                    "SPY": {"commissionPct": 0.5, "slippagePct": 0.0},
+                },
+            },
+        },
         cost_model={
             "kind": "asset_specific_linear_cost",
             "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},

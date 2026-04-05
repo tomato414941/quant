@@ -134,7 +134,7 @@ class ExecutionPolicyDefinition:
     key: str
     label: str
     entry: str
-    rebalance_frequency: str = "hold"
+    rebalance_frequency: str
 
 
 @dataclass(frozen=True)
@@ -458,16 +458,25 @@ def build_execution_policy_definition(
     key: str,
     label: str,
     entry: str,
-    rebalance_frequency: str = "hold",
+    rebalance_frequency: str,
 ) -> ExecutionPolicyDefinition:
     if rebalance_frequency not in SUPPORTED_REBALANCE_FREQUENCIES:
-        raise ValueError("Unsupported rebalance frequency.")
+        raise ValueError("Unsupported execution policy rebalance frequency.")
     return ExecutionPolicyDefinition(
         key=key,
         label=label,
         entry=entry,
         rebalance_frequency=rebalance_frequency,
     )
+
+
+def serialize_execution_policy_definition(execution_policy_definition: ExecutionPolicyDefinition) -> dict:
+    return {
+        "key": execution_policy_definition.key,
+        "label": execution_policy_definition.label,
+        "entry": execution_policy_definition.entry,
+        "rebalanceFrequency": execution_policy_definition.rebalance_frequency,
+    }
 
 
 def build_risk_controls_definition(
@@ -491,7 +500,7 @@ def build_strategy_definition(
     data_resolution: str = "daily",
     selection_definition: PortfolioStrategyDefinition,
     portfolio_model_definition: PortfolioModelDefinition,
-    execution_policy_definition: ExecutionPolicyDefinition,
+    execution_policy_definition: ExecutionPolicyDefinition | None = None,
     risk_controls_definition: RiskControlsDefinition,
     strategy_id: str | None = None,
     version: str = "v1",
@@ -505,7 +514,6 @@ def build_strategy_definition(
         [
             selection_definition.key,
             portfolio_model_definition.key,
-            execution_policy_definition.key,
         ]
     )
     if strategy_id is not None and key is not None and strategy_id != key:
@@ -514,7 +522,6 @@ def build_strategy_definition(
         [
             selection_definition.label,
             portfolio_model_definition.label,
-            execution_policy_definition.label,
         ]
     )
     return StrategyDefinition(
@@ -527,7 +534,13 @@ def build_strategy_definition(
         data_resolution=data_resolution,
         selection_definition=selection_definition,
         portfolio_model_definition=portfolio_model_definition,
-        execution_policy_definition=execution_policy_definition,
+        execution_policy_definition=execution_policy_definition
+        or build_execution_policy_definition(
+            key="annual",
+            label="年次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_frequency="annual",
+        ),
         risk_controls_definition=risk_controls_definition,
         extensions=tuple(sorted((extensions or {}).items())),
     )
@@ -563,16 +576,6 @@ def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrate
             "label": strategy_definition.fallback_rule.label,
         },
     }
-
-
-def serialize_execution_policy_definition(execution_policy_definition: ExecutionPolicyDefinition) -> dict:
-    return {
-        "key": execution_policy_definition.key,
-        "label": execution_policy_definition.label,
-        "entry": execution_policy_definition.entry,
-        "rebalanceFrequency": execution_policy_definition.rebalance_frequency,
-    }
-
 
 def serialize_risk_controls_definition(risk_controls_definition: RiskControlsDefinition) -> dict:
     return {
@@ -887,6 +890,7 @@ def compare_portfolio_runs(
     strategy_definitions: list[StrategyDefinition],
     initial_capital: float,
     split_ratio: float,
+    execution_assumptions: dict | None = None,
     cost_model: dict | None = None,
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
@@ -895,6 +899,17 @@ def compare_portfolio_runs(
         raise ValueError("At least one strategy is required.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
+    if execution_assumptions is None:
+        execution_assumptions = {
+            "kind": "close_execution_assumptions",
+            "label": "終値約定",
+            "parameters": {
+                "fillPrice": "close",
+            },
+            "costModel": None,
+        }
+    if cost_model is None:
+        cost_model = execution_assumptions.get("costModel")
     if cost_model is None:
         if transaction_cost is None:
             raise ValueError("Either cost_model or transaction_cost must be provided.")
@@ -904,6 +919,7 @@ def compare_portfolio_runs(
 
     runs: list[dict] = []
     for strategy_definition in strategy_definitions:
+        rebalance_frequency = strategy_definition.execution_policy_definition.rebalance_frequency
         strategy_universe = [
             asset
             for asset in strategy_definition.investment_universe_definition.tickers
@@ -931,7 +947,6 @@ def compare_portfolio_runs(
 
         selection_definition = strategy_definition.selection_definition
         model_definition = strategy_definition.portfolio_model_definition
-        execution_policy = strategy_definition.execution_policy_definition
         risk_controls = strategy_definition.risk_controls_definition
         initial_selected_assets, initial_weights = compute_portfolio_allocation(
             history_returns=train_returns,
@@ -958,7 +973,7 @@ def compare_portfolio_runs(
             transaction_cost=default_transaction_cost,
             asset_transaction_costs=asset_transaction_costs,
             max_weight=risk_controls.max_weight,
-            rebalance_frequency=execution_policy.rebalance_frequency,
+            rebalance_frequency=rebalance_frequency,
         )
 
         runs.append(
@@ -988,6 +1003,7 @@ def evaluate_strategy_run(
     strategy_definition: StrategyDefinition,
     initial_capital: float,
     split_ratio: float,
+    execution_assumptions: dict | None = None,
     cost_model: dict | None = None,
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
@@ -998,6 +1014,7 @@ def evaluate_strategy_run(
         strategy_definitions=[strategy_definition],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
+        execution_assumptions=execution_assumptions,
         cost_model=cost_model,
         transaction_cost=transaction_cost,
         portfolio_state=portfolio_state,
@@ -1040,6 +1057,17 @@ def compare_portfolio_models(
         ],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
+        execution_assumptions={
+            "kind": "close_execution_assumptions",
+            "label": "終値約定",
+            "parameters": {
+                "fillPrice": "close",
+            },
+            "costModel": build_flat_cost_model(
+                commission_pct=transaction_cost * 100,
+                slippage_pct=0.0,
+            ),
+        },
         transaction_cost=transaction_cost,
         portfolio_state=portfolio_state,
     )

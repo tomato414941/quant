@@ -64,7 +64,7 @@ UNIVERSE_POLICY_LABELS = {
 SCORE_MODEL_LABELS = {
     "none": "シグナルなし",
     "momentum": "モメンタム",
-    "trailing_momentum_12m": "12ヶ月モメンタム",
+    "trailing_momentum_12m": "モメンタム",
     "momentum_low_vol": "12ヶ月モメンタム+低ボラ",
     "momentum_macro": "12ヶ月モメンタム+マクロproxy",
     "volatility": "ボラティリティ",
@@ -215,9 +215,9 @@ def build_portfolio_strategy_definition(
 
     default_descriptions = {
         "full_universe": "全ETFを候補にする",
-        "full_universe_momentum_tilt": "全ETFを候補にし、12ヶ月モメンタムで重みを傾ける",
-        "full_universe_momentum_low_vol_tilt": "全ETFを候補にし、12ヶ月モメンタムと低ボラの複合スコアで重みを傾ける",
-        "full_universe_momentum_macro_tilt": "全ETFを候補にし、12ヶ月モメンタムとマクロproxyの複合スコアで重みを傾ける",
+        "full_universe_momentum_tilt": "全ETFを候補にし、モメンタムで重みを傾ける",
+        "full_universe_momentum_low_vol_tilt": "全ETFを候補にし、モメンタムと低ボラの複合スコアで重みを傾ける",
+        "full_universe_momentum_macro_tilt": "全ETFを候補にし、モメンタムとマクロproxyの複合スコアで重みを傾ける",
         "momentum_top3": "学習期間のモメンタム上位3ETFを候補にする",
         "dual_momentum_top3": "上昇しているETFだけからモメンタム上位3を候補にする",
         "trailing_momentum_low_vol_universe": "12ヶ月モメンタムが正のETFを候補にし、低ボラ群だけへ配分する",
@@ -302,25 +302,27 @@ def build_portfolio_strategy_definition(
     }
     default_score_parameters = {
         "full_universe": {},
-        "full_universe_momentum_tilt": {"tilt_strength": 0.5},
+        "full_universe_momentum_tilt": {"tilt_strength": 0.5, "window_days": 252},
         "full_universe_momentum_low_vol_tilt": {
             "tilt_strength": 0.25,
             "tilt_shape": 1.0,
+            "window_days": 252,
             "momentum_weight": 0.7,
             "low_vol_weight": 0.3,
         },
         "full_universe_momentum_macro_tilt": {
             "tilt_strength": 0.25,
             "tilt_shape": 1.0,
+            "window_days": 252,
             "momentum_weight": 0.85,
             "macro_weight": 0.15,
         },
-        "momentum_top3": {},
-        "dual_momentum_top3": {},
-        "trailing_momentum_low_vol_universe": {},
-        "positive_momentum_universe": {},
-        "positive_momentum_low_vol_universe": {},
-        "positive_momentum_high_volume_universe": {},
+        "momentum_top3": {"window_days": 252},
+        "dual_momentum_top3": {"window_days": 252},
+        "trailing_momentum_low_vol_universe": {"window_days": 252},
+        "positive_momentum_universe": {"window_days": 252},
+        "positive_momentum_low_vol_universe": {"window_days": 252},
+        "positive_momentum_high_volume_universe": {"window_days": 252},
     }
     filter_rules = {
         "full_universe": (),
@@ -551,11 +553,46 @@ def serialize_risk_controls_definition(risk_controls_definition: RiskControlsDef
     }
 
 
+def serialize_asset_ranking_model_parameters(strategy_definition: StrategyDefinition) -> dict[str, float]:
+    score_parameters = dict(strategy_definition.selection_definition.score_parameters)
+    serialized: dict[str, float] = {}
+
+    if "window_days" in score_parameters:
+        serialized["windowDays"] = float(score_parameters["window_days"])
+    if "momentum_weight" in score_parameters:
+        serialized["momentumWeight"] = float(score_parameters["momentum_weight"])
+    if "low_vol_weight" in score_parameters:
+        serialized["lowVolWeight"] = float(score_parameters["low_vol_weight"])
+    if "macro_weight" in score_parameters:
+        serialized["macroWeight"] = float(score_parameters["macro_weight"])
+
+    return serialized
+
+
+def serialize_tilt_rule(strategy_definition: StrategyDefinition) -> dict | None:
+    score_parameters = dict(strategy_definition.selection_definition.score_parameters)
+    if "tilt_strength" not in score_parameters:
+        return None
+
+    parameters = {
+        "strength": float(score_parameters["tilt_strength"]),
+    }
+    if "tilt_shape" in score_parameters:
+        parameters["shape"] = float(score_parameters["tilt_shape"])
+
+    return {
+        "key": "ranking_weight_tilt",
+        "label": "ランキング連動ティルト",
+        "parameters": parameters,
+    }
+
+
 def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
     ranking_model = (
         {
             "key": strategy_definition.selection_definition.score_model.key,
             "label": strategy_definition.selection_definition.score_model.label,
+            "parameters": serialize_asset_ranking_model_parameters(strategy_definition),
         }
         if strategy_definition.selection_definition.score_model.key != "none"
         else None
@@ -571,7 +608,6 @@ def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> di
     return {
         "strategyId": strategy_definition.strategy_id,
         "version": strategy_definition.version,
-        "key": strategy_definition.key,
         "label": strategy_definition.label,
         "hypothesis": strategy_definition.hypothesis,
         "description": strategy_definition.description,
@@ -608,23 +644,12 @@ def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> di
                 "riskControls": serialize_risk_controls_definition(
                     strategy_definition.risk_controls_definition
                 ),
+                "tiltRule": serialize_tilt_rule(strategy_definition),
             },
         },
         "extensions": {
             key: value for key, value in strategy_definition.extensions
         },
-        "selectionDefinition": serialize_portfolio_strategy_definition(
-            strategy_definition.selection_definition
-        ),
-        "portfolioModel": serialize_portfolio_model_definition(
-            strategy_definition.portfolio_model_definition
-        ),
-        "executionPolicy": serialize_execution_policy_definition(
-            strategy_definition.execution_policy_definition
-        ),
-        "riskControls": serialize_risk_controls_definition(
-            strategy_definition.risk_controls_definition
-        ),
     }
 
 
@@ -736,17 +761,18 @@ def extract_ranking_score_parameters(
     strategy_definition: PortfolioStrategyDefinition,
 ) -> dict[str, float]:
     score_parameters = dict(strategy_definition.score_parameters)
+    extracted: dict[str, float] = {}
+    if "window_days" in score_parameters:
+        extracted["windowDays"] = float(score_parameters["window_days"])
     if strategy_definition.score_model.key == "momentum_low_vol":
-        return {
-            "momentumWeight": float(score_parameters.get("momentum_weight", 0.7)),
-            "lowVolWeight": float(score_parameters.get("low_vol_weight", 0.3)),
-        }
+        extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.7))
+        extracted["lowVolWeight"] = float(score_parameters.get("low_vol_weight", 0.3))
+        return extracted
     if strategy_definition.score_model.key == "momentum_macro":
-        return {
-            "momentumWeight": float(score_parameters.get("momentum_weight", 0.85)),
-            "macroWeight": float(score_parameters.get("macro_weight", 0.15)),
-        }
-    return {}
+        extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.85))
+        extracted["macroWeight"] = float(score_parameters.get("macro_weight", 0.15))
+        return extracted
+    return extracted
 
 
 def build_portfolio_state(
@@ -945,7 +971,7 @@ def select_assets(
     volume_history: pd.DataFrame | None,
     strategy_definition: PortfolioStrategyDefinition,
 ) -> list[str]:
-    trailing_total_returns = compute_trailing_total_returns(returns)
+    trailing_total_returns = compute_trailing_total_returns(returns, strategy_definition)
 
     if strategy_definition.strategy_type == "full_universe":
         return list(returns.columns)
@@ -1024,12 +1050,12 @@ def compute_strategy_score_series(
     if score_key == "none":
         return None
     if score_key in {"momentum", "trailing_momentum_12m"}:
-        return compute_trailing_total_returns(returns)
+        return compute_trailing_total_returns(returns, strategy_definition)
     if score_key == "momentum_low_vol":
         score_parameters = dict(strategy_definition.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.7))
         low_vol_weight = float(score_parameters.get("low_vol_weight", 0.3))
-        trailing_returns = compute_trailing_total_returns(returns)
+        trailing_returns = compute_trailing_total_returns(returns, strategy_definition)
         momentum_rank = trailing_returns.rank(method="average", pct=True)
         low_vol_rank = (-returns.std()).rank(method="average", pct=True)
         return momentum_weight * momentum_rank + low_vol_weight * low_vol_rank
@@ -1037,9 +1063,9 @@ def compute_strategy_score_series(
         score_parameters = dict(strategy_definition.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.85))
         macro_weight = float(score_parameters.get("macro_weight", 0.15))
-        trailing_returns = compute_trailing_total_returns(returns)
+        trailing_returns = compute_trailing_total_returns(returns, strategy_definition)
         momentum_rank = trailing_returns.rank(method="average", pct=True)
-        macro_rank = compute_macro_proxy_rank(returns)
+        macro_rank = compute_macro_proxy_rank(returns, strategy_definition)
         return momentum_weight * momentum_rank + macro_weight * macro_rank
     if score_key == "volume_strength":
         if volume_history is None:
@@ -1050,8 +1076,17 @@ def compute_strategy_score_series(
     raise ValueError("Unsupported score model.")
 
 
-def compute_trailing_total_returns(returns: pd.DataFrame) -> pd.Series:
-    lookback = min(len(returns), 252)
+def get_ranking_window_days(strategy_definition: PortfolioStrategyDefinition) -> int:
+    score_parameters = dict(strategy_definition.score_parameters)
+    configured_window = int(score_parameters.get("window_days", 252))
+    return max(1, configured_window)
+
+
+def compute_trailing_total_returns(
+    returns: pd.DataFrame,
+    strategy_definition: PortfolioStrategyDefinition,
+) -> pd.Series:
+    lookback = min(len(returns), get_ranking_window_days(strategy_definition))
     trailing_returns = returns.iloc[-lookback:]
     return (1 + trailing_returns).prod() - 1
 
@@ -1067,8 +1102,11 @@ def compute_volume_strength(volume_history: pd.DataFrame) -> pd.Series:
     return (recent / baseline).replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
-def compute_macro_proxy_rank(returns: pd.DataFrame) -> pd.Series:
-    trailing_returns = compute_trailing_total_returns(returns)
+def compute_macro_proxy_rank(
+    returns: pd.DataFrame,
+    strategy_definition: PortfolioStrategyDefinition,
+) -> pd.Series:
+    trailing_returns = compute_trailing_total_returns(returns, strategy_definition)
     risk_assets = [asset for asset in ["SPY", "QQQ", "IWM", "EFA", "EEM", "EWJ", "EWZ", "VNQ", "DBC", "USO", "BTC-USD", "ETH-USD"] if asset in trailing_returns.index]
     defensive_assets = [asset for asset in ["TLT", "IEF", "LQD", "HYG", "TIP", "GLD", "SLV", "UUP"] if asset in trailing_returns.index]
     if not risk_assets or not defensive_assets:

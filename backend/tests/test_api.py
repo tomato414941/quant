@@ -177,34 +177,41 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"] == 70.0
     assert payload["study"]["initialPortfolioState"]["weights"][0]["asset"] == "CASH"
     assert payload["study"]["initialPortfolioState"]["weights"][0]["weightPct"] == 15.0
-    assert len(payload["study"]["strategyDefinitions"]) == 23
-    assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["universePolicy"]["label"]
-    assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["scoreModel"]["label"]
-    assert "filterRules" in payload["study"]["strategyDefinitions"][0]["selectionDefinition"]
-    assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["fallbackRule"]["label"]
+    assert len(payload["study"]["strategyDefinitions"]) == 25
+    assert payload["study"]["strategyDefinitions"][0]["components"]["core"]["investmentUniverse"]["label"]
+    assert payload["study"]["strategyDefinitions"][0]["components"]["optional"]["assetRankingModel"] is None
+    assert "filterRules" in payload["study"]["strategyDefinitions"][0]["components"]["optional"]
+    assert (
+        payload["study"]["strategyDefinitions"][5]["components"]["optional"]["assetRankingModel"]["parameters"]["windowDays"]
+        == 252.0
+    )
+    assert (
+        payload["study"]["strategyDefinitions"][5]["components"]["optional"]["tiltRule"]["parameters"]["strength"]
+        == 0.35
+    )
     assert payload["study"]["marketUniverse"]["assetCount"] == 20
     assert len(payload["study"]["marketUniverse"]["tickers"]) == 20
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
-    assert payload["runs"][0]["strategy"]["selectionDefinition"]["label"] == "全資産"
-    assert payload["runs"][0]["strategy"]["portfolioModel"]["label"] == "等金額配分"
+    assert payload["runs"][0]["strategy"]["components"]["core"]["investmentUniverse"]["label"] == "20資産マルチアセット"
+    assert payload["runs"][0]["strategy"]["components"]["core"]["portfolioModel"]["label"] == "等金額配分"
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
-    assert payload["runs"][0]["strategy"]["executionPolicy"]["label"] == "年次"
+    assert payload["runs"][0]["strategy"]["components"]["core"]["executionPolicy"]["label"] == "年次"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 46
+    assert payload["runStoreSummary"]["computedRunCount"] == 50
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert payload["sanityChecks"][0]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 23
-    assert len(payload["sanityChecks"][0]["runs"]) == 23
+    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 25
+    assert len(payload["sanityChecks"][0]["runs"]) == 25
 
     second_response = client.get("/api/dashboard")
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 46
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 50
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
-    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 23
+    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 25
     assert second_payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 0
 
 
@@ -374,9 +381,9 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["study"]["id"] == "etf_portfolio_models_10y"
-    assert payload["resultCount"] == 10
+    assert payload["resultCount"] == 12
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 10
+    assert payload["runStoreSummary"]["computedRunCount"] == 12
     assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
@@ -385,7 +392,7 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 10
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 12
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 

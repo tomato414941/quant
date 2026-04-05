@@ -30,31 +30,46 @@ FULL_UNIVERSE_MOMENTUM_TILT = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt",
     label="全資産モメンタム傾斜",
-    description="全ETFを候補に残しつつ、12ヶ月モメンタムで重みだけを傾ける",
-    score_parameters={"tilt_strength": 0.5},
+    description="全ETFを候補に残しつつ、モメンタムで重みだけを傾ける",
+    score_parameters={"tilt_strength": 0.5, "window_days": 252},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak",
-    label="全資産モメンタム傾斜 弱",
+    label="全資産モメンタム傾斜 弱 12ヶ月",
     description="全ETFを候補に残しつつ、弱めの12ヶ月モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.25, "tilt_shape": 0.0},
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 0.0, "window_days": 252},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top",
-    label="全資産モメンタム傾斜 最良 上位優遇",
+    label="全資産モメンタム傾斜 最良 上位優遇 12ヶ月",
     description="全ETFを候補に残しつつ、局所探索で最良だった上位優遇モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 252},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_6m",
+    label="全資産モメンタム傾斜 上位優遇 6ヶ月",
+    description="全ETFを候補に残しつつ、6ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 126},
+)
+FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M = build_portfolio_strategy_definition(
+    strategy_type="full_universe_momentum_tilt",
+    key="full_universe_momentum_tilt_weak_top_3m",
+    label="全資産モメンタム傾斜 上位優遇 3ヶ月",
+    description="全ETFを候補に残しつつ、3ヶ月モメンタムの上位優遇傾斜で重みを調整する",
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 63},
 )
 FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_low_vol_tilt",
     key="full_universe_momentum_low_vol_tilt_weak_top",
-    label="全資産モメンタム低ボラ傾斜 弱 上位優遇",
+    label="全資産モメンタム低ボラ傾斜 弱 上位優遇 12ヶ月",
     description="全ETFを候補に残しつつ、12ヶ月モメンタムと低ボラの複合スコアで弱く上位優遇する",
     score_parameters={
         "tilt_strength": 0.25,
         "tilt_shape": 1.0,
+        "window_days": 252,
         "momentum_weight": 0.7,
         "low_vol_weight": 0.3,
     },
@@ -67,6 +82,7 @@ FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP = build_portfolio_strategy_definit
     score_parameters={
         "tilt_strength": 0.25,
         "tilt_shape": 1.0,
+        "window_days": 252,
         "momentum_weight": 0.85,
         "low_vol_weight": 0.15,
     },
@@ -79,6 +95,7 @@ FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP = build_portfolio_strategy_definitio
     score_parameters={
         "tilt_strength": 0.25,
         "tilt_shape": 1.0,
+        "window_days": 252,
         "momentum_weight": 0.85,
         "macro_weight": 0.15,
     },
@@ -88,14 +105,14 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX = build_portfolio_strategy_definition(
     key="full_universe_momentum_tilt_weak_softmax",
     label="全資産モメンタム傾斜 弱 softmax",
     description="全ETFを候補に残しつつ、弱めのsoftmax型モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.25, "tilt_shape": 2.0},
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 2.0, "window_days": 252},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_STRONG = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_strong",
     label="全資産モメンタム傾斜 強",
     description="全ETFを候補に残しつつ、強めの12ヶ月モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 1.0, "tilt_shape": 0.0},
+    score_parameters={"tilt_strength": 1.0, "tilt_shape": 0.0, "window_days": 252},
 )
 MOMENTUM_TOP3 = build_portfolio_strategy_definition(
     strategy_type="momentum_top3",
@@ -264,8 +281,8 @@ DEFAULT_RISK_CONTROLS = build_risk_controls_definition(
 
 DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
     study_id="etf_portfolio_models_10y",
-    title="マルチアセット戦略 x ポートフォリオ構築の比較",
-    question="条件スイープで最良だった 年次 / 100%投資 / 45%上限 / 0.05%手数料 を固定し、10y を主期間に戦略と配分法を比較する",
+    title="有望Strategyの探索",
+    question="共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",
     dataset_spec=DatasetSpec(
         period="10y",
         sanity_periods=["3y"],
@@ -350,6 +367,20 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
         build_strategy_definition(
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,

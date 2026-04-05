@@ -327,11 +327,11 @@ def compact_run_record(record: dict) -> dict:
         "strategyHypothesis": strategy.get("hypothesis"),
         "investmentUniverseLabel": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("label"),
         "investmentUniverseAssetCount": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("assetCount"),
-        "portfolioModelLabel": strategy.get("portfolioModel", {}).get("label"),
-        "executionLabel": strategy.get("executionPolicy", {}).get("label"),
+        "portfolioModelLabel": strategy.get("components", {}).get("core", {}).get("portfolioModel", {}).get("label"),
+        "executionLabel": strategy.get("components", {}).get("core", {}).get("executionPolicy", {}).get("label"),
         "period": dataset_context.get("period"),
-        "maxInvestmentPct": strategy.get("riskControls", {}).get("maxInvestmentPct"),
-        "maxWeightPct": strategy.get("riskControls", {}).get("maxWeightPct"),
+        "maxInvestmentPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxInvestmentPct"),
+        "maxWeightPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxWeightPct"),
         "commissionPct": cost_assumptions.get("commissionPct"),
         "benchmark": evaluation_settings.get("benchmark"),
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
@@ -594,6 +594,7 @@ def build_parameter_sweep_runs(
                     score_parameters = {
                         "tilt_strength": tilt_strength,
                         "tilt_shape": 1.0,
+                        "window_days": 252,
                     }
                     if macro_weight is not None:
                         score_parameters["momentum_weight"] = round(1.0 - macro_weight, 2)

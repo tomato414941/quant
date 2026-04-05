@@ -9,14 +9,15 @@ from app.portfolio import (
     build_risk_controls_definition,
     build_strategy_definition,
 )
-from app.study_models import (
+from app.comparison_models import (
+    ComparisonDefinition,
     CostAssumptions,
     ConditionVariant,
     DatasetSpec,
     EvaluationContext,
     EvaluationSettings,
+    RunInputDefinition,
     SelectionPolicy,
-    StudyDefinition,
 )
 
 
@@ -273,62 +274,85 @@ ANNUAL_EXECUTION_POLICY = build_execution_policy_definition(
     rebalance_frequency="annual",
 )
 
+HOLD_EXECUTION_POLICY = build_execution_policy_definition(
+    key="hold",
+    label="保有",
+    entry="hold",
+    rebalance_frequency="hold",
+)
+
 DEFAULT_RISK_CONTROLS = build_risk_controls_definition(
     max_investment_ratio=1.0,
     max_weight=0.45,
 )
 
 
-DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
-    study_id="etf_portfolio_models_10y",
+REFERENCE_EQUAL_WEIGHT_WITH_CASH = build_strategy_definition(
+    strategy_id="ref-fu-eq-hold-cash",
+    investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
+    selection_definition=FULL_UNIVERSE,
+    portfolio_model_definition=EQUAL_WEIGHT,
+    execution_policy_definition=HOLD_EXECUTION_POLICY,
+    risk_controls_definition=build_risk_controls_definition(
+        max_investment_ratio=0.85,
+        max_weight=None,
+    ),
+    label="等金額買い持ち + CASH",
+    description="全資産を等金額で買い持ちし、15% を CASH に残す参照用 Strategy",
+)
+
+
+DEFAULT_COMPARISON_CONFIG = ComparisonDefinition(
+    comparison_id="etf_portfolio_models_10y",
     title="有望Strategyの探索",
     question="共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",
     dataset_spec=DatasetSpec(
         period="10y",
         sanity_periods=["3y"],
     ),
-    evaluation_context=EvaluationContext(
-        evaluation_settings=EvaluationSettings(
-            split_ratio=0.7,
-            initial_capital=10_000,
-            benchmark="equal_weight_buy_and_hold_with_cash",
+    run_input=RunInputDefinition(
+        portfolio_state=build_portfolio_state(
+            current_weights={
+                "SPY": 0.0425,
+                "QQQ": 0.0425,
+                "IWM": 0.0425,
+                "EFA": 0.0425,
+                "EEM": 0.0425,
+                "EWJ": 0.0425,
+                "EWZ": 0.0425,
+                "VNQ": 0.0425,
+                "TLT": 0.0425,
+                "IEF": 0.0425,
+                "LQD": 0.0425,
+                "HYG": 0.0425,
+                "TIP": 0.0425,
+                "GLD": 0.0425,
+                "SLV": 0.0425,
+                "DBC": 0.0425,
+                "USO": 0.0425,
+                "UUP": 0.0425,
+                "BTC-USD": 0.0425,
+                "ETH-USD": 0.0425,
+            },
+            cash_weight=0.15,
         ),
-        cost_assumptions=CostAssumptions(
-            commission_pct=0.05,
-            slippage_pct=0.0,
+        evaluation_context=EvaluationContext(
+            evaluation_settings=EvaluationSettings(
+                split_ratio=0.7,
+                initial_capital=10_000,
+            ),
+            cost_assumptions=CostAssumptions(
+                commission_pct=0.05,
+                slippage_pct=0.0,
+            ),
         ),
-    ),
-    initial_portfolio_state=build_portfolio_state(
-        current_weights={
-            "SPY": 0.0425,
-            "QQQ": 0.0425,
-            "IWM": 0.0425,
-            "EFA": 0.0425,
-            "EEM": 0.0425,
-            "EWJ": 0.0425,
-            "EWZ": 0.0425,
-            "VNQ": 0.0425,
-            "TLT": 0.0425,
-            "IEF": 0.0425,
-            "LQD": 0.0425,
-            "HYG": 0.0425,
-            "TIP": 0.0425,
-            "GLD": 0.0425,
-            "SLV": 0.0425,
-            "DBC": 0.0425,
-            "USO": 0.0425,
-            "UUP": 0.0425,
-            "BTC-USD": 0.0425,
-            "ETH-USD": 0.0425,
-        },
-        cash_weight=0.15,
     ),
     selection_policy=SelectionPolicy(
         primary_metric="sharpe_ratio",
         secondary_metric="total_return",
         tertiary_metric="max_drawdown",
     ),
-    strategy_definitions=[
+    candidate_strategy_definitions=[
         build_strategy_definition(
             strategy_id="stg-fu-eq-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
@@ -536,6 +560,9 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             hypothesis="暗号資産を外したETFユニバースでも、上位優遇型のモメンタム傾斜が有効に働く可能性がある",
             description="18資産ETFに限定して、12ヶ月モメンタムの上位優遇傾斜をHRPに載せる",
         ),
+    ],
+    reference_strategy_definitions=[
+        REFERENCE_EQUAL_WEIGHT_WITH_CASH,
     ],
     condition_variants=build_condition_variants(),
 )

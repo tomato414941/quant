@@ -4,8 +4,8 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from app import main as main_module
+from app.comparison_models import ConditionVariant
 from app.main import app
-from app.study_models import ConditionVariant
 
 
 client = TestClient(app)
@@ -121,105 +121,148 @@ def test_healthcheck() -> None:
 
 def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
 
     response = client.get("/api/dashboard")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["study"]["id"] == "etf_portfolio_models_10y"
-    assert payload["study"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
-    assert payload["study"]["evaluationContext"]["datasetContext"]["source"] == "test"
-    assert payload["study"]["evaluationContext"]["kind"] == "evaluation_context"
-    assert payload["study"]["evaluationContext"]["schemaVersion"] == "v1"
-    assert payload["study"]["evaluationContext"]["datasetContext"]["period"] == "10y"
-    assert payload["study"]["evaluationContext"]["datasetContext"]["sanityPeriods"] == ["3y"]
-    assert payload["study"]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
-    assert payload["study"]["evaluationContext"]["datasetContext"]["alignedEndDate"] == "2025-01-07"
-    assert payload["study"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
-    assert payload["study"]["strategyDefinitions"][0]["components"]["core"]["dataResolution"]["label"] == "daily"
-    assert payload["study"]["strategyDefinitions"][0]["kind"] == "strategy_definition"
-    assert payload["study"]["strategyDefinitions"][0]["schemaVersion"] == "v1"
-    assert payload["study"]["evaluationContext"]["costAssumptions"]["commissionPct"] == 0.05
-    assert payload["study"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"] == 70.0
-    assert payload["study"]["initialPortfolioState"]["weights"][0]["asset"] == "CASH"
-    assert payload["study"]["initialPortfolioState"]["weights"][0]["weightPct"] == 15.0
-    assert len(payload["study"]["strategyDefinitions"]) == 25
-    assert payload["study"]["strategyDefinitions"][0]["components"]["core"]["investmentUniverse"]["label"]
-    assert payload["study"]["strategyDefinitions"][0]["components"]["optional"]["assetRankingModel"] is None
-    assert "filterRules" in payload["study"]["strategyDefinitions"][0]["components"]["optional"]
+    expected_strategy_count = len(config.candidate_strategy_definitions)
+    expected_reference_count = len(config.reference_strategy_definitions)
+
+    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparison"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
+    assert payload["comparison"]["runInput"]["evaluationContext"]["kind"] == "evaluation_context"
+    assert payload["comparison"]["runInput"]["evaluationContext"]["schemaVersion"] == "v1"
+    assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["source"] == "test"
+    assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["period"] == "10y"
     assert (
-        payload["study"]["strategyDefinitions"][5]["components"]["optional"]["assetRankingModel"]["parameters"]["windowDays"]
+        payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["sanityPeriods"]
+        == ["3y"]
+    )
+    assert (
+        payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["alignedStartDate"]
+        == "2025-01-01"
+    )
+    assert (
+        payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["alignedEndDate"]
+        == "2025-01-07"
+    )
+    assert payload["comparison"]["runInput"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
+    assert payload["comparison"]["runInput"]["evaluationContext"]["costAssumptions"]["commissionPct"] == 0.05
+    assert (
+        payload["comparison"]["runInput"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"]
+        == 70.0
+    )
+    assert payload["comparison"]["runInput"]["portfolioState"]["weights"][0]["asset"] == "CASH"
+    assert payload["comparison"]["runInput"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
+    assert len(payload["comparison"]["candidateStrategies"]) == expected_strategy_count
+    assert len(payload["comparison"]["referenceStrategies"]) == expected_reference_count
+    assert (
+        payload["comparison"]["candidateStrategies"][0]["components"]["core"]["dataResolution"]["label"]
+        == "daily"
+    )
+    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
+    assert payload["comparison"]["candidateStrategies"][0]["schemaVersion"] == "v1"
+    assert payload["comparison"]["candidateStrategies"][0]["components"]["core"]["investmentUniverse"]["label"]
+    assert (
+        payload["comparison"]["candidateStrategies"][0]["components"]["optional"]["assetRankingModel"]
+        is None
+    )
+    assert "filterRules" in payload["comparison"]["candidateStrategies"][0]["components"]["optional"]
+    assert (
+        payload["comparison"]["candidateStrategies"][5]["components"]["optional"]["assetRankingModel"][
+            "parameters"
+        ]["windowDays"]
         == 252.0
     )
     assert (
-        payload["study"]["strategyDefinitions"][5]["components"]["optional"]["tiltRule"]["parameters"]["strength"]
+        payload["comparison"]["candidateStrategies"][5]["components"]["optional"]["tiltRule"][
+            "parameters"
+        ]["strength"]
         == 0.35
     )
-    assert payload["study"]["marketUniverse"]["assetCount"] == 20
-    assert len(payload["study"]["marketUniverse"]["tickers"]) == 20
-    assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
-    assert payload["runs"][0]["kind"] == "run_result"
-    assert payload["runs"][0]["schemaVersion"] == "v1"
-    assert payload["runs"][0]["strategy"]["components"]["core"]["investmentUniverse"]["label"] == "20資産マルチアセット"
-    assert payload["runs"][0]["strategy"]["components"]["core"]["portfolioModel"]["label"] == "等金額配分"
-    assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
-    assert payload["runs"][0]["strategy"]["components"]["core"]["executionPolicy"]["label"] == "年次"
+    assert payload["comparison"]["marketUniverse"]["assetCount"] == 20
+    assert len(payload["comparison"]["marketUniverse"]["tickers"]) == 20
+
+    assert len(payload["candidateRuns"]) == expected_strategy_count
+    assert len(payload["referenceRuns"]) == expected_reference_count
+    assert payload["candidateRuns"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
+    assert payload["candidateRuns"][0]["kind"] == "run_result"
+    assert payload["candidateRuns"][0]["schemaVersion"] == "v1"
+    assert (
+        payload["candidateRuns"][0]["strategy"]["components"]["core"]["investmentUniverse"]["label"]
+        == "20資産マルチアセット"
+    )
+    assert payload["referenceRuns"][0]["strategy"]["label"] == "等金額買い持ち + CASH"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 50
+    assert payload["runStoreSummary"]["computedRunCount"] == (expected_strategy_count + expected_reference_count) * 2
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
-    assert payload["sanityChecks"][0]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
+    assert (
+        payload["sanityChecks"][0]["evaluationContext"]["datasetContext"]["alignedStartDate"]
+        == "2025-01-01"
+    )
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 25
-    assert len(payload["sanityChecks"][0]["runs"]) == 25
+    assert (
+        payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"]
+        == expected_strategy_count + expected_reference_count
+    )
+    assert len(payload["sanityChecks"][0]["candidateRuns"]) == expected_strategy_count
+    assert len(payload["sanityChecks"][0]["referenceRuns"]) == expected_reference_count
 
     second_response = client.get("/api/dashboard")
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 50
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == (expected_strategy_count + expected_reference_count) * 2
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
-    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 25
+    assert (
+        second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"]
+        == expected_strategy_count + expected_reference_count
+    )
     assert second_payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 0
 
 
 def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    base_config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    base_config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
     config = copy.deepcopy(base_config)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
-    config.strategy_definitions = [config.strategy_definitions[0]]
-    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+    config.candidate_strategy_definitions = [config.candidate_strategy_definitions[0]]
+    config.reference_strategy_definitions = []
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
 
     first_response = client.get("/api/dashboard")
 
     assert first_response.status_code == 200
     first_payload = first_response.json()
-    assert len(first_payload["runs"]) == 1
+    assert len(first_payload["candidateRuns"]) == 1
+    assert len(first_payload["referenceRuns"]) == 0
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 1
 
-    config.strategy_definitions.append(copy.deepcopy(base_config.strategy_definitions[1]))
+    config.candidate_strategy_definitions.append(copy.deepcopy(base_config.candidate_strategy_definitions[1]))
 
     second_response = client.get("/api/dashboard")
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert len(second_payload["runs"]) == 2
+    assert len(second_payload["candidateRuns"]) == 2
     assert second_payload["runStoreSummary"]["cachedRunCount"] == 1
     assert second_payload["runStoreSummary"]["computedRunCount"] == 1
 
 
 def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
-    config.strategy_definitions = [config.strategy_definitions[0]]
+    config.candidate_strategy_definitions = [config.candidate_strategy_definitions[0]]
+    config.reference_strategy_definitions = []
     config.condition_variants = [
         ConditionVariant(
             key="baseline",
@@ -236,12 +279,13 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
             max_weight=None,
         ),
     ]
-    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
 
     first_response = client.get("/api/condition-sweep")
 
     assert first_response.status_code == 200
     first_payload = first_response.json()
+    assert first_payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert first_payload["resultCount"] == 2
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 2
@@ -276,20 +320,20 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
 
 def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
 
     dashboard_response = client.get("/api/dashboard")
     assert dashboard_response.status_code == 200
 
-    response = client.get("/api/run-catalog", params={"limit": 5, "run_kind": "dashboard"})
+    response = client.get("/api/run-catalog", params={"limit": 5, "run_kind": "strategy_run"})
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["studyId"] == "etf_portfolio_models_10y"
+    assert payload["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["limit"] == 5
-    assert payload["runKind"] == "dashboard"
+    assert payload["runKind"] == "strategy_run"
     assert payload["recordCount"] == 5
     assert payload["records"][0]["strategyLabel"]
     assert payload["records"][0]["investmentUniverseLabel"]
@@ -301,15 +345,15 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
 
 def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
 
     response = client.post("/api/runs/generate-parameter-sweep")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["study"]["id"] == "etf_portfolio_models_10y"
+    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["generation"]["method"] == "parameter_sweep"
     assert payload["generation"]["batchKey"] == "local_tilt_search_v1"
     assert payload["generation"]["spec"]["parameterGrid"]["tiltStrength"] == [0.15, 0.2, 0.25, 0.3, 0.35]
@@ -343,15 +387,15 @@ def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
 
 def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_DASHBOARD_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
 
     response = client.get("/api/ranking-evaluation")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["study"]["id"] == "etf_portfolio_models_10y"
+    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["resultCount"] == 12
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == 12

@@ -874,12 +874,6 @@ def compare_portfolio_runs(
 
         split_index = compute_split_index(len(returns), split_ratio)
         train_returns = returns.iloc[:split_index]
-        benchmark_weights = np.repeat(1.0 / len(returns.columns), len(returns.columns))
-        benchmark_returns = pd.Series(
-            returns.to_numpy(dtype="float64") @ benchmark_weights,
-            index=returns.index,
-            dtype="float64",
-        )
         initial_portfolio_weights = resolve_initial_weights(
             universe_columns=returns.columns,
             portfolio_state=portfolio_state,
@@ -911,11 +905,9 @@ def compare_portfolio_runs(
             initial_selected_assets=initial_selected_assets,
             max_investment_ratio=risk_controls.max_investment_ratio,
             initial_capital=initial_capital,
-            benchmark_returns=benchmark_returns,
             transaction_cost=transaction_cost,
             max_weight=risk_controls.max_weight,
             rebalance_frequency=execution_policy.rebalance_frequency,
-            portfolio_state=portfolio_state,
         )
 
         runs.append(
@@ -930,8 +922,7 @@ def compare_portfolio_runs(
                     risk_controls.max_investment_ratio,
                 ),
                 "selectedAssets": backtest["latestSelectedAssets"],
-                "summary": backtest["summary"]["portfolio"],
-                "benchmark": backtest["summary"]["benchmark"],
+                "summary": backtest["summary"],
                 "splitAnalysis": backtest["splitAnalysis"],
                 "series": backtest["series"],
             }
@@ -1548,23 +1539,17 @@ def run_portfolio_backtest(
     initial_selected_assets: list[str],
     max_investment_ratio: float,
     initial_capital: float,
-    benchmark_returns: pd.Series,
     transaction_cost: float,
     max_weight: float | None,
     rebalance_frequency: str,
-    portfolio_state: PortfolioState | None,
 ) -> dict:
     portfolio_equity = initial_capital
-    benchmark_equity = initial_capital
     portfolio_returns: list[float] = []
-    benchmark_return_values: list[float] = []
     series: list[dict] = []
     train_dates: list[str] = []
     test_dates: list[str] = []
     train_portfolio_returns: list[float] = []
     test_portfolio_returns: list[float] = []
-    train_benchmark_returns: list[float] = []
-    test_benchmark_returns: list[float] = []
     train_turnover = 0.0
     test_turnover = 0.0
     current_weights = initial_weights.copy()
@@ -1599,18 +1584,13 @@ def run_portfolio_backtest(
 
         portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), current_weights))
         portfolio_return -= transaction_cost * trade_turnover
-        benchmark_return = float(benchmark_returns.loc[date])
 
         portfolio_equity *= 1 + portfolio_return
-        benchmark_equity *= 1 + benchmark_return
         portfolio_returns.append(portfolio_return)
-        benchmark_return_values.append(benchmark_return)
         segment_dates = train_dates if index < split_index else test_dates
         segment_portfolio_returns = train_portfolio_returns if index < split_index else test_portfolio_returns
-        segment_benchmark_returns = train_benchmark_returns if index < split_index else test_benchmark_returns
         segment_dates.append(str(date))
         segment_portfolio_returns.append(portfolio_return)
-        segment_benchmark_returns.append(benchmark_return)
         if index < split_index:
             train_turnover += trade_turnover
         else:
@@ -1619,31 +1599,19 @@ def run_portfolio_backtest(
             {
                 "date": str(date),
                 "portfolioEquity": round(portfolio_equity, 2),
-                "benchmarkEquity": round(benchmark_equity, 2),
                 "portfolioReturnPct": round(portfolio_return * 100, 2),
             }
         )
 
-    summary = {
-        "portfolio": summarize_portfolio_metrics(
-            final_value=portfolio_equity,
-            initial_value=initial_capital,
-            periods=len(returns),
-            returns=portfolio_returns,
-            series=series,
-            equity_key="portfolioEquity",
-            turnover=round((train_turnover + test_turnover) * 100, 2),
-        ),
-        "benchmark": summarize_portfolio_metrics(
-            final_value=benchmark_equity,
-            initial_value=initial_capital,
-            periods=len(returns),
-            returns=benchmark_return_values,
-            series=series,
-            equity_key="benchmarkEquity",
-            turnover=0.0,
-        ),
-    }
+    summary = summarize_portfolio_metrics(
+        final_value=portfolio_equity,
+        initial_value=initial_capital,
+        periods=len(returns),
+        returns=portfolio_returns,
+        series=series,
+        equity_key="portfolioEquity",
+        turnover=round((train_turnover + test_turnover) * 100, 2),
+    )
     return {
         "summary": summary,
         "series": series,
@@ -1654,13 +1622,11 @@ def run_portfolio_backtest(
             "train": summarize_segment_from_returns(
                 dates=train_dates,
                 portfolio_returns=train_portfolio_returns,
-                benchmark_returns=train_benchmark_returns,
                 turnover=train_turnover,
             ),
             "test": summarize_segment_from_returns(
                 dates=test_dates,
                 portfolio_returns=test_portfolio_returns,
-                benchmark_returns=test_benchmark_returns,
                 turnover=test_turnover,
             ),
         },
@@ -1688,7 +1654,6 @@ def summarize_portfolio_metrics(
 def summarize_segment_from_returns(
     dates: list[str],
     portfolio_returns: list[float],
-    benchmark_returns: list[float],
     turnover: float,
 ) -> dict:
     return {
@@ -1700,12 +1665,6 @@ def summarize_segment_from_returns(
             daily_returns=portfolio_returns,
             equity_key="portfolioEquity",
             turnover=turnover,
-        ),
-        "benchmark": summarize_metrics_from_daily_returns(
-            dates=dates,
-            daily_returns=benchmark_returns,
-            equity_key="benchmarkEquity",
-            turnover=0.0,
         ),
     }
 

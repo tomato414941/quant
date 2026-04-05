@@ -11,81 +11,120 @@ from app.portfolio import (
     evaluate_asset_ranking_definition,
     evaluate_strategy_run,
     serialize_asset_ranking_definition,
-    serialize_portfolio_model_definition,
-    serialize_execution_policy_definition,
-    serialize_risk_controls_definition,
     serialize_portfolio_state,
     serialize_strategy_definition,
 )
+from app.comparison_models import ComparisonDefinition, ConditionVariant, EvaluationContext
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_definition
-from app.study_models import ConditionVariant, EvaluationContext, StudyDefinition
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def collect_study_tickers(study: StudyDefinition) -> list[str]:
+def collect_comparison_tickers(comparison: ComparisonDefinition) -> list[str]:
     seen: dict[str, None] = {}
-    for strategy_definition in study.strategy_definitions:
+    for strategy_definition in (
+        comparison.candidate_strategy_definitions + comparison.reference_strategy_definitions
+    ):
         for ticker in strategy_definition.investment_universe_definition.tickers:
             seen.setdefault(ticker, None)
     return list(seen.keys())
 
 
 def build_dashboard_payload(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
-    run_store = build_run_result_store(study)
-    study_tickers = collect_study_tickers(study)
+    run_store = build_run_result_store(comparison)
+    comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study_tickers,
-        period=study.dataset_spec.period,
+        tickers=comparison_tickers,
+        period=comparison.dataset_spec.period,
     )
-    runs, run_store_summary = build_portfolio_runs(
-        study=study,
+    candidate_runs, candidate_run_store_summary = build_strategy_runs(
+        comparison=comparison,
+        strategy_definitions=comparison.candidate_strategy_definitions,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=study.dataset_spec.period,
+        dataset_period=comparison.dataset_spec.period,
+        dataset_metadata=metadata,
+        run_store=run_store,
+    )
+    reference_runs, reference_run_store_summary = build_strategy_runs(
+        comparison=comparison,
+        strategy_definitions=comparison.reference_strategy_definitions,
+        closes=market_bundle["closes"],
+        volumes=market_bundle["volumes"],
+        dataset_period=comparison.dataset_spec.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
     sanity_checks = []
-    total_cached_runs = run_store_summary.cached_run_count
-    total_computed_runs = run_store_summary.computed_run_count
-    for period in study.dataset_spec.sanity_periods:
+    total_cached_runs = (
+        candidate_run_store_summary.cached_run_count + reference_run_store_summary.cached_run_count
+    )
+    total_computed_runs = (
+        candidate_run_store_summary.computed_run_count + reference_run_store_summary.computed_run_count
+    )
+    for period in comparison.dataset_spec.sanity_periods:
         sanity_bundle, sanity_metadata = fetch_market_universe_bundle(
-            tickers=study_tickers,
+            tickers=comparison_tickers,
             period=period,
         )
-        sanity_runs, sanity_run_store_summary = build_portfolio_runs(
-            study=study,
+        sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
+            comparison=comparison,
+            strategy_definitions=comparison.candidate_strategy_definitions,
             closes=sanity_bundle["closes"],
             volumes=sanity_bundle["volumes"],
             dataset_period=period,
             dataset_metadata=sanity_metadata,
             run_store=run_store,
         )
-        total_cached_runs += sanity_run_store_summary.cached_run_count
-        total_computed_runs += sanity_run_store_summary.computed_run_count
+        sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
+            comparison=comparison,
+            strategy_definitions=comparison.reference_strategy_definitions,
+            closes=sanity_bundle["closes"],
+            volumes=sanity_bundle["volumes"],
+            dataset_period=period,
+            dataset_metadata=sanity_metadata,
+            run_store=run_store,
+        )
+        total_cached_runs += (
+            sanity_candidate_run_store_summary.cached_run_count
+            + sanity_reference_run_store_summary.cached_run_count
+        )
+        total_computed_runs += (
+            sanity_candidate_run_store_summary.computed_run_count
+            + sanity_reference_run_store_summary.computed_run_count
+        )
         sanity_checks.append(
             {
                 "period": period,
                 "evaluationContext": serialize_evaluation_context(
-                    study,
+                    comparison,
                     sanity_metadata,
                     period_override=period,
                 ),
-                "runStoreSummary": sanity_run_store_summary.to_payload(),
-                "runs": sanity_runs,
+                "runStoreSummary": {
+                    "cachedRunCount": (
+                        sanity_candidate_run_store_summary.cached_run_count
+                        + sanity_reference_run_store_summary.cached_run_count
+                    ),
+                    "computedRunCount": (
+                        sanity_candidate_run_store_summary.computed_run_count
+                        + sanity_reference_run_store_summary.computed_run_count
+                    ),
+                },
+                "candidateRuns": sanity_candidate_runs,
+                "referenceRuns": sanity_reference_runs,
             }
         )
 
     return {
-        "study": serialize_study(study, metadata),
-        "runs": runs,
-        "comparisonSeries": build_comparison_series(runs),
+        "comparison": serialize_comparison(comparison, metadata),
+        "candidateRuns": candidate_runs,
+        "referenceRuns": reference_runs,
         "runStoreSummary": {
             "cachedRunCount": total_cached_runs,
             "computedRunCount": total_computed_runs,
@@ -95,29 +134,29 @@ def build_dashboard_payload(
 
 
 def build_condition_sweep_payload(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
-    run_store = build_run_result_store(study)
-    study_tickers = collect_study_tickers(study)
+    run_store = build_run_result_store(comparison)
+    comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study_tickers,
-        period=study.dataset_spec.period,
+        tickers=comparison_tickers,
+        period=comparison.dataset_spec.period,
     )
     results, run_store_summary = build_condition_sweep_runs(
-        study=study,
+        comparison=comparison,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=study.dataset_spec.period,
+        dataset_period=comparison.dataset_spec.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
     return {
-        "study": serialize_study(study, metadata),
+        "comparison": serialize_comparison(comparison, metadata),
         "conditionVariants": [
             serialize_condition_variant(condition_variant)
-            for condition_variant in study.condition_variants
+            for condition_variant in comparison.condition_variants
         ],
         "resultCount": len(results),
         "runStoreSummary": run_store_summary.to_payload(),
@@ -126,26 +165,26 @@ def build_condition_sweep_payload(
 
 
 def build_ranking_evaluation_payload(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
-    run_store = build_run_result_store(study)
-    study_tickers = collect_study_tickers(study)
+    run_store = build_run_result_store(comparison)
+    comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study_tickers,
-        period=study.dataset_spec.period,
+        tickers=comparison_tickers,
+        period=comparison.dataset_spec.period,
     )
     results, run_store_summary = build_ranking_evaluation_runs(
-        study=study,
+        comparison=comparison,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=study.dataset_spec.period,
+        dataset_period=comparison.dataset_spec.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
     return {
-        "study": serialize_study(study, metadata),
+        "comparison": serialize_comparison(comparison, metadata),
         "resultCount": len(results),
         "runStoreSummary": run_store_summary.to_payload(),
         "results": results,
@@ -153,20 +192,20 @@ def build_ranking_evaluation_payload(
 
 
 def build_run_catalog_payload(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     *,
     limit: int = 50,
     run_kind: str | None = None,
     generation_method: str | None = None,
 ) -> dict:
-    run_store = build_run_result_store(study)
+    run_store = build_run_result_store(comparison)
     records = run_store.list_records(
         run_kind=run_kind,
         generation_method=generation_method,
         limit=limit,
     )
     return {
-        "studyId": study.study_id,
+        "comparisonId": comparison.comparison_id,
         "limit": limit,
         "runKind": run_kind,
         "generationMethod": generation_method,
@@ -176,26 +215,26 @@ def build_run_catalog_payload(
 
 
 def generate_parameter_sweep_runs_payload(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
-    run_store = build_run_result_store(study)
-    study_tickers = collect_study_tickers(study)
+    run_store = build_run_result_store(comparison)
+    comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study_tickers,
-        period=study.dataset_spec.period,
+        tickers=comparison_tickers,
+        period=comparison.dataset_spec.period,
     )
     results, run_store_summary = build_parameter_sweep_runs(
-        study=study,
+        comparison=comparison,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=study.dataset_spec.period,
+        dataset_period=comparison.dataset_spec.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
     return {
-        "study": serialize_study(study, metadata),
+        "comparison": serialize_comparison(comparison, metadata),
         "generation": {
             "method": "parameter_sweep",
             "batchKey": "local_tilt_search_v1",
@@ -207,22 +246,22 @@ def generate_parameter_sweep_runs_payload(
     }
 
 
-def build_run_result_store(study: StudyDefinition) -> FileRunResultStore:
-    root_dir = Path(study.result_store_dir)
+def build_run_result_store(comparison: ComparisonDefinition) -> FileRunResultStore:
+    root_dir = Path(comparison.result_store_dir)
     if not root_dir.is_absolute():
         root_dir = PROJECT_ROOT / root_dir
     return FileRunResultStore(root_dir)
 
 
 def serialize_dataset_context(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     dataset_metadata: dict[str, str],
     *,
     period_override: str | None = None,
 ) -> dict:
     return {
-        "period": period_override or study.dataset_spec.period,
-        "sanityPeriods": study.dataset_spec.sanity_periods,
+        "period": period_override or comparison.dataset_spec.period,
+        "sanityPeriods": comparison.dataset_spec.sanity_periods,
         "source": dataset_metadata["source"],
         "alignedStartDate": dataset_metadata["aligned_start_date"],
         "alignedEndDate": dataset_metadata["aligned_end_date"],
@@ -241,12 +280,11 @@ def serialize_evaluation_settings(evaluation_context: EvaluationContext) -> dict
     return {
         "splitRatioPct": round(evaluation_context.evaluation_settings.split_ratio * 100, 1),
         "initialCapital": round(evaluation_context.evaluation_settings.initial_capital, 2),
-        "benchmark": evaluation_context.evaluation_settings.benchmark,
     }
 
 
 def serialize_evaluation_context(
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     dataset_metadata: dict[str, str],
     *,
     period_override: str | None = None,
@@ -255,41 +293,51 @@ def serialize_evaluation_context(
         "kind": "evaluation_context",
         "schemaVersion": "v1",
         "datasetContext": serialize_dataset_context(
-            study,
+            comparison,
             dataset_metadata,
             period_override=period_override,
         ),
-        "evaluationSettings": serialize_evaluation_settings(study.evaluation_context),
-        "costAssumptions": serialize_cost_assumptions(study.evaluation_context),
+        "evaluationSettings": serialize_evaluation_settings(comparison.run_input.evaluation_context),
+        "costAssumptions": serialize_cost_assumptions(comparison.run_input.evaluation_context),
     }
 
 
-def serialize_study(study: StudyDefinition, dataset_metadata: dict[str, str]) -> dict:
-    strategies_by_key: dict[str, dict] = {}
-    for strategy_definition in study.strategy_definitions:
-        strategies_by_key[strategy_definition.key] = serialize_strategy_definition(strategy_definition)
-
-    study_tickers = collect_study_tickers(study)
-
+def serialize_comparison(comparison: ComparisonDefinition, dataset_metadata: dict[str, str]) -> dict:
+    comparison_tickers = collect_comparison_tickers(comparison)
     return {
-        "id": study.study_id,
-        "title": study.title,
-        "question": study.question,
+        "kind": "strategy_comparison",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "title": comparison.title,
+        "question": comparison.question,
         "selectionPolicy": {
-            "primaryMetric": study.selection_policy.primary_metric,
-            "secondaryMetric": study.selection_policy.secondary_metric,
-            "tertiaryMetric": study.selection_policy.tertiary_metric,
+            "primaryMetric": comparison.selection_policy.primary_metric,
+            "secondaryMetric": comparison.selection_policy.secondary_metric,
+            "tertiaryMetric": comparison.selection_policy.tertiary_metric,
         },
         "marketUniverse": {
-            "assetCount": len(study_tickers),
-            "tickers": study_tickers,
+            "assetCount": len(comparison_tickers),
+            "tickers": comparison_tickers,
         },
-        "evaluationContext": serialize_evaluation_context(study, dataset_metadata),
-        "initialPortfolioState": serialize_portfolio_state(study.initial_portfolio_state),
-        "strategyDefinitions": list(strategies_by_key.values()),
+        "datasetSpec": {
+            "period": comparison.dataset_spec.period,
+            "sanityPeriods": comparison.dataset_spec.sanity_periods,
+        },
+        "runInput": {
+            "portfolioState": serialize_portfolio_state(comparison.run_input.portfolio_state),
+            "evaluationContext": serialize_evaluation_context(comparison, dataset_metadata),
+        },
+        "candidateStrategies": [
+            serialize_strategy_definition(strategy_definition)
+            for strategy_definition in comparison.candidate_strategy_definitions
+        ],
+        "referenceStrategies": [
+            serialize_strategy_definition(strategy_definition)
+            for strategy_definition in comparison.reference_strategy_definitions
+        ],
         "conditionVariants": [
             serialize_condition_variant(condition_variant)
-            for condition_variant in study.condition_variants
+            for condition_variant in comparison.condition_variants
         ],
     }
 
@@ -335,16 +383,16 @@ def compact_run_record(record: dict) -> dict:
         "maxInvestmentPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxInvestmentPct"),
         "maxWeightPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxWeightPct"),
         "commissionPct": cost_assumptions.get("commissionPct"),
-        "benchmark": evaluation_settings.get("benchmark"),
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
         "totalReturnPct": portfolio_summary.get("totalReturnPct"),
         "maxDrawdownPct": portfolio_summary.get("maxDrawdownPct"),
     }
 
 
-def build_portfolio_runs(
+def build_strategy_runs(
     *,
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
+    strategy_definitions: list,
     closes,
     volumes,
     dataset_period: str,
@@ -355,7 +403,7 @@ def build_portfolio_runs(
         "period": dataset_period,
     }
     serialized_evaluation_context = serialize_evaluation_context(
-        study,
+        comparison,
         dataset_metadata,
         period_override=dataset_period,
     )
@@ -363,14 +411,14 @@ def build_portfolio_runs(
     cached_run_count = 0
     computed_run_count = 0
 
-    for strategy_definition in study.strategy_definitions:
+    for strategy_definition in strategy_definitions:
         serialized_strategy = serialize_strategy_definition(strategy_definition)
         run_definition = build_run_definition(
-            run_kind="dashboard",
+            run_kind="strategy_run",
             strategy=serialized_strategy,
             dataset_spec=dataset_spec,
             evaluation_context=serialized_evaluation_context,
-            portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
+            portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
             dataset_metadata=dataset_metadata,
         )
         cached_run = run_store.load(run_definition)
@@ -383,10 +431,10 @@ def build_portfolio_runs(
             closes=closes,
             volumes=volumes,
             strategy_definition=strategy_definition,
-            initial_capital=study.evaluation_context.evaluation_settings.initial_capital,
-            split_ratio=study.evaluation_context.evaluation_settings.split_ratio,
-            transaction_cost=study.evaluation_context.cost_assumptions.commission_pct / 100,
-            portfolio_state=study.initial_portfolio_state,
+            initial_capital=comparison.run_input.evaluation_context.evaluation_settings.initial_capital,
+            split_ratio=comparison.run_input.evaluation_context.evaluation_settings.split_ratio,
+            transaction_cost=comparison.run_input.evaluation_context.cost_assumptions.commission_pct / 100,
+            portfolio_state=comparison.run_input.portfolio_state,
         )
         run_store.save(run_definition, run)
         computed_run_count += 1
@@ -400,7 +448,7 @@ def build_portfolio_runs(
 
 def build_condition_sweep_runs(
     *,
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     closes,
     volumes,
     dataset_period: str,
@@ -414,8 +462,8 @@ def build_condition_sweep_runs(
     cached_run_count = 0
     computed_run_count = 0
 
-    for strategy_definition in study.strategy_definitions:
-        for condition_variant in study.condition_variants:
+    for strategy_definition in comparison.candidate_strategy_definitions:
+        for condition_variant in comparison.condition_variants:
             effective_strategy = replace(
                 strategy_definition,
                 risk_controls_definition=build_risk_controls_definition(
@@ -424,16 +472,16 @@ def build_condition_sweep_runs(
                 ),
             )
             effective_evaluation_context = replace(
-                study.evaluation_context,
+                comparison.run_input.evaluation_context,
                 cost_assumptions=replace(
-                    study.evaluation_context.cost_assumptions,
+                    comparison.run_input.evaluation_context.cost_assumptions,
                     commission_pct=condition_variant.commission_pct,
                 ),
             )
             serialized_strategy = serialize_strategy_definition(effective_strategy)
             serialized_evaluation_context = {
                 **serialize_evaluation_context(
-                    study,
+                    comparison,
                     dataset_metadata,
                     period_override=dataset_period,
                 ),
@@ -445,7 +493,7 @@ def build_condition_sweep_runs(
                 strategy=serialized_strategy,
                 dataset_spec=dataset_spec,
                 evaluation_context=serialized_evaluation_context,
-                portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
+                portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
                 dataset_metadata=dataset_metadata,
             )
             cached_run = run_store.load(run_definition)
@@ -461,7 +509,7 @@ def build_condition_sweep_runs(
                 initial_capital=effective_evaluation_context.evaluation_settings.initial_capital,
                 split_ratio=effective_evaluation_context.evaluation_settings.split_ratio,
                 transaction_cost=effective_evaluation_context.cost_assumptions.commission_pct / 100,
-                portfolio_state=study.initial_portfolio_state,
+                portfolio_state=comparison.run_input.portfolio_state,
             )
             compact_run = compact_condition_sweep_run(
                 run=run,
@@ -488,7 +536,7 @@ def build_condition_sweep_runs(
 
 def build_ranking_evaluation_runs(
     *,
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     closes,
     volumes,
     dataset_period: str,
@@ -500,7 +548,7 @@ def build_ranking_evaluation_runs(
     }
     returns = closes.pct_change().dropna()
     aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
-    ranking_definitions = build_asset_ranking_definitions(study.strategy_definitions)
+    ranking_definitions = build_asset_ranking_definitions(comparison.candidate_strategy_definitions)
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -512,11 +560,11 @@ def build_ranking_evaluation_runs(
             strategy={"ranking": serialized_ranking_definition},
             dataset_spec=dataset_spec,
             evaluation_context=serialize_evaluation_context(
-                study,
+                comparison,
                 dataset_metadata,
                 period_override=dataset_period,
             ),
-            portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
+            portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
             dataset_metadata=dataset_metadata,
         )
         cached_run = run_store.load(run_definition)
@@ -528,7 +576,7 @@ def build_ranking_evaluation_runs(
         result = evaluate_asset_ranking_definition(
             returns=returns,
             volumes=aligned_volumes,
-            split_ratio=study.evaluation_context.evaluation_settings.split_ratio,
+            split_ratio=comparison.run_input.evaluation_context.evaluation_settings.split_ratio,
             ranking_definition=ranking_definition,
         )
         run_store.save(run_definition, result)
@@ -552,7 +600,7 @@ def build_ranking_evaluation_runs(
 
 def build_parameter_sweep_runs(
     *,
-    study: StudyDefinition,
+    comparison: ComparisonDefinition,
     closes,
     volumes,
     dataset_period: str,
@@ -562,7 +610,7 @@ def build_parameter_sweep_runs(
     dataset_spec = {
         "period": dataset_period,
     }
-    base_evaluation_context = study.evaluation_context
+    base_evaluation_context = comparison.run_input.evaluation_context
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -616,7 +664,7 @@ def build_parameter_sweep_runs(
                     )
                     base_strategy = next(
                         strategy
-                        for strategy in study.strategy_definitions
+                        for strategy in comparison.candidate_strategy_definitions
                         if strategy.portfolio_model_definition.model_type == "hierarchical_risk_parity"
                     )
                     effective_strategy = build_strategy_definition(
@@ -631,7 +679,7 @@ def build_parameter_sweep_runs(
                     )
                     serialized_strategy = serialize_strategy_definition(effective_strategy)
                     serialized_evaluation_context = serialize_evaluation_context(
-                        study,
+                        comparison,
                         dataset_metadata,
                         period_override=dataset_period,
                     )
@@ -640,7 +688,7 @@ def build_parameter_sweep_runs(
                         strategy=serialized_strategy,
                         dataset_spec=dataset_spec,
                         evaluation_context=serialized_evaluation_context,
-                        portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
+                        portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
                         dataset_metadata=dataset_metadata,
                         generation=generation,
                     )
@@ -657,7 +705,7 @@ def build_parameter_sweep_runs(
                         initial_capital=base_evaluation_context.evaluation_settings.initial_capital,
                         split_ratio=base_evaluation_context.evaluation_settings.split_ratio,
                         transaction_cost=base_evaluation_context.cost_assumptions.commission_pct / 100,
-                        portfolio_state=study.initial_portfolio_state,
+                        portfolio_state=comparison.run_input.portfolio_state,
                     )
                     compact_run = compact_parameter_sweep_run(
                         run=run,
@@ -699,7 +747,6 @@ def compact_condition_sweep_run(
         "weights": run["weights"],
         "selectedAssets": run["selectedAssets"],
         "summary": run["summary"],
-        "benchmark": run["benchmark"],
         "splitAnalysis": run["splitAnalysis"],
     }
 
@@ -734,7 +781,6 @@ def compact_parameter_sweep_run(
         "weights": run["weights"],
         "selectedAssets": run["selectedAssets"],
         "summary": run["summary"],
-        "benchmark": run["benchmark"],
         "splitAnalysis": run["splitAnalysis"],
     }
 
@@ -759,22 +805,3 @@ def build_parameter_sweep_generation_spec() -> dict:
             "maxWeight": [0.40, 0.425, 0.45, 0.475, 0.50],
         },
     }
-
-
-def build_comparison_series(runs: list[dict]) -> list[dict]:
-    rows_by_date: dict[str, dict] = {}
-
-    for run in runs:
-        model_key = run["key"]
-        for point in run["series"]:
-            row = rows_by_date.setdefault(
-                point["date"],
-                {
-                    "date": point["date"],
-                    "benchmarkEquity": point["benchmarkEquity"],
-                },
-            )
-            row["benchmarkEquity"] = point["benchmarkEquity"]
-            row[model_key] = point["portfolioEquity"]
-
-    return [rows_by_date[key] for key in sorted(rows_by_date.keys())]

@@ -77,14 +77,12 @@ type PortfolioRun = {
       splitRatioPct: number
     }
     train: {
-      benchmark: SummaryMetrics
       dayCount: number
       endDate: string
       portfolio: SummaryMetrics
       startDate: string
     }
     test: {
-      benchmark: SummaryMetrics
       dayCount: number
       endDate: string
       portfolio: SummaryMetrics
@@ -94,8 +92,10 @@ type PortfolioRun = {
 }
 
 type DashboardResult = {
-  study: {
-    id: string
+  comparison: {
+    kind?: string
+    schemaVersion?: string
+    comparisonId: string
     title: string
     question: string
     selectionPolicy: {
@@ -103,29 +103,40 @@ type DashboardResult = {
       secondaryMetric: string
       tertiaryMetric: string
     }
-    evaluationContext: {
-      kind?: string
-      schemaVersion?: string
-      datasetContext: {
-        period: string
-        sanityPeriods: string[]
-        source: string
-        alignedStartDate: string
-        alignedEndDate: string
-        rowCount: number
+    datasetSpec: {
+      period: string
+      sanityPeriods: string[]
+    }
+    runInput: {
+      portfolioState: {
+        weights: Array<{ asset: string; weightPct: number }>
       }
-      evaluationSettings: {
-        splitRatioPct: number
-        initialCapital: number
-        benchmark: string
-      }
-      costAssumptions: {
-        commissionPct: number
-        slippagePct: number
+      evaluationContext: {
+        kind?: string
+        schemaVersion?: string
+        datasetContext: {
+          period: string
+          sanityPeriods: string[]
+          source: string
+          alignedStartDate: string
+          alignedEndDate: string
+          rowCount: number
+        }
+        evaluationSettings: {
+          splitRatioPct: number
+          initialCapital: number
+        }
+        costAssumptions: {
+          commissionPct: number
+          slippagePct: number
+        }
       }
     }
+    candidateStrategies: StrategyDefinition[]
+    referenceStrategies: StrategyDefinition[]
   }
-  runs: PortfolioRun[]
+  candidateRuns: PortfolioRun[]
+  referenceRuns: PortfolioRun[]
 }
 
 const API_BASE_URL =
@@ -206,10 +217,12 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [cardFaces, setCardFaces] = useState<{
     strategy: 'front' | 'back'
+    reference: 'front' | 'back'
     evaluation: 'front' | 'back'
     result: 'front' | 'back'
   }>({
     strategy: 'front',
+    reference: 'front',
     evaluation: 'front',
     result: 'front',
   })
@@ -251,7 +264,7 @@ function App() {
       return []
     }
 
-    return dashboard.runs.slice().sort((left, right) => {
+    return dashboard.candidateRuns.slice().sort((left, right) => {
       if (right.summary.sharpeRatio !== left.summary.sharpeRatio) {
         return right.summary.sharpeRatio - left.summary.sharpeRatio
       }
@@ -263,6 +276,7 @@ function App() {
   }, [dashboard])
 
   const bestRun = sortedRuns[0] ?? null
+  const referenceRun = dashboard?.referenceRuns[0] ?? null
   const rawRunResult = bestRun
     ? {
         kind: bestRun.kind,
@@ -429,6 +443,120 @@ function App() {
             }
           />
 
+          {referenceRun ? (
+            <FlipCard
+              title="Reference Strategy"
+              face={cardFaces.reference}
+              onToggle={() =>
+                setCardFaces((current) => ({
+                  ...current,
+                  reference: current.reference === 'front' ? 'back' : 'front',
+                }))
+              }
+              back={referenceRun.strategy}
+              front={
+                <div className="card-body">
+                  <dl className="data-list">
+                    <DataListRow label="strategyId" value={referenceRun.strategy.strategyId} />
+                    <DataListRow label="version" value={referenceRun.strategy.version} />
+                    <DataListRow label="label" value={referenceRun.strategy.label} />
+                    <DataListRow label="hypothesis" value={referenceRun.strategy.hypothesis ?? 'null'} />
+                    <DataListRow
+                      label="investmentUniverse.key"
+                      value={referenceRun.strategy.components.core.investmentUniverse.key}
+                    />
+                    <DataListRow
+                      label="investmentUniverse.label"
+                      value={referenceRun.strategy.components.core.investmentUniverse.label}
+                    />
+                    <DataListRow
+                      label="investmentUniverse.assetCount"
+                      value={referenceRun.strategy.components.core.investmentUniverse.assetCount}
+                    />
+                    <DataListRow
+                      label="investmentUniverse.tickers"
+                      value={<ValueList values={referenceRun.strategy.components.core.investmentUniverse.tickers} />}
+                    />
+                    <DataListRow
+                      label="dataResolution"
+                      value={referenceRun.strategy.components.core.dataResolution.label}
+                    />
+                    <DataListRow
+                      label="portfolioModel"
+                      value={`${referenceRun.strategy.components.core.portfolioModel.label} (${referenceRun.strategy.components.core.portfolioModel.key})`}
+                    />
+                    <DataListRow
+                      label="executionPolicy"
+                      value={`${referenceRun.strategy.components.core.executionPolicy.label} (${referenceRun.strategy.components.core.executionPolicy.key})`}
+                    />
+                    <DataListRow
+                      label="executionPolicy.entry"
+                      value={referenceRun.strategy.components.core.executionPolicy.entry}
+                    />
+                    <DataListRow
+                      label="executionPolicy.rebalanceFrequency"
+                      value={referenceRun.strategy.components.core.executionPolicy.rebalanceFrequency}
+                    />
+                    <DataListRow
+                      label="featureInputs"
+                      value={<ValueList values={referenceRun.strategy.components.optional.featureInputs} />}
+                    />
+                    <DataListRow
+                      label="assetRankingModel"
+                      value={
+                        referenceRun.strategy.components.optional.assetRankingModel
+                          ? `${referenceRun.strategy.components.optional.assetRankingModel.label} (${referenceRun.strategy.components.optional.assetRankingModel.key})`
+                          : 'null'
+                      }
+                    />
+                    <DataListRow
+                      label="filterRules"
+                      value={
+                        referenceRun.strategy.components.optional.filterRules.length > 0 ? (
+                          <ValueList
+                            values={referenceRun.strategy.components.optional.filterRules.map(
+                              (rule) => `${rule.label} (${rule.key})`,
+                            )}
+                          />
+                        ) : (
+                          '[]'
+                        )
+                      }
+                    />
+                    <DataListRow
+                      label="fallbackRule"
+                      value={
+                        referenceRun.strategy.components.optional.fallbackRule
+                          ? `${referenceRun.strategy.components.optional.fallbackRule.label} (${referenceRun.strategy.components.optional.fallbackRule.key})`
+                          : 'null'
+                      }
+                    />
+                    <DataListRow
+                      label="tiltRule"
+                      value={
+                        referenceRun.strategy.components.optional.tiltRule
+                          ? `${referenceRun.strategy.components.optional.tiltRule.label} (${referenceRun.strategy.components.optional.tiltRule.key})`
+                          : 'null'
+                      }
+                    />
+                    <DataListRow
+                      label="riskControls.maxInvestmentPct"
+                      value={formatMetricValue(
+                        referenceRun.strategy.components.optional.riskControls.maxInvestmentPct,
+                      )}
+                    />
+                    <DataListRow
+                      label="riskControls.maxWeightPct"
+                      value={formatMetricValue(
+                        referenceRun.strategy.components.optional.riskControls.maxWeightPct,
+                      )}
+                    />
+                  </dl>
+                </div>
+              }
+            />
+          ) : null}
+
           <FlipCard
             title="Evaluation Context"
             face={cardFaces.evaluation}
@@ -438,62 +566,58 @@ function App() {
                 evaluation: current.evaluation === 'front' ? 'back' : 'front',
               }))
             }
-            back={dashboard.study.evaluationContext}
+            back={dashboard.comparison.runInput.evaluationContext}
             front={
               <div className="card-body">
                 <dl className="data-list">
                   <DataListRow
                     label="datasetContext.period"
-                    value={dashboard.study.evaluationContext.datasetContext.period}
+                    value={dashboard.comparison.runInput.evaluationContext.datasetContext.period}
                   />
                   <DataListRow
                     label="datasetContext.sanityPeriods"
                     value={
-                      <ValueList values={dashboard.study.evaluationContext.datasetContext.sanityPeriods} />
+                      <ValueList values={dashboard.comparison.runInput.evaluationContext.datasetContext.sanityPeriods} />
                     }
                   />
                   <DataListRow
                     label="datasetContext.source"
-                    value={dashboard.study.evaluationContext.datasetContext.source}
+                    value={dashboard.comparison.runInput.evaluationContext.datasetContext.source}
                   />
                   <DataListRow
                     label="datasetContext.alignedStartDate"
-                    value={dashboard.study.evaluationContext.datasetContext.alignedStartDate}
+                    value={dashboard.comparison.runInput.evaluationContext.datasetContext.alignedStartDate}
                   />
                   <DataListRow
                     label="datasetContext.alignedEndDate"
-                    value={dashboard.study.evaluationContext.datasetContext.alignedEndDate}
+                    value={dashboard.comparison.runInput.evaluationContext.datasetContext.alignedEndDate}
                   />
                   <DataListRow
                     label="datasetContext.rowCount"
-                    value={dashboard.study.evaluationContext.datasetContext.rowCount}
+                    value={dashboard.comparison.runInput.evaluationContext.datasetContext.rowCount}
                   />
                   <DataListRow
                     label="evaluationSettings.splitRatioPct"
                     value={formatMetricValue(
-                      dashboard.study.evaluationContext.evaluationSettings.splitRatioPct,
+                      dashboard.comparison.runInput.evaluationContext.evaluationSettings.splitRatioPct,
                     )}
                   />
                   <DataListRow
                     label="evaluationSettings.initialCapital"
                     value={formatMetricValue(
-                      dashboard.study.evaluationContext.evaluationSettings.initialCapital,
+                      dashboard.comparison.runInput.evaluationContext.evaluationSettings.initialCapital,
                     )}
-                  />
-                  <DataListRow
-                    label="evaluationSettings.benchmark"
-                    value={dashboard.study.evaluationContext.evaluationSettings.benchmark}
                   />
                   <DataListRow
                     label="costAssumptions.commissionPct"
                     value={formatMetricValue(
-                      dashboard.study.evaluationContext.costAssumptions.commissionPct,
+                      dashboard.comparison.runInput.evaluationContext.costAssumptions.commissionPct,
                     )}
                   />
                   <DataListRow
                     label="costAssumptions.slippagePct"
                     value={formatMetricValue(
-                      dashboard.study.evaluationContext.costAssumptions.slippagePct,
+                      dashboard.comparison.runInput.evaluationContext.costAssumptions.slippagePct,
                     )}
                   />
                 </dl>
@@ -535,20 +659,12 @@ function App() {
                     label="train.portfolio"
                     value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.train.portfolio)}</pre>}
                   />
-                  <DataListRow
-                    label="train.benchmark"
-                    value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.train.benchmark)}</pre>}
-                  />
                   <DataListRow label="test.startDate" value={bestRun.splitAnalysis.test.startDate} />
                   <DataListRow label="test.endDate" value={bestRun.splitAnalysis.test.endDate} />
                   <DataListRow label="test.dayCount" value={bestRun.splitAnalysis.test.dayCount} />
                   <DataListRow
                     label="test.portfolio"
                     value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.test.portfolio)}</pre>}
-                  />
-                  <DataListRow
-                    label="test.benchmark"
-                    value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.test.benchmark)}</pre>}
                   />
                 </dl>
               </div>

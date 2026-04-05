@@ -21,13 +21,18 @@ class CostAssumptions:
 class EvaluationSettings:
     split_ratio: float
     initial_capital: float
-    benchmark: str
 
 
 @dataclass
 class EvaluationContext:
     evaluation_settings: EvaluationSettings
     cost_assumptions: CostAssumptions
+
+
+@dataclass
+class RunInputDefinition:
+    portfolio_state: PortfolioState
+    evaluation_context: EvaluationContext
 
 
 @dataclass
@@ -47,14 +52,14 @@ class ConditionVariant:
 
 
 @dataclass
-class StudyDefinition:
-    study_id: str
+class ComparisonDefinition:
+    comparison_id: str
     title: str
     question: str
     dataset_spec: DatasetSpec
-    evaluation_context: EvaluationContext
-    initial_portfolio_state: PortfolioState
+    run_input: RunInputDefinition
     selection_policy: SelectionPolicy
-    strategy_definitions: list[StrategyDefinition]
+    candidate_strategy_definitions: list[StrategyDefinition]
+    reference_strategy_definitions: list[StrategyDefinition] = field(default_factory=list)
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"

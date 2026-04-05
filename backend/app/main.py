@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.dashboard_config import DEFAULT_DASHBOARD_CONFIG
+from app.dashboard_config import DEFAULT_COMPARISON_CONFIG
 from app.dashboard_service import (
     build_condition_sweep_payload,
     build_dashboard_payload,
@@ -35,7 +35,7 @@ def healthcheck() -> dict[str, str]:
 def dashboard() -> dict:
     try:
         return build_dashboard_payload(
-            DEFAULT_DASHBOARD_CONFIG,
+            DEFAULT_COMPARISON_CONFIG,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:
@@ -46,7 +46,7 @@ def dashboard() -> dict:
 def condition_sweep() -> dict:
     try:
         return build_condition_sweep_payload(
-            DEFAULT_DASHBOARD_CONFIG,
+            DEFAULT_COMPARISON_CONFIG,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:
@@ -57,7 +57,7 @@ def condition_sweep() -> dict:
 def generate_parameter_sweep_runs() -> dict:
     try:
         return generate_parameter_sweep_runs_payload(
-            DEFAULT_DASHBOARD_CONFIG,
+            DEFAULT_COMPARISON_CONFIG,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:
@@ -72,7 +72,7 @@ def run_catalog(
 ) -> dict:
     try:
         return build_run_catalog_payload(
-            DEFAULT_DASHBOARD_CONFIG,
+            DEFAULT_COMPARISON_CONFIG,
             limit=limit,
             run_kind=run_kind,
             generation_method=generation_method,
@@ -85,7 +85,7 @@ def run_catalog(
 def ranking_evaluation() -> dict:
     try:
         return build_ranking_evaluation_payload(
-            DEFAULT_DASHBOARD_CONFIG,
+            DEFAULT_COMPARISON_CONFIG,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:

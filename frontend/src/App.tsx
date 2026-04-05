@@ -116,6 +116,19 @@ function formatBenchmarkLabel(value: string): string {
   return value
 }
 
+function formatDataResolutionLabel(value: string): string {
+  if (value === 'daily') {
+    return '日次'
+  }
+  if (value === 'weekly') {
+    return '週次'
+  }
+  if (value === 'monthly') {
+    return '月次'
+  }
+  return value
+}
+
 function formatMetricLabel(value: string): string {
   if (value === 'sharpe_ratio') {
     return 'シャープレシオ'
@@ -140,14 +153,174 @@ function formatFilters(filters: StrategyComponent[]): string {
   return filters.map((filter) => filter.label).join(' / ')
 }
 
-function formatStrategyParameters(parameters: Record<string, number>): string {
-  const entries = Object.entries(parameters)
-  if (entries.length === 0) {
-    return 'なし'
+function formatFeatureInputs(values: string[]): string {
+  const labels = values.map((value) => {
+    if (value === 'close') {
+      return '価格'
+    }
+    if (value === 'volume') {
+      return '出来高'
+    }
+    return value
+  })
+  return labels.join(' + ')
+}
+
+function formatWindowDays(value: number): string {
+  const knownWindows: Record<number, string> = {
+    21: '1ヶ月',
+    63: '3ヶ月',
+    126: '6ヶ月',
+    252: '12ヶ月',
   }
-  return entries
-    .map(([key, value]) => `${key}=${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)}`)
-    .join(' / ')
+  return knownWindows[value] ?? `${value.toFixed(0)}日`
+}
+
+function formatRankingModelSummary(model: StrategyComponentWithParameters | null): string {
+  if (!model) {
+    return '使わない'
+  }
+
+  const parts = [model.label]
+  const parameterLabels: string[] = []
+
+  if (typeof model.parameters.windowDays === 'number') {
+    parameterLabels.push(`窓 ${formatWindowDays(model.parameters.windowDays)}`)
+  }
+  if (typeof model.parameters.momentumWeight === 'number') {
+    parameterLabels.push(`モメンタム ${model.parameters.momentumWeight.toFixed(2)}`)
+  }
+  if (typeof model.parameters.lowVolWeight === 'number') {
+    parameterLabels.push(`低ボラ ${model.parameters.lowVolWeight.toFixed(2)}`)
+  }
+  if (typeof model.parameters.macroWeight === 'number') {
+    parameterLabels.push(`マクロ ${model.parameters.macroWeight.toFixed(2)}`)
+  }
+
+  if (parameterLabels.length > 0) {
+    parts.push(`(${parameterLabels.join(' / ')})`)
+  }
+  return parts.join(' ')
+}
+
+function formatTiltShape(value: number | undefined): string {
+  if (value === 1) {
+    return '上位優遇'
+  }
+  if (value === 2) {
+    return 'softmax'
+  }
+  return '線形'
+}
+
+function formatTiltRuleSummary(rule: StrategyComponentWithParameters | null): string {
+  if (!rule) {
+    return '使わない'
+  }
+
+  const strength = typeof rule.parameters.strength === 'number' ? rule.parameters.strength.toFixed(2) : '-'
+  const shape = formatTiltShape(rule.parameters.shape)
+  return `${shape} / 強度 ${strength}`
+}
+
+function buildStrategyDetails(strategy: StrategyDefinition): Array<{ label: string; value: string }> {
+  const details = [
+    {
+      label: '投資対象',
+      value: `${strategy.components.core.investmentUniverse.label} (${strategy.components.core.investmentUniverse.assetCount}資産)`,
+    },
+    {
+      label: 'データ粒度',
+      value: formatDataResolutionLabel(strategy.components.core.dataResolution.label),
+    },
+    {
+      label: '配分',
+      value: strategy.components.core.portfolioModel.label,
+    },
+    {
+      label: '執行',
+      value: strategy.components.core.executionPolicy.label,
+    },
+    {
+      label: 'リスク制御',
+      value: formatRiskControls(
+        strategy.components.optional.riskControls.maxInvestmentPct,
+        strategy.components.optional.riskControls.maxWeightPct,
+      ),
+    },
+  ]
+
+  if (strategy.components.optional.assetRankingModel) {
+    details.splice(2, 0, {
+      label: '資産評価',
+      value: formatRankingModelSummary(strategy.components.optional.assetRankingModel),
+    })
+  }
+
+  if (strategy.components.optional.tiltRule) {
+    details.splice(3, 0, {
+      label: '重み付け',
+      value: formatTiltRuleSummary(strategy.components.optional.tiltRule),
+    })
+  }
+
+  if (strategy.components.optional.featureInputs.length > 0) {
+    details.splice(2, 0, {
+      label: '入力データ',
+      value: formatFeatureInputs(strategy.components.optional.featureInputs),
+    })
+  }
+
+  if (strategy.components.optional.filterRules.length > 0) {
+    details.splice(details.length - 2, 0, {
+      label: 'フィルタ',
+      value: formatFilters(strategy.components.optional.filterRules),
+    })
+  }
+
+  if (strategy.components.optional.fallbackRule) {
+    details.push({
+      label: 'フォールバック',
+      value: strategy.components.optional.fallbackRule.label,
+    })
+  }
+
+  return details
+}
+
+function buildEvaluationDetails(dashboard: DashboardResult): Array<{ label: string; value: string }> {
+  return [
+    {
+      label: '評価期間',
+      value: dashboard.study.evaluationContext.datasetContext.period,
+    },
+    {
+      label: '補助確認',
+      value: dashboard.study.evaluationContext.datasetContext.sanityPeriods.join(' / ') || 'なし',
+    },
+    {
+      label: '手数料',
+      value: `${dashboard.study.evaluationContext.costAssumptions.commissionPct.toFixed(2)}%`,
+    },
+    {
+      label: '分割',
+      value: `学習 ${dashboard.study.evaluationContext.evaluationSettings.splitRatioPct.toFixed(1)}% / 検証 ${(
+        100 - dashboard.study.evaluationContext.evaluationSettings.splitRatioPct
+      ).toFixed(1)}%`,
+    },
+    {
+      label: 'ベンチマーク',
+      value: formatBenchmarkLabel(dashboard.study.evaluationContext.evaluationSettings.benchmark),
+    },
+    {
+      label: '選定基準',
+      value: [
+        formatMetricLabel(dashboard.study.selectionPolicy.primaryMetric),
+        formatMetricLabel(dashboard.study.selectionPolicy.secondaryMetric),
+        formatMetricLabel(dashboard.study.selectionPolicy.tertiaryMetric),
+      ].join(' → '),
+    },
+  ]
 }
 
 function App() {
@@ -204,6 +377,8 @@ function App() {
   }, [dashboard])
 
   const bestRun = sortedRuns[0] ?? null
+  const strategyDetails = bestRun ? buildStrategyDetails(bestRun.strategy) : []
+  const evaluationDetails = dashboard ? buildEvaluationDetails(dashboard) : []
 
   if (loading && !dashboard) {
     return (
@@ -256,102 +431,24 @@ function App() {
           <section className="subpanel">
             <h3>Strategy</h3>
             <dl className="detail-list">
-              <div>
-                <dt>投資対象</dt>
-                <dd>{bestRun.strategy.components.core.investmentUniverse.label}</dd>
-              </div>
-              <div>
-                <dt>資産数</dt>
-                <dd>{bestRun.strategy.components.core.investmentUniverse.assetCount}資産</dd>
-              </div>
-              <div>
-                <dt>ランキングモデル</dt>
-                <dd>
-                  {bestRun.strategy.components.optional.assetRankingModel
-                    ? `${bestRun.strategy.components.optional.assetRankingModel.label} (${formatStrategyParameters(
-                        bestRun.strategy.components.optional.assetRankingModel.parameters,
-                      )})`
-                    : 'なし'}
-                </dd>
-              </div>
-              <div>
-                <dt>データ粒度</dt>
-                <dd>{bestRun.strategy.components.core.dataResolution.label}</dd>
-              </div>
-              <div>
-                <dt>特徴量</dt>
-                <dd>{bestRun.strategy.components.optional.featureInputs.join(' + ')}</dd>
-              </div>
-              <div>
-                <dt>ティルト</dt>
-                <dd>
-                  {bestRun.strategy.components.optional.tiltRule
-                    ? `${bestRun.strategy.components.optional.tiltRule.label} (${formatStrategyParameters(
-                        bestRun.strategy.components.optional.tiltRule.parameters,
-                      )})`
-                    : 'なし'}
-                </dd>
-              </div>
-              <div>
-                <dt>フィルタ</dt>
-                <dd>{formatFilters(bestRun.strategy.components.optional.filterRules)}</dd>
-              </div>
-              <div>
-                <dt>ポートフォリオモデル</dt>
-                <dd>{bestRun.strategy.components.core.portfolioModel.label}</dd>
-              </div>
-              <div>
-                <dt>執行方針</dt>
-                <dd>{bestRun.strategy.components.core.executionPolicy.label}</dd>
-              </div>
-              <div>
-                <dt>リスク制御</dt>
-                <dd>
-                  {formatRiskControls(
-                    bestRun.strategy.components.optional.riskControls.maxInvestmentPct,
-                    bestRun.strategy.components.optional.riskControls.maxWeightPct,
-                  )}
-                </dd>
-              </div>
+              {strategyDetails.map((detail) => (
+                <div key={detail.label}>
+                  <dt>{detail.label}</dt>
+                  <dd>{detail.value}</dd>
+                </div>
+              ))}
             </dl>
           </section>
 
           <section className="subpanel">
             <h3>Evaluation Context</h3>
             <dl className="detail-list">
-              <div>
-                <dt>評価期間</dt>
-                <dd>{dashboard.study.evaluationContext.datasetContext.period}</dd>
-              </div>
-              <div>
-                <dt>補助確認</dt>
-                <dd>{dashboard.study.evaluationContext.datasetContext.sanityPeriods.join(' / ') || 'なし'}</dd>
-              </div>
-              <div>
-                <dt>手数料</dt>
-                <dd>{dashboard.study.evaluationContext.costAssumptions.commissionPct.toFixed(2)}%</dd>
-              </div>
-              <div>
-                <dt>分割</dt>
-                <dd>
-                  学習 {dashboard.study.evaluationContext.evaluationSettings.splitRatioPct.toFixed(1)}% / 検証{' '}
-                  {(100 - dashboard.study.evaluationContext.evaluationSettings.splitRatioPct).toFixed(1)}%
-                </dd>
-              </div>
-              <div>
-                <dt>ベンチマーク</dt>
-                <dd>{formatBenchmarkLabel(dashboard.study.evaluationContext.evaluationSettings.benchmark)}</dd>
-              </div>
-              <div>
-                <dt>選定基準</dt>
-                <dd>
-                  {[
-                    formatMetricLabel(dashboard.study.selectionPolicy.primaryMetric),
-                    formatMetricLabel(dashboard.study.selectionPolicy.secondaryMetric),
-                    formatMetricLabel(dashboard.study.selectionPolicy.tertiaryMetric),
-                  ].join(' → ')}
-                </dd>
-              </div>
+              {evaluationDetails.map((detail) => (
+                <div key={detail.label}>
+                  <dt>{detail.label}</dt>
+                  <dd>{detail.value}</dd>
+                </div>
+              ))}
             </dl>
           </section>
         </div>

@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
+import statistics
 
 import numpy as np
 import pandas as pd
 from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
-
-from app.strategy import (
-    cagr,
-    max_drawdown,
-    percent_return,
-    sharpe_ratio,
-    validate_split_ratio,
-)
 
 
 SUPPORTED_PORTFOLIO_MODELS = {
@@ -80,6 +74,7 @@ FALLBACK_RULE_LABELS = {
     "none": "フォールバックなし",
     "cash_on_empty": "候補ゼロならCASH",
 }
+TRADING_DAYS_PER_YEAR = 252
 
 
 @dataclass(frozen=True)
@@ -184,6 +179,42 @@ class AssetRankingDefinition:
     strategy_definition: PortfolioStrategyDefinition
     source_strategy_keys: tuple[str, ...]
     source_strategy_labels: tuple[str, ...]
+
+
+def validate_split_ratio(split_ratio: float) -> None:
+    if split_ratio <= 0 or split_ratio >= 1:
+        raise ValueError("Split ratio must be between 0 and 1.")
+
+
+def percent_return(final_value: float, initial_value: float) -> float:
+    return ((final_value / initial_value) - 1) * 100
+
+
+def cagr(final_value: float, initial_value: float, periods: int) -> float:
+    years = max((periods - 1) / TRADING_DAYS_PER_YEAR, 1 / TRADING_DAYS_PER_YEAR)
+    return (((final_value / initial_value) ** (1 / years)) - 1) * 100
+
+
+def sharpe_ratio(returns: list[float]) -> float:
+    if len(returns) < 2:
+        return 0.0
+
+    mean_return = statistics.fmean(returns)
+    volatility = statistics.pstdev(returns)
+    if volatility == 0:
+        return 0.0
+    return math.sqrt(TRADING_DAYS_PER_YEAR) * (mean_return / volatility)
+
+
+def max_drawdown(series: list[dict], equity_key: str) -> float:
+    peak = series[0][equity_key]
+    max_dd = 0.0
+    for point in series:
+        equity = point[equity_key]
+        peak = max(peak, equity)
+        drawdown = (equity / peak) - 1
+        max_dd = min(max_dd, drawdown)
+    return abs(max_dd) * 100
 
 
 def build_investment_universe_definition(

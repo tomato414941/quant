@@ -223,7 +223,6 @@ def serialize_dataset_context(
     return {
         "period": period_override or study.dataset_spec.period,
         "sanityPeriods": study.dataset_spec.sanity_periods,
-        "frequency": study.dataset_spec.frequency,
         "source": dataset_metadata["source"],
         "alignedStartDate": dataset_metadata["aligned_start_date"],
         "alignedEndDate": dataset_metadata["aligned_end_date"],
@@ -260,7 +259,6 @@ def serialize_evaluation_context(
         ),
         "evaluationSettings": serialize_evaluation_settings(study.evaluation_context),
         "costAssumptions": serialize_cost_assumptions(study.evaluation_context),
-        "initialState": serialize_portfolio_state(study.evaluation_context.initial_state),
     }
 
 
@@ -285,6 +283,7 @@ def serialize_study(study: StudyDefinition, dataset_metadata: dict[str, str]) ->
             "tickers": study_tickers,
         },
         "evaluationContext": serialize_evaluation_context(study, dataset_metadata),
+        "initialPortfolioState": serialize_portfolio_state(study.initial_portfolio_state),
         "strategyDefinitions": list(strategies_by_key.values()),
         "conditionVariants": [
             serialize_condition_variant(condition_variant)
@@ -352,7 +351,6 @@ def build_portfolio_runs(
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
         "period": dataset_period,
-        "frequency": study.dataset_spec.frequency,
     }
     serialized_evaluation_context = serialize_evaluation_context(
         study,
@@ -370,6 +368,7 @@ def build_portfolio_runs(
             strategy=serialized_strategy,
             dataset_spec=dataset_spec,
             evaluation_context=serialized_evaluation_context,
+            portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
             dataset_metadata=dataset_metadata,
         )
         cached_run = run_store.load(run_definition)
@@ -385,7 +384,7 @@ def build_portfolio_runs(
             initial_capital=study.evaluation_context.evaluation_settings.initial_capital,
             split_ratio=study.evaluation_context.evaluation_settings.split_ratio,
             transaction_cost=study.evaluation_context.cost_assumptions.commission_pct / 100,
-            portfolio_state=study.evaluation_context.initial_state,
+            portfolio_state=study.initial_portfolio_state,
         )
         run_store.save(run_definition, run)
         computed_run_count += 1
@@ -408,7 +407,6 @@ def build_condition_sweep_runs(
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
         "period": dataset_period,
-        "frequency": study.dataset_spec.frequency,
     }
     results: list[dict] = []
     cached_run_count = 0
@@ -445,6 +443,7 @@ def build_condition_sweep_runs(
                 strategy=serialized_strategy,
                 dataset_spec=dataset_spec,
                 evaluation_context=serialized_evaluation_context,
+                portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
                 dataset_metadata=dataset_metadata,
             )
             cached_run = run_store.load(run_definition)
@@ -460,7 +459,7 @@ def build_condition_sweep_runs(
                 initial_capital=effective_evaluation_context.evaluation_settings.initial_capital,
                 split_ratio=effective_evaluation_context.evaluation_settings.split_ratio,
                 transaction_cost=effective_evaluation_context.cost_assumptions.commission_pct / 100,
-                portfolio_state=study.evaluation_context.initial_state,
+                portfolio_state=study.initial_portfolio_state,
             )
             compact_run = compact_condition_sweep_run(
                 run=run,
@@ -496,7 +495,6 @@ def build_ranking_evaluation_runs(
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
         "period": dataset_period,
-        "frequency": study.dataset_spec.frequency,
     }
     returns = closes.pct_change().dropna()
     aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
@@ -516,6 +514,7 @@ def build_ranking_evaluation_runs(
                 dataset_metadata,
                 period_override=dataset_period,
             ),
+            portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
             dataset_metadata=dataset_metadata,
         )
         cached_run = run_store.load(run_definition)
@@ -560,7 +559,6 @@ def build_parameter_sweep_runs(
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
         "period": dataset_period,
-        "frequency": study.dataset_spec.frequency,
     }
     base_evaluation_context = study.evaluation_context
     results: list[dict] = []
@@ -639,6 +637,7 @@ def build_parameter_sweep_runs(
                         strategy=serialized_strategy,
                         dataset_spec=dataset_spec,
                         evaluation_context=serialized_evaluation_context,
+                        portfolio_state=serialize_portfolio_state(study.initial_portfolio_state),
                         dataset_metadata=dataset_metadata,
                         generation=generation,
                     )
@@ -655,7 +654,7 @@ def build_parameter_sweep_runs(
                         initial_capital=base_evaluation_context.evaluation_settings.initial_capital,
                         split_ratio=base_evaluation_context.evaluation_settings.split_ratio,
                         transaction_cost=base_evaluation_context.cost_assumptions.commission_pct / 100,
-                        portfolio_state=study.evaluation_context.initial_state,
+                        portfolio_state=study.initial_portfolio_state,
                     )
                     compact_run = compact_parameter_sweep_run(
                         run=run,

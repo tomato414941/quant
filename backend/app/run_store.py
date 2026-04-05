@@ -105,6 +105,7 @@ def build_run_definition(
     strategy: dict,
     dataset_spec: dict,
     evaluation_context: dict,
+    portfolio_state: dict,
     dataset_metadata: dict,
     generation: dict | None = None,
 ) -> dict:
@@ -115,14 +116,15 @@ def build_run_definition(
         "evaluationContext": {
             "datasetContext": {
                 "period": dataset_spec["period"],
-                "frequency": dataset_spec["frequency"],
                 "alignedStartDate": dataset_metadata["aligned_start_date"],
                 "alignedEndDate": dataset_metadata["aligned_end_date"],
                 "rowCount": dataset_metadata["row_count"],
             },
             "evaluationSettings": evaluation_context["evaluationSettings"],
             "costAssumptions": evaluation_context["costAssumptions"],
-            "initialState": evaluation_context["initialState"],
+        },
+        "runInput": {
+            "portfolioState": portfolio_state,
         },
     }
     if generation is not None:

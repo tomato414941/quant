@@ -157,6 +157,7 @@ class StrategyDefinition:
     hypothesis: str
     description: str
     investment_universe_definition: InvestmentUniverseDefinition
+    data_resolution: str
     selection_definition: PortfolioStrategyDefinition
     portfolio_model_definition: PortfolioModelDefinition
     execution_policy_definition: ExecutionPolicyDefinition
@@ -455,6 +456,7 @@ def build_risk_controls_definition(
 def build_strategy_definition(
     *,
     investment_universe_definition: InvestmentUniverseDefinition,
+    data_resolution: str = "daily",
     selection_definition: PortfolioStrategyDefinition,
     portfolio_model_definition: PortfolioModelDefinition,
     execution_policy_definition: ExecutionPolicyDefinition,
@@ -490,6 +492,7 @@ def build_strategy_definition(
         hypothesis=hypothesis or selection_definition.description,
         description=description or selection_definition.description,
         investment_universe_definition=investment_universe_definition,
+        data_resolution=data_resolution,
         selection_definition=selection_definition,
         portfolio_model_definition=portfolio_model_definition,
         execution_policy_definition=execution_policy_definition,
@@ -579,6 +582,10 @@ def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> di
                     "label": strategy_definition.investment_universe_definition.label,
                     "assetCount": len(strategy_definition.investment_universe_definition.tickers),
                     "tickers": list(strategy_definition.investment_universe_definition.tickers),
+                },
+                "dataResolution": {
+                    "key": strategy_definition.data_resolution,
+                    "label": strategy_definition.data_resolution,
                 },
                 "portfolioModel": serialize_portfolio_model_definition(
                     strategy_definition.portfolio_model_definition

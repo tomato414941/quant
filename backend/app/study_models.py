@@ -8,7 +8,6 @@ from app.portfolio import PortfolioState, StrategyDefinition
 @dataclass
 class DatasetSpec:
     period: str
-    frequency: str
     sanity_periods: list[str] = field(default_factory=list)
 
 
@@ -29,7 +28,6 @@ class EvaluationSettings:
 class EvaluationContext:
     evaluation_settings: EvaluationSettings
     cost_assumptions: CostAssumptions
-    initial_state: PortfolioState
 
 
 @dataclass
@@ -55,6 +53,7 @@ class StudyDefinition:
     question: str
     dataset_spec: DatasetSpec
     evaluation_context: EvaluationContext
+    initial_portfolio_state: PortfolioState
     selection_policy: SelectionPolicy
     strategy_definitions: list[StrategyDefinition]
     condition_variants: list[ConditionVariant] = field(default_factory=list)

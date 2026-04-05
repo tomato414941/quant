@@ -172,10 +172,11 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
     assert payload["study"]["evaluationContext"]["datasetContext"]["alignedEndDate"] == "2025-01-07"
     assert payload["study"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
+    assert payload["study"]["strategyDefinitions"][0]["components"]["core"]["dataResolution"]["label"] == "daily"
     assert payload["study"]["evaluationContext"]["costAssumptions"]["commissionPct"] == 0.05
     assert payload["study"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"] == 70.0
-    assert payload["study"]["evaluationContext"]["initialState"]["weights"][0]["asset"] == "CASH"
-    assert payload["study"]["evaluationContext"]["initialState"]["weights"][0]["weightPct"] == 15.0
+    assert payload["study"]["initialPortfolioState"]["weights"][0]["asset"] == "CASH"
+    assert payload["study"]["initialPortfolioState"]["weights"][0]["weightPct"] == 15.0
     assert len(payload["study"]["strategyDefinitions"]) == 23
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["universePolicy"]["label"]
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["scoreModel"]["label"]

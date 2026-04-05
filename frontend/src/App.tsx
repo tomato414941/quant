@@ -28,6 +28,10 @@ type StrategyDefinition = {
   components: {
     core: {
       investmentUniverse: InvestmentUniverse
+      dataResolution: {
+        key: string
+        label: string
+      }
       portfolioModel: {
         key: string
         label: string
@@ -101,7 +105,6 @@ type DashboardResult = {
     evaluationContext: {
       datasetContext: {
         period: string
-        frequency: string
         sanityPeriods: string[]
       }
       evaluationSettings: {
@@ -111,6 +114,12 @@ type DashboardResult = {
       costAssumptions: {
         commissionPct: number
       }
+    }
+    initialPortfolioState: {
+      weights: Array<{
+        asset: string
+        weightPct: number
+      }>
     }
   }
   runs: PortfolioRun[]
@@ -398,8 +407,8 @@ function App() {
                   <dd>{dashboard.study.evaluationContext.datasetContext.sanityPeriods.join(' / ') || 'なし'}</dd>
                 </div>
                 <div>
-                  <dt>頻度</dt>
-                  <dd>{dashboard.study.evaluationContext.datasetContext.frequency}</dd>
+                  <dt>データ粒度</dt>
+                  <dd>{bestRun.strategy.components.core.dataResolution.label}</dd>
                 </div>
                 <div>
                   <dt>手数料</dt>

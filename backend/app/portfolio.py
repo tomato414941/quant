@@ -144,13 +144,20 @@ class RiskControlsDefinition:
 
 @dataclass(frozen=True)
 class StrategyDefinition:
-    key: str
+    strategy_id: str
+    version: str
     label: str
+    hypothesis: str
     description: str
     selection_definition: PortfolioStrategyDefinition
     portfolio_model_definition: PortfolioModelDefinition
     execution_policy_definition: ExecutionPolicyDefinition
     risk_controls_definition: RiskControlsDefinition
+    extensions: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def key(self) -> str:
+        return self.strategy_id
 
 
 @dataclass(frozen=True)
@@ -426,17 +433,23 @@ def build_strategy_definition(
     portfolio_model_definition: PortfolioModelDefinition,
     execution_policy_definition: ExecutionPolicyDefinition,
     risk_controls_definition: RiskControlsDefinition,
+    strategy_id: str | None = None,
+    version: str = "v1",
+    hypothesis: str | None = None,
+    extensions: dict[str, str] | None = None,
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
 ) -> StrategyDefinition:
-    strategy_key = key or "__".join(
+    resolved_strategy_id = strategy_id or key or "__".join(
         [
             selection_definition.key,
             portfolio_model_definition.key,
             execution_policy_definition.key,
         ]
     )
+    if strategy_id is not None and key is not None and strategy_id != key:
+        raise ValueError("strategy_id and key must match when both are provided.")
     strategy_label = label or " × ".join(
         [
             selection_definition.label,
@@ -445,13 +458,16 @@ def build_strategy_definition(
         ]
     )
     return StrategyDefinition(
-        key=strategy_key,
+        strategy_id=resolved_strategy_id,
+        version=version,
         label=strategy_label,
+        hypothesis=hypothesis or selection_definition.description,
         description=description or selection_definition.description,
         selection_definition=selection_definition,
         portfolio_model_definition=portfolio_model_definition,
         execution_policy_definition=execution_policy_definition,
         risk_controls_definition=risk_controls_definition,
+        extensions=tuple(sorted((extensions or {}).items())),
     )
 
 
@@ -506,10 +522,61 @@ def serialize_risk_controls_definition(risk_controls_definition: RiskControlsDef
 
 
 def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
+    ranking_model = (
+        {
+            "key": strategy_definition.selection_definition.score_model.key,
+            "label": strategy_definition.selection_definition.score_model.label,
+        }
+        if strategy_definition.selection_definition.score_model.key != "none"
+        else None
+    )
+    fallback_rule = (
+        {
+            "key": strategy_definition.selection_definition.fallback_rule.key,
+            "label": strategy_definition.selection_definition.fallback_rule.label,
+        }
+        if strategy_definition.selection_definition.fallback_rule.key != "none"
+        else None
+    )
     return {
+        "strategyId": strategy_definition.strategy_id,
+        "version": strategy_definition.version,
         "key": strategy_definition.key,
         "label": strategy_definition.label,
+        "hypothesis": strategy_definition.hypothesis,
         "description": strategy_definition.description,
+        "components": {
+            "core": {
+                "investmentUniverse": {
+                    "key": strategy_definition.selection_definition.universe_policy.key,
+                    "label": strategy_definition.selection_definition.universe_policy.label,
+                },
+                "portfolioModel": serialize_portfolio_model_definition(
+                    strategy_definition.portfolio_model_definition
+                ),
+                "executionPolicy": serialize_execution_policy_definition(
+                    strategy_definition.execution_policy_definition
+                ),
+            },
+            "optional": {
+                "assetRankingModel": ranking_model,
+                "featureInputs": list(strategy_definition.selection_definition.feature_inputs),
+                "filterRules": [
+                    {
+                        "key": filter_rule.key,
+                        "label": filter_rule.label,
+                    }
+                    for filter_rule in strategy_definition.selection_definition.filter_rules
+                ],
+                "fallbackRule": fallback_rule,
+                "riskControls": serialize_risk_controls_definition(
+                    strategy_definition.risk_controls_definition
+                ),
+            },
+        },
+        "extensions": {
+            key: value for key, value in strategy_definition.extensions
+        },
         "selectionDefinition": serialize_portfolio_strategy_definition(
             strategy_definition.selection_definition
         ),

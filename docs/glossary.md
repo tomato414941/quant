@@ -54,7 +54,21 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 ### Strategy
 
 このプロジェクトで最終的に採用候補として選ぶ、意思決定ルールの完全な仕様。  
-`Strategy` は上位概念であり、内部に複数の構成要素を持つ。
+`Strategy` は上位概念であり、内部に複数の構成要素を持つ。  
+コード上では、`Strategy` は固定的な単一手法名ではなく、`StrategySpec` に近い拡張可能な仕様として扱う。
+
+最低限持つもの:
+- `strategy_id`
+- `version`
+- `label`
+- `hypothesis`
+- `components`
+- `extensions`
+
+考え方:
+- `Strategy` は「我々が選ぶ対象」
+- `Run` は「その Strategy を特定の前提で評価した結果」
+- `Study` は「複数 Strategy を共通の問いで比べる枠」
 
 含まれるもの:
 - Universe Policy
@@ -74,6 +88,36 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 
 要するに、`Strategy` は「何をどう持つか」の仕様であり、  
 `Portfolio Model` や `Execution Policy` はその構成要素である。
+
+## Strategy Components
+
+`Strategy` を構成する要素の総称。
+
+このプロジェクトでは、Strategy Components を次の2種類に分けて考える。
+
+- `Core Components`
+  多くの Strategy に存在する中核要素
+- `Optional Components`
+  Strategy によって存在したりしなかったりする追加要素
+
+### Core Components
+
+現在の設計では、少なくとも次を `Core Components` とみなす。
+
+- Investment Universe
+- Portfolio Model
+- Execution Policy
+
+### Optional Components
+
+現在の設計では、次は `Optional Components` とみなす。
+
+- Asset Ranking Model
+- Feature Inputs
+- Filter Rules
+- Fallback Rule
+- Risk Controls
+- 拡張的な Data Sources / custom logic
 
 例:
 - 全資産を候補にし、12ヶ月モメンタムで上位優遇 tilt をかけ、HRP で配分し、年次で更新する
@@ -120,7 +164,7 @@ Strategy の構成要素の1つ。
 現在の保有状態。  
 今のプロジェクトでは最小構成として、現在ウェイトと cash 比率を持つ。
 
-### Execution Model
+### Execution Policy
 
 Strategy の構成要素の1つ。  
 目標ウェイトへの変更をどう実行したとみなすかを決めるモデル。
@@ -133,13 +177,30 @@ Strategy の構成要素の1つ。
 - 手数料や slippage の実数値そのものは、普通は Strategy ではなく評価前提やコスト前提として扱う
 - ただし「どのコストモデルを使うか」は比較対象になりうる
 
+### Assumptions
+
+Strategy そのものではなく、Strategy を評価するために外側から与える前提条件。
+
+例:
+- 評価期間
+- benchmark
+- split ratio
+- cost assumptions
+- portfolio state
+- generation metadata
+
+整理:
+- `Strategy` は選ぶ対象
+- `Assumptions` は評価の前提
+- `Run` は `Strategy + Assumptions + Result`
+
 ### Candidate
 
 比較対象として並べる Strategy の候補。
 
 補足:
-- 実装上は一時的に `Strategy x Portfolio Model` のような組み方をしていた時期がある
-- ただし、概念としては `Candidate` は最終的に選ぶ Strategy 候補そのものを指す
+- 以前は実装上 `Candidate` を強く使っていたが、現在の主語は `Strategy`
+- 今後は UI や保存設計でも、`Candidate` より `Strategy` を優先する
 
 例:
 - 全資産モメンタム傾斜 最良 上位優遇 × HRP × 年次
@@ -172,10 +233,8 @@ Run を生成するために追加で振る評価条件。
 
 構成:
 - Strategy
-- Dataset / Period
-- Cost / Constraint assumptions
-- Portfolio State
-- Evaluation settings
+- Assumptions
+- Result
 
 出力:
 - Sharpe
@@ -222,7 +281,7 @@ Study は「何を比較したいか」を表し、Run は「その比較の中�
 - `Portfolio Model`
   - `Allocator` より優先
   - Strategy の構成要素として扱う
-- `Execution Model`
+- `Execution Policy`
   - `Trading Rule` より優先
   - Strategy の構成要素として扱う
 - `Run`

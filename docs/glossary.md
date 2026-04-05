@@ -177,22 +177,74 @@ Strategy の構成要素の1つ。
 - 手数料や slippage の実数値そのものは、普通は Strategy ではなく評価前提やコスト前提として扱う
 - ただし「どのコストモデルを使うか」は比較対象になりうる
 
-### Assumptions
+### Evaluation Context
 
-Strategy そのものではなく、Strategy を評価するために外側から与える前提条件。
+Strategy そのものではなく、Strategy を評価するために外側から与える文脈全体。  
+以前は `Assumptions` と呼んでいたが、内容が「仮定」だけではないため、現在は `Evaluation Context` を優先する。
 
-例:
-- 評価期間
-- benchmark
-- split ratio
-- cost assumptions
-- portfolio state
-- generation metadata
+含まれるもの:
+- Dataset Context
+- Evaluation Settings
+- Cost Assumptions
+- Initial State
+- Generation Metadata
 
 整理:
 - `Strategy` は選ぶ対象
-- `Assumptions` は評価の前提
-- `Run` は `Strategy + Assumptions + Result`
+- `Evaluation Context` は評価の土俵
+- `Run` は `Strategy + Evaluation Context + Result`
+
+### Dataset Context
+
+Strategy の外側で、どの期間・頻度・整列済みデータ範囲で評価したかを表す文脈。
+
+例:
+- `10y`
+- `daily`
+- `alignedStartDate / alignedEndDate`
+- `rowCount`
+
+補足:
+- `investment universe` そのものは Strategy に含める
+- `その universe をどの期間で評価したか` は Dataset Context に含める
+
+### Evaluation Settings
+
+評価のやり方に関する設定。
+
+例:
+- split ratio
+- initial capital
+- benchmark
+
+### Cost Assumptions
+
+コスト前提。
+
+例:
+- fee
+- slippage
+
+補足:
+- fee の実数値そのものは通常 Strategy ではなく Evaluation Context
+- ただし、どの cost model を採用するかは Strategy や Study の論点になりうる
+
+### Initial State
+
+評価開始時の状態。
+
+例:
+- portfolio state
+- cash 比率
+
+### Generation Metadata
+
+その Run がどのように作られたかを表すメタ情報。
+
+例:
+- manual
+- condition grid
+- parameter sweep
 
 ### Candidate
 
@@ -221,19 +273,18 @@ Run を生成するために追加で振る評価条件。
 
 式で書くと:
 
-`Run = Strategy + Assumptions + Result`
+`Run = Strategy + Evaluation Context + Result`
 
-ここでいう `Assumptions` には、たとえば次が入る。
-- 評価期間
-- benchmark
-- split ratio
+ここでいう `Evaluation Context` には、たとえば次が入る。
+- dataset context
+- evaluation settings
 - cost assumptions
-- portfolio state
+- initial state
 - generation metadata
 
 構成:
 - Strategy
-- Assumptions
+- Evaluation Context
 - Result
 
 出力:

@@ -20,11 +20,17 @@ class CostAssumptions:
 
 
 @dataclass
-class EvaluationAssumptions:
+class EvaluationSettings:
     split_ratio: float
     initial_capital: float
     benchmark: str
+
+
+@dataclass
+class EvaluationContext:
+    evaluation_settings: EvaluationSettings
     cost_assumptions: CostAssumptions
+    initial_state: PortfolioState
 
 
 @dataclass
@@ -42,8 +48,7 @@ class StudyDefinition:
     title: str
     question: str
     dataset_spec: DatasetSpec
-    evaluation_assumptions: EvaluationAssumptions
-    portfolio_state: PortfolioState
+    evaluation_context: EvaluationContext
     strategy_definitions: list[StrategyDefinition]
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"

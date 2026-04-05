@@ -63,16 +63,25 @@ type PortfolioRun = {
 
 type DashboardResult = {
   study: {
-    datasetSpec: {
-      period: string
+    marketUniverse: {
+      assetCount: number
       tickers: string[]
     }
-    evaluationAssumptions: {
-      splitRatioPct: number
-      benchmark: string
+    evaluationContext: {
+      datasetContext: {
+        period: string
+      }
+      evaluationSettings: {
+        splitRatioPct: number
+        benchmark: string
+      }
       costAssumptions: {
         commissionPct: number
       }
+    }
+    datasetSpec?: {
+      period: string
+      tickers: string[]
     }
   }
   runs: PortfolioRun[]
@@ -268,23 +277,23 @@ function App() {
           <dl className="decision-details">
             <div>
               <dt>評価期間</dt>
-              <dd>{dashboard.study.datasetSpec.period}</dd>
+              <dd>{dashboard.study.evaluationContext.datasetContext.period}</dd>
             </div>
             <div>
               <dt>資産数</dt>
-              <dd>{dashboard.study.datasetSpec.tickers.length}資産</dd>
+              <dd>{dashboard.study.marketUniverse.assetCount}資産</dd>
             </div>
             <div>
               <dt>手数料前提</dt>
-              <dd>{dashboard.study.evaluationAssumptions.costAssumptions.commissionPct.toFixed(2)}%</dd>
+              <dd>{dashboard.study.evaluationContext.costAssumptions.commissionPct.toFixed(2)}%</dd>
             </div>
             <div>
               <dt>分割</dt>
-              <dd>学習 {dashboard.study.evaluationAssumptions.splitRatioPct.toFixed(1)}% / 検証 {(100 - dashboard.study.evaluationAssumptions.splitRatioPct).toFixed(1)}%</dd>
+              <dd>学習 {dashboard.study.evaluationContext.evaluationSettings.splitRatioPct.toFixed(1)}% / 検証 {(100 - dashboard.study.evaluationContext.evaluationSettings.splitRatioPct).toFixed(1)}%</dd>
             </div>
             <div>
               <dt>比較基準</dt>
-              <dd>{formatBenchmarkLabel(dashboard.study.evaluationAssumptions.benchmark)}</dd>
+              <dd>{formatBenchmarkLabel(dashboard.study.evaluationContext.evaluationSettings.benchmark)}</dd>
             </div>
             <div>
               <dt>直近Turnover</dt>

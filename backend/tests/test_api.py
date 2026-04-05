@@ -165,22 +165,23 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["study"]["id"] == "etf_portfolio_models_10y"
-    assert payload["study"]["datasetSpec"]["source"] == "test"
-    assert payload["study"]["datasetSpec"]["period"] == "10y"
-    assert payload["study"]["datasetSpec"]["sanityPeriods"] == ["3y"]
-    assert payload["study"]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
-    assert payload["study"]["datasetSpec"]["alignedEndDate"] == "2025-01-07"
-    assert payload["study"]["datasetSpec"]["rowCount"] == 7
-    assert payload["study"]["evaluationAssumptions"]["costAssumptions"]["commissionPct"] == 0.05
-    assert payload["study"]["evaluationAssumptions"]["splitRatioPct"] == 70.0
-    assert payload["study"]["portfolioState"]["weights"][0]["asset"] == "CASH"
-    assert payload["study"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
+    assert payload["study"]["evaluationContext"]["datasetContext"]["source"] == "test"
+    assert payload["study"]["evaluationContext"]["datasetContext"]["period"] == "10y"
+    assert payload["study"]["evaluationContext"]["datasetContext"]["sanityPeriods"] == ["3y"]
+    assert payload["study"]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
+    assert payload["study"]["evaluationContext"]["datasetContext"]["alignedEndDate"] == "2025-01-07"
+    assert payload["study"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
+    assert payload["study"]["evaluationContext"]["costAssumptions"]["commissionPct"] == 0.05
+    assert payload["study"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"] == 70.0
+    assert payload["study"]["evaluationContext"]["initialState"]["weights"][0]["asset"] == "CASH"
+    assert payload["study"]["evaluationContext"]["initialState"]["weights"][0]["weightPct"] == 15.0
     assert len(payload["study"]["strategyDefinitions"]) == 22
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["universePolicy"]["label"]
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["scoreModel"]["label"]
     assert "filterRules" in payload["study"]["strategyDefinitions"][0]["selectionDefinition"]
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["fallbackRule"]["label"]
-    assert len(payload["study"]["datasetSpec"]["tickers"]) == 20
+    assert payload["study"]["marketUniverse"]["assetCount"] == 20
+    assert len(payload["study"]["marketUniverse"]["tickers"]) == 20
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
     assert payload["runs"][0]["strategy"]["selectionDefinition"]["label"] == "全資産"
     assert payload["runs"][0]["strategy"]["portfolioModel"]["label"] == "等金額配分"
@@ -190,7 +191,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["runStoreSummary"]["computedRunCount"] == 44
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
-    assert payload["sanityChecks"][0]["datasetSpec"]["alignedStartDate"] == "2025-01-01"
+    assert payload["sanityChecks"][0]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 22
     assert len(payload["sanityChecks"][0]["runs"]) == 22

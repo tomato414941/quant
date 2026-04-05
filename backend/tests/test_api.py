@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app import main as main_module
 from app.comparison_models import ConditionVariant
 from app.main import app
-from app.portfolio import build_asset_ranking_definitions
+from app.portfolio import build_asset_ranking_specs
 
 
 client = TestClient(app)
@@ -130,8 +130,8 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    expected_strategy_count = len(config.candidate_strategy_definitions)
-    expected_reference_count = len(config.reference_strategy_definitions)
+    expected_strategy_count = len(config.candidate_strategies)
+    expected_reference_count = len(config.reference_strategies)
 
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["comparison"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
@@ -142,25 +142,25 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         payload["comparison"]["executionAssumptions"]["costModel"]["parameters"]["commissionPct"]
         == 0.05
     )
-    assert payload["comparison"]["evaluationSpec"]["kind"] == "evaluation_spec"
-    assert payload["comparison"]["evaluationSpec"]["schemaVersion"] == "v1"
-    assert payload["comparison"]["evaluationSpec"]["datasetContext"]["source"] == "test"
-    assert payload["comparison"]["evaluationSpec"]["datasetContext"]["period"] == "10y"
+    assert payload["comparison"]["evaluation"]["kind"] == "evaluation_spec"
+    assert payload["comparison"]["evaluation"]["schemaVersion"] == "v1"
+    assert payload["comparison"]["evaluation"]["datasetContext"]["source"] == "test"
+    assert payload["comparison"]["evaluation"]["datasetContext"]["period"] == "10y"
     assert (
-        payload["comparison"]["evaluationSpec"]["datasetContext"]["sanityPeriods"]
+        payload["comparison"]["evaluation"]["datasetContext"]["sanityPeriods"]
         == ["3y"]
     )
     assert (
-        payload["comparison"]["evaluationSpec"]["datasetContext"]["alignedStartDate"]
+        payload["comparison"]["evaluation"]["datasetContext"]["alignedStartDate"]
         == "2025-01-01"
     )
     assert (
-        payload["comparison"]["evaluationSpec"]["datasetContext"]["alignedEndDate"]
+        payload["comparison"]["evaluation"]["datasetContext"]["alignedEndDate"]
         == "2025-01-07"
     )
-    assert payload["comparison"]["evaluationSpec"]["datasetContext"]["rowCount"] == 7
+    assert payload["comparison"]["evaluation"]["datasetContext"]["rowCount"] == 7
     assert (
-        payload["comparison"]["evaluationSpec"]["evaluationSettings"]["splitRatioPct"]
+        payload["comparison"]["evaluation"]["evaluationSettings"]["splitRatioPct"]
         == 70.0
     )
     assert payload["comparison"]["runInput"]["portfolioState"]["weights"][0]["asset"] == "CASH"
@@ -171,7 +171,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         payload["comparison"]["candidateStrategies"][0]["components"]["core"]["dataResolution"]["label"]
         == "daily"
     )
-    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
+    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_spec"
     assert payload["comparison"]["candidateStrategies"][0]["schemaVersion"] == "v1"
     assert payload["comparison"]["candidateStrategies"][0]["components"]["core"]["investmentUniverse"]["label"]
     assert (
@@ -213,7 +213,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert (
-        payload["sanityChecks"][0]["evaluationSpec"]["datasetContext"]["alignedStartDate"]
+        payload["sanityChecks"][0]["evaluation"]["datasetContext"]["alignedStartDate"]
         == "2025-01-01"
     )
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
@@ -242,9 +242,9 @@ def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_pat
     base_config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config = copy.deepcopy(base_config)
     config.result_store_dir = str(tmp_path / "run_results")
-    config.dataset_spec.sanity_periods = []
-    config.candidate_strategy_definitions = [config.candidate_strategy_definitions[0]]
-    config.reference_strategy_definitions = []
+    config.dataset.sanity_periods = []
+    config.candidate_strategies = [config.candidate_strategies[0]]
+    config.reference_strategies = []
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     first_response = client.get("/api/dashboard")
@@ -256,7 +256,7 @@ def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_pat
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 1
 
-    config.candidate_strategy_definitions.append(copy.deepcopy(base_config.candidate_strategy_definitions[1]))
+    config.candidate_strategies.append(copy.deepcopy(base_config.candidate_strategies[1]))
 
     second_response = client.get("/api/dashboard")
 
@@ -271,9 +271,9 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    config.dataset_spec.sanity_periods = []
-    config.candidate_strategy_definitions = [config.candidate_strategy_definitions[0]]
-    config.reference_strategy_definitions = []
+    config.dataset.sanity_periods = []
+    config.candidate_strategies = [config.candidate_strategies[0]]
+    config.reference_strategies = []
     config.condition_variants = [
         ConditionVariant(
             key="baseline",
@@ -408,12 +408,12 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    expected_ranking_count = len(build_asset_ranking_definitions(config.candidate_strategy_definitions))
+    expected_ranking_count = len(build_asset_ranking_specs(config.candidate_strategies))
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["resultCount"] == expected_ranking_count
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == expected_ranking_count
-    assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
+    assert payload["results"][0]["rankingSpec"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
 

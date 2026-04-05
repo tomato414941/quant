@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v14"
+RUN_STORE_LOGIC_VERSION = "v15"
 
 
 @dataclass(frozen=True)
@@ -27,8 +27,8 @@ class FileRunResultStore:
         self.root_dir = root_dir
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
-    def load(self, run_definition: dict) -> dict | None:
-        path = self._path_for(run_definition)
+    def load(self, run_spec: dict) -> dict | None:
+        path = self._path_for(run_spec)
         if not path.exists():
             return None
         try:
@@ -50,19 +50,19 @@ class FileRunResultStore:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
-            run_definition = payload.get("runDefinition", {})
-            if run_definition.get("logicVersion") != RUN_STORE_LOGIC_VERSION:
+            run_spec = payload.get("runSpec", {})
+            if run_spec.get("logicVersion") != RUN_STORE_LOGIC_VERSION:
                 continue
-            if run_kind is not None and run_definition.get("runKind") != run_kind:
+            if run_kind is not None and run_spec.get("runKind") != run_kind:
                 continue
-            generation = run_definition.get("generation", {})
+            generation = run_spec.get("generation", {})
             if generation_method is not None and generation.get("method") != generation_method:
                 continue
             records.append(
                 {
                     "runKey": path.stem,
                     "savedAtUtc": payload.get("savedAtUtc"),
-                    "runDefinition": run_definition,
+                    "runSpec": run_spec,
                     "result": payload.get("result", {}),
                 }
             )
@@ -77,11 +77,11 @@ class FileRunResultStore:
             return records[:limit]
         return records
 
-    def save(self, run_definition: dict, result: dict) -> None:
-        path = self._path_for(run_definition)
+    def save(self, run_spec: dict, result: dict) -> None:
+        path = self._path_for(run_spec)
         payload = {
             "savedAtUtc": datetime.now(timezone.utc).isoformat(),
-            "runDefinition": run_definition,
+            "runSpec": run_spec,
             "result": result,
         }
         path.write_text(
@@ -89,39 +89,41 @@ class FileRunResultStore:
             encoding="utf-8",
         )
 
-    def _path_for(self, run_definition: dict) -> Path:
-        digest = build_run_cache_key(run_definition)
+    def _path_for(self, run_spec: dict) -> Path:
+        digest = build_run_cache_key(run_spec)
         return self.root_dir / f"{digest}.json"
 
 
-def build_run_cache_key(run_definition: dict) -> str:
-    serialized = json.dumps(run_definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+def build_run_cache_key(run_spec: dict) -> str:
+    serialized = json.dumps(run_spec, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def build_run_definition(
+def build_run_spec(
     *,
     run_kind: str,
     strategy: dict,
-    dataset_spec: dict,
-    evaluation_spec: dict,
+    dataset: dict,
+    evaluation: dict,
     execution_assumptions: dict,
     portfolio_state: dict,
     dataset_metadata: dict,
     generation: dict | None = None,
 ) -> dict:
-    run_definition = {
+    run_spec = {
+        "kind": "run_spec",
+        "schemaVersion": "v1",
         "logicVersion": RUN_STORE_LOGIC_VERSION,
         "runKind": run_kind,
         "strategy": strategy,
-        "evaluationSpec": {
+        "evaluation": {
             "datasetContext": {
-                "period": dataset_spec["period"],
+                "period": dataset["period"],
                 "alignedStartDate": dataset_metadata["aligned_start_date"],
                 "alignedEndDate": dataset_metadata["aligned_end_date"],
                 "rowCount": dataset_metadata["row_count"],
             },
-            "evaluationSettings": evaluation_spec["evaluationSettings"],
+            "evaluationSettings": evaluation["evaluationSettings"],
         },
         "executionAssumptions": execution_assumptions,
         "runInput": {
@@ -129,5 +131,5 @@ def build_run_definition(
         },
     }
     if generation is not None:
-        run_definition["generation"] = generation
-    return run_definition
+        run_spec["generation"] = generation
+    return run_spec

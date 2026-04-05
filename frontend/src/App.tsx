@@ -27,7 +27,7 @@ type InvestmentUniverse = {
   tickers: string[]
 }
 
-type StrategyDefinition = {
+type StrategySpec = {
   kind?: string
   schemaVersion?: string
   strategyId: string
@@ -72,7 +72,7 @@ type PortfolioRun = {
   kind?: string
   schemaVersion?: string
   key: string
-  strategy: StrategyDefinition
+  strategy: StrategySpec
   summary: SummaryMetrics
   splitAnalysis: {
     config: {
@@ -105,7 +105,7 @@ type DashboardResult = {
       secondaryMetric: string
       tertiaryMetric: string
     }
-    datasetSpec: {
+    dataset: {
       period: string
       sanityPeriods: string[]
     }
@@ -128,7 +128,7 @@ type DashboardResult = {
         perAssetOverrides: Record<string, Record<string, number>>
       }
     }
-    evaluationSpec: {
+    evaluation: {
       kind?: string
       schemaVersion?: string
       datasetContext: {
@@ -144,8 +144,8 @@ type DashboardResult = {
         initialCapital: number
       }
     }
-    candidateStrategies: StrategyDefinition[]
-    referenceStrategies: StrategyDefinition[]
+    candidateStrategies: StrategySpec[]
+    referenceStrategies: StrategySpec[]
   }
   candidateRuns: PortfolioRun[]
   referenceRuns: PortfolioRun[]
@@ -232,14 +232,14 @@ function App() {
     reference: 'front' | 'back'
     portfolioState: 'front' | 'back'
     executionAssumptions: 'front' | 'back'
-    evaluationSpec: 'front' | 'back'
+    evaluation: 'front' | 'back'
     result: 'front' | 'back'
   }>({
     strategy: 'front',
     reference: 'front',
     portfolioState: 'front',
     executionAssumptions: 'front',
-    evaluationSpec: 'front',
+    evaluation: 'front',
     result: 'front',
   })
   const hasLoadedRef = useRef(false)
@@ -657,54 +657,54 @@ function App() {
           />
 
           <FlipCard
-            title="Evaluation Spec"
-            face={cardFaces.evaluationSpec}
+            title="Evaluation"
+            face={cardFaces.evaluation}
             onToggle={() =>
               setCardFaces((current) => ({
                 ...current,
-                evaluationSpec: current.evaluationSpec === 'front' ? 'back' : 'front',
+                evaluation: current.evaluation === 'front' ? 'back' : 'front',
               }))
             }
-            back={dashboard.comparison.evaluationSpec}
+            back={dashboard.comparison.evaluation}
             front={
               <div className="card-body">
                 <dl className="data-list">
                   <DataListRow
                     label="datasetContext.period"
-                    value={dashboard.comparison.evaluationSpec.datasetContext.period}
+                    value={dashboard.comparison.evaluation.datasetContext.period}
                   />
                   <DataListRow
                     label="datasetContext.sanityPeriods"
                     value={
-                      <ValueList values={dashboard.comparison.evaluationSpec.datasetContext.sanityPeriods} />
+                      <ValueList values={dashboard.comparison.evaluation.datasetContext.sanityPeriods} />
                     }
                   />
                   <DataListRow
                     label="datasetContext.source"
-                    value={dashboard.comparison.evaluationSpec.datasetContext.source}
+                    value={dashboard.comparison.evaluation.datasetContext.source}
                   />
                   <DataListRow
                     label="datasetContext.alignedStartDate"
-                    value={dashboard.comparison.evaluationSpec.datasetContext.alignedStartDate}
+                    value={dashboard.comparison.evaluation.datasetContext.alignedStartDate}
                   />
                   <DataListRow
                     label="datasetContext.alignedEndDate"
-                    value={dashboard.comparison.evaluationSpec.datasetContext.alignedEndDate}
+                    value={dashboard.comparison.evaluation.datasetContext.alignedEndDate}
                   />
                   <DataListRow
                     label="datasetContext.rowCount"
-                    value={dashboard.comparison.evaluationSpec.datasetContext.rowCount}
+                    value={dashboard.comparison.evaluation.datasetContext.rowCount}
                   />
                   <DataListRow
                     label="evaluationSettings.splitRatioPct"
                     value={formatMetricValue(
-                      dashboard.comparison.evaluationSpec.evaluationSettings.splitRatioPct,
+                      dashboard.comparison.evaluation.evaluationSettings.splitRatioPct,
                     )}
                   />
                   <DataListRow
                     label="evaluationSettings.initialCapital"
                     value={formatMetricValue(
-                      dashboard.comparison.evaluationSpec.evaluationSettings.initialCapital,
+                      dashboard.comparison.evaluation.evaluationSettings.initialCapital,
                     )}
                   />
                 </dl>

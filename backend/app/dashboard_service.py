@@ -4,18 +4,18 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.portfolio import (
-    build_asset_ranking_definitions,
-    build_portfolio_strategy_definition,
-    build_risk_controls_definition,
-    build_strategy_definition,
-    evaluate_asset_ranking_definition,
+    build_asset_ranking_specs,
+    build_risk_controls_spec,
+    build_selection_spec,
+    build_strategy_spec,
+    evaluate_asset_ranking_spec,
     evaluate_strategy_run,
-    serialize_asset_ranking_definition,
+    serialize_asset_ranking_spec,
     serialize_portfolio_state,
-    serialize_strategy_definition,
+    serialize_strategy_spec,
 )
 from app.comparison_models import ComparisonSpec, ConditionVariant, EvaluationSpec
-from app.run_store import FileRunResultStore, RunStoreSummary, build_run_definition
+from app.run_store import FileRunResultStore, RunStoreSummary, build_run_spec
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,10 +23,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def collect_comparison_tickers(comparison: ComparisonSpec) -> list[str]:
     seen: dict[str, None] = {}
-    for strategy_definition in (
-        comparison.candidate_strategy_definitions + comparison.reference_strategy_definitions
+    for strategy in (
+        comparison.candidate_strategies + comparison.reference_strategies
     ):
-        for ticker in strategy_definition.investment_universe_definition.tickers:
+        for ticker in strategy.investment_universe.tickers:
             seen.setdefault(ticker, None)
     return list(seen.keys())
 
@@ -40,23 +40,23 @@ def build_dashboard_payload(
     comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
         tickers=comparison_tickers,
-        period=comparison.dataset_spec.period,
+        period=comparison.dataset.period,
     )
     candidate_runs, candidate_run_store_summary = build_strategy_runs(
         comparison=comparison,
-        strategy_definitions=comparison.candidate_strategy_definitions,
+        strategy_specs=comparison.candidate_strategies,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=comparison.dataset_spec.period,
+        dataset_period=comparison.dataset.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
     reference_runs, reference_run_store_summary = build_strategy_runs(
         comparison=comparison,
-        strategy_definitions=comparison.reference_strategy_definitions,
+        strategy_specs=comparison.reference_strategies,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=comparison.dataset_spec.period,
+        dataset_period=comparison.dataset.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
@@ -67,14 +67,14 @@ def build_dashboard_payload(
     total_computed_runs = (
         candidate_run_store_summary.computed_run_count + reference_run_store_summary.computed_run_count
     )
-    for period in comparison.dataset_spec.sanity_periods:
+    for period in comparison.dataset.sanity_periods:
         sanity_bundle, sanity_metadata = fetch_market_universe_bundle(
             tickers=comparison_tickers,
             period=period,
         )
         sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
             comparison=comparison,
-            strategy_definitions=comparison.candidate_strategy_definitions,
+            strategy_specs=comparison.candidate_strategies,
             closes=sanity_bundle["closes"],
             volumes=sanity_bundle["volumes"],
             dataset_period=period,
@@ -83,7 +83,7 @@ def build_dashboard_payload(
         )
         sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
             comparison=comparison,
-            strategy_definitions=comparison.reference_strategy_definitions,
+            strategy_specs=comparison.reference_strategies,
             closes=sanity_bundle["closes"],
             volumes=sanity_bundle["volumes"],
             dataset_period=period,
@@ -101,7 +101,7 @@ def build_dashboard_payload(
         sanity_checks.append(
             {
                 "period": period,
-                "evaluationSpec": serialize_evaluation_spec(
+                "evaluation": serialize_evaluation(
                     comparison,
                     sanity_metadata,
                     period_override=period,
@@ -142,13 +142,13 @@ def build_condition_sweep_payload(
     comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
         tickers=comparison_tickers,
-        period=comparison.dataset_spec.period,
+        period=comparison.dataset.period,
     )
     results, run_store_summary = build_condition_sweep_runs(
         comparison=comparison,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=comparison.dataset_spec.period,
+        dataset_period=comparison.dataset.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
@@ -173,13 +173,13 @@ def build_ranking_evaluation_payload(
     comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
         tickers=comparison_tickers,
-        period=comparison.dataset_spec.period,
+        period=comparison.dataset.period,
     )
     results, run_store_summary = build_ranking_evaluation_runs(
         comparison=comparison,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=comparison.dataset_spec.period,
+        dataset_period=comparison.dataset.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
@@ -223,13 +223,13 @@ def generate_parameter_sweep_runs_payload(
     comparison_tickers = collect_comparison_tickers(comparison)
     market_bundle, metadata = fetch_market_universe_bundle(
         tickers=comparison_tickers,
-        period=comparison.dataset_spec.period,
+        period=comparison.dataset.period,
     )
     results, run_store_summary = build_parameter_sweep_runs(
         comparison=comparison,
         closes=market_bundle["closes"],
         volumes=market_bundle["volumes"],
-        dataset_period=comparison.dataset_spec.period,
+        dataset_period=comparison.dataset.period,
         dataset_metadata=metadata,
         run_store=run_store,
     )
@@ -260,8 +260,8 @@ def serialize_dataset_context(
     period_override: str | None = None,
 ) -> dict:
     return {
-        "period": period_override or comparison.dataset_spec.period,
-        "sanityPeriods": comparison.dataset_spec.sanity_periods,
+        "period": period_override or comparison.dataset.period,
+        "sanityPeriods": comparison.dataset.sanity_periods,
         "source": dataset_metadata["source"],
         "alignedStartDate": dataset_metadata["aligned_start_date"],
         "alignedEndDate": dataset_metadata["aligned_end_date"],
@@ -269,39 +269,39 @@ def serialize_dataset_context(
     }
 
 
-def serialize_cost_model_from_definition(cost_model_definition) -> dict:
+def serialize_cost_model_spec(cost_model) -> dict:
     return {
-        "kind": cost_model_definition.kind,
+        "kind": cost_model.kind,
         "parameters": {
             key: round(value, 3)
-            for key, value in cost_model_definition.parameters.items()
+            for key, value in cost_model.parameters.items()
         },
-        "perAssetOverrides": cost_model_definition.per_asset_overrides,
+        "perAssetOverrides": cost_model.per_asset_overrides,
     }
 
 
 def serialize_execution_assumptions(comparison: ComparisonSpec) -> dict:
     return {
-        "kind": comparison.execution_assumptions_definition.kind,
-        "label": comparison.execution_assumptions_definition.label,
+        "kind": comparison.execution_assumptions.kind,
+        "label": comparison.execution_assumptions.label,
         "parameters": {
             key: value
-            for key, value in comparison.execution_assumptions_definition.parameters.items()
+            for key, value in comparison.execution_assumptions.parameters.items()
         },
-        "costModel": serialize_cost_model_from_definition(
-            comparison.execution_assumptions_definition.cost_model_definition
+        "costModel": serialize_cost_model_spec(
+            comparison.execution_assumptions.cost_model
         ),
     }
 
 
-def serialize_evaluation_settings(evaluation_spec: EvaluationSpec) -> dict:
+def serialize_evaluation_settings(evaluation: EvaluationSpec) -> dict:
     return {
-        "splitRatioPct": round(evaluation_spec.evaluation_settings.split_ratio * 100, 1),
-        "initialCapital": round(evaluation_spec.evaluation_settings.initial_capital, 2),
+        "splitRatioPct": round(evaluation.evaluation_settings.split_ratio * 100, 1),
+        "initialCapital": round(evaluation.evaluation_settings.initial_capital, 2),
     }
 
 
-def serialize_evaluation_spec(
+def serialize_evaluation(
     comparison: ComparisonSpec,
     dataset_metadata: dict[str, str],
     *,
@@ -315,7 +315,7 @@ def serialize_evaluation_spec(
             dataset_metadata,
             period_override=period_override,
         ),
-        "evaluationSettings": serialize_evaluation_settings(comparison.evaluation_spec),
+        "evaluationSettings": serialize_evaluation_settings(comparison.evaluation),
     }
 
 
@@ -336,22 +336,22 @@ def serialize_comparison(comparison: ComparisonSpec, dataset_metadata: dict[str,
             "assetCount": len(comparison_tickers),
             "tickers": comparison_tickers,
         },
-        "datasetSpec": {
-            "period": comparison.dataset_spec.period,
-            "sanityPeriods": comparison.dataset_spec.sanity_periods,
+        "dataset": {
+            "period": comparison.dataset.period,
+            "sanityPeriods": comparison.dataset.sanity_periods,
         },
         "runInput": {
             "portfolioState": serialize_portfolio_state(comparison.run_input.portfolio_state),
         },
         "executionAssumptions": serialize_execution_assumptions(comparison),
-        "evaluationSpec": serialize_evaluation_spec(comparison, dataset_metadata),
+        "evaluation": serialize_evaluation(comparison, dataset_metadata),
         "candidateStrategies": [
-            serialize_strategy_definition(strategy_definition)
-            for strategy_definition in comparison.candidate_strategy_definitions
+            serialize_strategy_spec(strategy_spec)
+            for strategy_spec in comparison.candidate_strategies
         ],
         "referenceStrategies": [
-            serialize_strategy_definition(strategy_definition)
-            for strategy_definition in comparison.reference_strategy_definitions
+            serialize_strategy_spec(strategy_spec)
+            for strategy_spec in comparison.reference_strategies
         ],
         "conditionVariants": [
             serialize_condition_variant(condition_variant)
@@ -373,22 +373,21 @@ def serialize_condition_variant(condition_variant: ConditionVariant) -> dict:
 
 
 def compact_run_record(record: dict) -> dict:
-    run_definition = record["runDefinition"]
+    run_spec = record["runSpec"]
     result = record["result"]
-    strategy = run_definition.get("strategy", {})
-    run_input = run_definition.get("runInput", {})
-    execution_assumptions = run_definition.get("executionAssumptions", {})
-    evaluation_spec = run_definition.get("evaluationSpec", {})
-    dataset_context = evaluation_spec.get("datasetContext", {})
+    strategy = run_spec.get("strategy", {})
+    execution_assumptions = run_spec.get("executionAssumptions", {})
+    evaluation = run_spec.get("evaluation", {})
+    dataset_context = evaluation.get("datasetContext", {})
     summary = result.get("summary", {})
     portfolio_summary = summary.get("portfolio", summary)
 
     return {
         "runKey": record["runKey"],
         "savedAtUtc": record.get("savedAtUtc"),
-        "runKind": run_definition.get("runKind"),
-        "generationMethod": run_definition.get("generation", {}).get("method"),
-        "generationBatchKey": run_definition.get("generation", {}).get("batchKey"),
+        "runKind": run_spec.get("runKind"),
+        "generationMethod": run_spec.get("generation", {}).get("method"),
+        "generationBatchKey": run_spec.get("generation", {}).get("batchKey"),
         "strategyId": strategy.get("strategyId"),
         "strategyVersion": strategy.get("version"),
         "strategyLabel": strategy.get("label"),
@@ -411,17 +410,17 @@ def compact_run_record(record: dict) -> dict:
 def build_strategy_runs(
     *,
     comparison: ComparisonSpec,
-    strategy_definitions: list,
+    strategy_specs: list,
     closes,
     volumes,
     dataset_period: str,
     dataset_metadata: dict[str, str],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    dataset_spec = {
+    dataset = {
         "period": dataset_period,
     }
-    serialized_evaluation_spec = serialize_evaluation_spec(
+    serialized_evaluation = serialize_evaluation(
         comparison,
         dataset_metadata,
         period_override=dataset_period,
@@ -431,18 +430,18 @@ def build_strategy_runs(
     cached_run_count = 0
     computed_run_count = 0
 
-    for strategy_definition in strategy_definitions:
-        serialized_strategy = serialize_strategy_definition(strategy_definition)
-        run_definition = build_run_definition(
+    for strategy_spec in strategy_specs:
+        serialized_strategy = serialize_strategy_spec(strategy_spec)
+        run_spec = build_run_spec(
             run_kind="strategy_run",
             strategy=serialized_strategy,
-            dataset_spec=dataset_spec,
-            evaluation_spec=serialized_evaluation_spec,
+            dataset=dataset,
+            evaluation=serialized_evaluation,
             execution_assumptions=serialized_execution_assumptions,
             portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
             dataset_metadata=dataset_metadata,
         )
-        cached_run = run_store.load(run_definition)
+        cached_run = run_store.load(run_spec)
         if cached_run is not None:
             cached_run_count += 1
             runs.append(cached_run)
@@ -451,13 +450,13 @@ def build_strategy_runs(
         run = evaluate_strategy_run(
             closes=closes,
             volumes=volumes,
-            strategy_definition=strategy_definition,
-            initial_capital=comparison.evaluation_spec.evaluation_settings.initial_capital,
-            split_ratio=comparison.evaluation_spec.evaluation_settings.split_ratio,
+            strategy=strategy_spec,
+            initial_capital=comparison.evaluation.evaluation_settings.initial_capital,
+            split_ratio=comparison.evaluation.evaluation_settings.split_ratio,
             execution_assumptions=serialized_execution_assumptions,
             portfolio_state=comparison.run_input.portfolio_state,
         )
-        run_store.save(run_definition, run)
+        run_store.save(run_spec, run)
         computed_run_count += 1
         runs.append(run)
 
@@ -476,37 +475,37 @@ def build_condition_sweep_runs(
     dataset_metadata: dict[str, str],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    dataset_spec = {
+    dataset = {
         "period": dataset_period,
     }
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
 
-    for strategy_definition in comparison.candidate_strategy_definitions:
+    for strategy_spec in comparison.candidate_strategies:
         for condition_variant in comparison.condition_variants:
             effective_strategy = replace(
-                strategy_definition,
-                risk_controls_definition=build_risk_controls_definition(
+                strategy_spec,
+                risk_controls=build_risk_controls_spec(
                     max_investment_ratio=condition_variant.max_investment_ratio,
                     max_weight=condition_variant.max_weight,
                 ),
             )
-            effective_evaluation_spec = replace(
-                comparison.evaluation_spec,
+            effective_evaluation = replace(
+                comparison.evaluation,
             )
             effective_execution_assumptions = replace(
-                comparison.execution_assumptions_definition,
-                cost_model_definition=replace(
-                    comparison.execution_assumptions_definition.cost_model_definition,
+                comparison.execution_assumptions,
+                cost_model=replace(
+                    comparison.execution_assumptions.cost_model,
                     parameters={
-                        **comparison.execution_assumptions_definition.cost_model_definition.parameters,
+                        **comparison.execution_assumptions.cost_model.parameters,
                         "commissionPct": condition_variant.commission_pct,
                     },
                 ),
             )
-            serialized_strategy = serialize_strategy_definition(effective_strategy)
-            serialized_evaluation_spec = serialize_evaluation_spec(
+            serialized_strategy = serialize_strategy_spec(effective_strategy)
+            serialized_evaluation = serialize_evaluation(
                 comparison,
                 dataset_metadata,
                 period_override=dataset_period,
@@ -517,21 +516,21 @@ def build_condition_sweep_runs(
                 "parameters": {
                     key: value for key, value in effective_execution_assumptions.parameters.items()
                 },
-                "costModel": serialize_cost_model_from_definition(
-                    effective_execution_assumptions.cost_model_definition
+                "costModel": serialize_cost_model_spec(
+                    effective_execution_assumptions.cost_model
                 ),
             }
             serialized_condition_variant = serialize_condition_variant(condition_variant)
-            run_definition = build_run_definition(
+            run_spec = build_run_spec(
                 run_kind="condition_sweep",
                 strategy=serialized_strategy,
-                dataset_spec=dataset_spec,
-                evaluation_spec=serialized_evaluation_spec,
+                dataset=dataset,
+                evaluation=serialized_evaluation,
                 execution_assumptions=serialized_execution_assumptions,
                 portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
                 dataset_metadata=dataset_metadata,
             )
-            cached_run = run_store.load(run_definition)
+            cached_run = run_store.load(run_spec)
             if cached_run is not None:
                 cached_run_count += 1
                 results.append(cached_run)
@@ -540,18 +539,18 @@ def build_condition_sweep_runs(
             run = evaluate_strategy_run(
                 closes=closes,
                 volumes=volumes,
-                strategy_definition=effective_strategy,
-                initial_capital=effective_evaluation_spec.evaluation_settings.initial_capital,
-                split_ratio=effective_evaluation_spec.evaluation_settings.split_ratio,
+                strategy=effective_strategy,
+                initial_capital=effective_evaluation.evaluation_settings.initial_capital,
+                split_ratio=effective_evaluation.evaluation_settings.split_ratio,
                 execution_assumptions=serialized_execution_assumptions,
                 portfolio_state=comparison.run_input.portfolio_state,
             )
             compact_run = compact_condition_sweep_run(
                 run=run,
-                key=f"{strategy_definition.key}__{condition_variant.key}",
+                key=f"{strategy_spec.key}__{condition_variant.key}",
                 condition_variant=serialized_condition_variant,
             )
-            run_store.save(run_definition, compact_run)
+            run_store.save(run_spec, compact_run)
             computed_run_count += 1
             results.append(compact_run)
 
@@ -578,23 +577,23 @@ def build_ranking_evaluation_runs(
     dataset_metadata: dict[str, str],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    dataset_spec = {
+    dataset = {
         "period": dataset_period,
     }
     returns = closes.pct_change().dropna()
     aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
-    ranking_definitions = build_asset_ranking_definitions(comparison.candidate_strategy_definitions)
+    ranking_specs = build_asset_ranking_specs(comparison.candidate_strategies)
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
 
-    for ranking_definition in ranking_definitions:
-        serialized_ranking_definition = serialize_asset_ranking_definition(ranking_definition)
-        run_definition = build_run_definition(
+    for ranking_spec in ranking_specs:
+        serialized_ranking_spec = serialize_asset_ranking_spec(ranking_spec)
+        run_spec = build_run_spec(
             run_kind="ranking_evaluation",
-            strategy={"ranking": serialized_ranking_definition},
-            dataset_spec=dataset_spec,
-            evaluation_spec=serialize_evaluation_spec(
+            strategy={"ranking": serialized_ranking_spec},
+            dataset=dataset,
+            evaluation=serialize_evaluation(
                 comparison,
                 dataset_metadata,
                 period_override=dataset_period,
@@ -603,19 +602,19 @@ def build_ranking_evaluation_runs(
             portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
             dataset_metadata=dataset_metadata,
         )
-        cached_run = run_store.load(run_definition)
+        cached_run = run_store.load(run_spec)
         if cached_run is not None:
             cached_run_count += 1
             results.append(cached_run)
             continue
 
-        result = evaluate_asset_ranking_definition(
+        result = evaluate_asset_ranking_spec(
             returns=returns,
             volumes=aligned_volumes,
-            split_ratio=comparison.evaluation_spec.evaluation_settings.split_ratio,
-            ranking_definition=ranking_definition,
+            split_ratio=comparison.evaluation.evaluation_settings.split_ratio,
+            ranking_spec=ranking_spec,
         )
-        run_store.save(run_definition, result)
+        run_store.save(run_spec, result)
         computed_run_count += 1
         results.append(result)
 
@@ -643,10 +642,10 @@ def build_parameter_sweep_runs(
     dataset_metadata: dict[str, str],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    dataset_spec = {
+    dataset = {
         "period": dataset_period,
     }
-    base_evaluation_spec = comparison.evaluation_spec
+    base_evaluation = comparison.evaluation
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -688,7 +687,7 @@ def build_parameter_sweep_runs(
                         score_parameters["momentum_weight"] = round(1.0 - macro_weight, 2)
                         score_parameters["macro_weight"] = macro_weight
 
-                    strategy_definition = build_portfolio_strategy_definition(
+                    selection_spec = build_selection_spec(
                         strategy_type=family_spec["strategyType"],
                         key=(
                             f"{family_spec['familyKey']}"
@@ -702,35 +701,35 @@ def build_parameter_sweep_runs(
                     )
                     base_strategy = next(
                         strategy
-                        for strategy in comparison.candidate_strategy_definitions
-                        if strategy.portfolio_model_definition.model_type == "hierarchical_risk_parity"
+                        for strategy in comparison.candidate_strategies
+                        if strategy.portfolio_model.model_type == "hierarchical_risk_parity"
                     )
-                    effective_strategy = build_strategy_definition(
-                        investment_universe_definition=base_strategy.investment_universe_definition,
-                        selection_definition=strategy_definition,
-                        portfolio_model_definition=base_strategy.portfolio_model_definition,
-                        risk_controls_definition=build_risk_controls_definition(
+                    effective_strategy = build_strategy_spec(
+                        investment_universe=base_strategy.investment_universe,
+                        selection=selection_spec,
+                        portfolio_model=base_strategy.portfolio_model,
+                        risk_controls=build_risk_controls_spec(
                             max_investment_ratio=1.0,
                             max_weight=max_weight,
                         ),
                     )
-                    serialized_strategy = serialize_strategy_definition(effective_strategy)
-                    serialized_evaluation_spec = serialize_evaluation_spec(
+                    serialized_strategy = serialize_strategy_spec(effective_strategy)
+                    serialized_evaluation = serialize_evaluation(
                         comparison,
                         dataset_metadata,
                         period_override=dataset_period,
                     )
-                    run_definition = build_run_definition(
+                    run_spec = build_run_spec(
                         run_kind="portfolio_comparison",
                         strategy=serialized_strategy,
-                        dataset_spec=dataset_spec,
-                        evaluation_spec=serialized_evaluation_spec,
+                        dataset=dataset,
+                        evaluation=serialized_evaluation,
                         execution_assumptions=serialize_execution_assumptions(comparison),
                         portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
                         dataset_metadata=dataset_metadata,
                         generation=generation,
                     )
-                    cached_run = run_store.load(run_definition)
+                    cached_run = run_store.load(run_spec)
                     if cached_run is not None:
                         cached_run_count += 1
                         results.append(cached_run)
@@ -739,9 +738,9 @@ def build_parameter_sweep_runs(
                     run = evaluate_strategy_run(
                         closes=closes,
                         volumes=volumes,
-                        strategy_definition=effective_strategy,
-                        initial_capital=base_evaluation_spec.evaluation_settings.initial_capital,
-                        split_ratio=base_evaluation_spec.evaluation_settings.split_ratio,
+                        strategy=effective_strategy,
+                        initial_capital=base_evaluation.evaluation_settings.initial_capital,
+                        split_ratio=base_evaluation.evaluation_settings.split_ratio,
                         execution_assumptions=serialize_execution_assumptions(comparison),
                         portfolio_state=comparison.run_input.portfolio_state,
                     )
@@ -755,7 +754,7 @@ def build_parameter_sweep_runs(
                         window_days=family_spec["windowDays"],
                         strategy=serialized_strategy,
                     )
-                    run_store.save(run_definition, compact_run)
+                    run_store.save(run_spec, compact_run)
                     computed_run_count += 1
                     results.append(compact_run)
 

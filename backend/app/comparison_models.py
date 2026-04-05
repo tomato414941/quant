@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.portfolio import PortfolioState, StrategyDefinition
+from app.portfolio import PortfolioState, StrategySpec
 
 
 @dataclass
@@ -12,28 +12,28 @@ class DatasetSpec:
 
 
 @dataclass
-class CostModelDefinition:
+class CostModelSpec:
     kind: str
     parameters: dict[str, float]
     per_asset_overrides: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 @dataclass
-class ExecutionAssumptionsDefinition:
+class ExecutionAssumptionsSpec:
     kind: str
     label: str
     parameters: dict[str, str | float | bool]
-    cost_model_definition: CostModelDefinition
+    cost_model: CostModelSpec
 
 
-def build_cost_model_definition(
+def build_cost_model_spec(
     *,
     kind: str = "flat_cost",
     commission_pct: float,
     slippage_pct: float = 0.0,
     per_asset_overrides: dict[str, dict[str, float]] | None = None,
-) -> CostModelDefinition:
-    return CostModelDefinition(
+) -> CostModelSpec:
+    return CostModelSpec(
         kind=kind,
         parameters={
             "commissionPct": commission_pct,
@@ -43,13 +43,13 @@ def build_cost_model_definition(
     )
 
 
-def build_asset_specific_linear_cost_model_definition(
+def build_asset_specific_linear_cost_model_spec(
     *,
     default_commission_pct: float,
     default_slippage_pct: float = 0.0,
     per_asset_overrides: dict[str, dict[str, float]] | None = None,
-) -> CostModelDefinition:
-    return build_cost_model_definition(
+) -> CostModelSpec:
+    return build_cost_model_spec(
         kind="asset_specific_linear_cost",
         commission_pct=default_commission_pct,
         slippage_pct=default_slippage_pct,
@@ -57,18 +57,18 @@ def build_asset_specific_linear_cost_model_definition(
     )
 
 
-def build_execution_assumptions_definition(
+def build_execution_assumptions_spec(
     *,
     kind: str = "close_execution_assumptions",
     label: str,
     parameters: dict[str, str | float | bool] | None = None,
-    cost_model_definition: CostModelDefinition,
-) -> ExecutionAssumptionsDefinition:
-    return ExecutionAssumptionsDefinition(
+    cost_model: CostModelSpec,
+) -> ExecutionAssumptionsSpec:
+    return ExecutionAssumptionsSpec(
         kind=kind,
         label=label,
         parameters=parameters or {},
-        cost_model_definition=cost_model_definition,
+        cost_model=cost_model,
     )
 
 
@@ -84,7 +84,7 @@ class EvaluationSpec:
 
 
 @dataclass
-class RunInputDefinition:
+class RunInputSpec:
     portfolio_state: PortfolioState
 
 
@@ -109,12 +109,12 @@ class ComparisonSpec:
     comparison_id: str
     title: str
     question: str
-    dataset_spec: DatasetSpec
-    run_input: RunInputDefinition
-    execution_assumptions_definition: ExecutionAssumptionsDefinition
-    evaluation_spec: EvaluationSpec
+    dataset: DatasetSpec
+    run_input: RunInputSpec
+    execution_assumptions: ExecutionAssumptionsSpec
+    evaluation: EvaluationSpec
     selection_policy: SelectionPolicy
-    candidate_strategy_definitions: list[StrategyDefinition]
-    reference_strategy_definitions: list[StrategyDefinition] = field(default_factory=list)
+    candidate_strategies: list[StrategySpec]
+    reference_strategies: list[StrategySpec] = field(default_factory=list)
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"

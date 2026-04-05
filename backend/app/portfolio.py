@@ -77,52 +77,52 @@ TRADING_DAYS_PER_YEAR = 252
 
 
 @dataclass(frozen=True)
-class UniversePolicyDefinition:
+class UniversePolicySpec:
     key: str
     label: str
 
 
 @dataclass(frozen=True)
-class InvestmentUniverseDefinition:
+class InvestmentUniverseSpec:
     key: str
     label: str
     tickers: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class ScoreModelDefinition:
+class RankingModelSpec:
     kind: str
     label: str
 
 
 @dataclass(frozen=True)
-class FilterRuleDefinition:
+class FilterRuleSpec:
     key: str
     label: str
 
 
 @dataclass(frozen=True)
-class FallbackRuleDefinition:
+class FallbackRuleSpec:
     key: str
     label: str
 
 
 @dataclass(frozen=True)
-class PortfolioStrategyDefinition:
+class SelectionSpec:
     key: str
     strategy_type: str
     label: str
     description: str
     feature_inputs: tuple[str, ...]
-    universe_policy: UniversePolicyDefinition
-    score_model: ScoreModelDefinition
+    universe_policy: UniversePolicySpec
+    score_model: RankingModelSpec
     score_parameters: tuple[tuple[str, float], ...]
-    filter_rules: tuple[FilterRuleDefinition, ...]
-    fallback_rule: FallbackRuleDefinition
+    filter_rules: tuple[FilterRuleSpec, ...]
+    fallback_rule: FallbackRuleSpec
 
 
 @dataclass(frozen=True)
-class PortfolioModelDefinition:
+class PortfolioModelSpec:
     key: str
     model_type: str
     label: str
@@ -130,7 +130,7 @@ class PortfolioModelDefinition:
 
 
 @dataclass(frozen=True)
-class ExecutionPolicyDefinition:
+class ExecutionPolicySpec:
     key: str
     label: str
     entry: str
@@ -138,24 +138,24 @@ class ExecutionPolicyDefinition:
 
 
 @dataclass(frozen=True)
-class RiskControlsDefinition:
+class RiskControlsSpec:
     max_investment_ratio: float
     max_weight: float | None = None
 
 
 @dataclass(frozen=True)
-class StrategyDefinition:
+class StrategySpec:
     strategy_id: str
     version: str
     label: str
     hypothesis: str | None
     description: str
-    investment_universe_definition: InvestmentUniverseDefinition
+    investment_universe: InvestmentUniverseSpec
     data_resolution: str
-    selection_definition: PortfolioStrategyDefinition
-    portfolio_model_definition: PortfolioModelDefinition
-    execution_policy_definition: ExecutionPolicyDefinition
-    risk_controls_definition: RiskControlsDefinition
+    selection: SelectionSpec
+    portfolio_model: PortfolioModelSpec
+    execution_policy: ExecutionPolicySpec
+    risk_controls: RiskControlsSpec
     extensions: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -170,12 +170,12 @@ class PortfolioState:
 
 
 @dataclass(frozen=True)
-class AssetRankingDefinition:
+class AssetRankingSpec:
     key: str
     label: str
     description: str
-    investment_universe_definition: InvestmentUniverseDefinition
-    strategy_definition: PortfolioStrategyDefinition
+    investment_universe: InvestmentUniverseSpec
+    selection: SelectionSpec
     source_strategy_keys: tuple[str, ...]
     source_strategy_labels: tuple[str, ...]
 
@@ -216,30 +216,30 @@ def max_drawdown(series: list[dict], equity_key: str) -> float:
     return abs(max_dd) * 100
 
 
-def build_investment_universe_definition(
+def build_investment_universe_spec(
     *,
     tickers: list[str] | tuple[str, ...],
     key: str,
     label: str,
-) -> InvestmentUniverseDefinition:
+) -> InvestmentUniverseSpec:
     normalized_tickers = tuple(dict.fromkeys(ticker.strip().upper() for ticker in tickers if ticker.strip()))
     if len(normalized_tickers) < 2:
         raise ValueError("Investment universe must contain at least two tickers.")
-    return InvestmentUniverseDefinition(
+    return InvestmentUniverseSpec(
         key=key,
         label=label,
         tickers=normalized_tickers,
     )
 
 
-def build_portfolio_strategy_definition(
+def build_selection_spec(
     strategy_type: str,
     *,
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
     score_parameters: dict[str, float] | None = None,
-) -> PortfolioStrategyDefinition:
+) -> SelectionSpec:
     if strategy_type not in SUPPORTED_PORTFOLIO_STRATEGIES:
         raise ValueError("Unsupported portfolio strategy.")
 
@@ -268,64 +268,64 @@ def build_portfolio_strategy_definition(
         "positive_momentum_high_volume_universe": ("close", "volume"),
     }
     universe_policies = {
-        "full_universe": UniversePolicyDefinition("all_assets", UNIVERSE_POLICY_LABELS["all_assets"]),
-        "full_universe_momentum_tilt": UniversePolicyDefinition(
+        "full_universe": UniversePolicySpec("all_assets", UNIVERSE_POLICY_LABELS["all_assets"]),
+        "full_universe_momentum_tilt": UniversePolicySpec(
             "all_assets",
             UNIVERSE_POLICY_LABELS["all_assets"],
         ),
-        "full_universe_momentum_low_vol_tilt": UniversePolicyDefinition(
+        "full_universe_momentum_low_vol_tilt": UniversePolicySpec(
             "all_assets",
             UNIVERSE_POLICY_LABELS["all_assets"],
         ),
-        "full_universe_momentum_macro_tilt": UniversePolicyDefinition(
+        "full_universe_momentum_macro_tilt": UniversePolicySpec(
             "all_assets",
             UNIVERSE_POLICY_LABELS["all_assets"],
         ),
-        "momentum_top3": UniversePolicyDefinition("all_assets", UNIVERSE_POLICY_LABELS["all_assets"]),
-        "dual_momentum_top3": UniversePolicyDefinition(
+        "momentum_top3": UniversePolicySpec("all_assets", UNIVERSE_POLICY_LABELS["all_assets"]),
+        "dual_momentum_top3": UniversePolicySpec(
             "positive_assets_only",
             UNIVERSE_POLICY_LABELS["positive_assets_only"],
         ),
-        "trailing_momentum_low_vol_universe": UniversePolicyDefinition(
+        "trailing_momentum_low_vol_universe": UniversePolicySpec(
             "all_assets",
             UNIVERSE_POLICY_LABELS["all_assets"],
         ),
-        "positive_momentum_universe": UniversePolicyDefinition(
+        "positive_momentum_universe": UniversePolicySpec(
             "positive_assets_only",
             UNIVERSE_POLICY_LABELS["positive_assets_only"],
         ),
-        "positive_momentum_low_vol_universe": UniversePolicyDefinition(
+        "positive_momentum_low_vol_universe": UniversePolicySpec(
             "positive_assets_only",
             UNIVERSE_POLICY_LABELS["positive_assets_only"],
         ),
-        "positive_momentum_high_volume_universe": UniversePolicyDefinition(
+        "positive_momentum_high_volume_universe": UniversePolicySpec(
             "positive_assets_only",
             UNIVERSE_POLICY_LABELS["positive_assets_only"],
         ),
     }
     score_models = {
-        "full_universe": ScoreModelDefinition("none", SCORE_MODEL_LABELS["none"]),
-        "full_universe_momentum_tilt": ScoreModelDefinition(
+        "full_universe": RankingModelSpec("none", SCORE_MODEL_LABELS["none"]),
+        "full_universe_momentum_tilt": RankingModelSpec(
             "trailing_momentum",
             SCORE_MODEL_LABELS["trailing_momentum"],
         ),
-        "full_universe_momentum_low_vol_tilt": ScoreModelDefinition(
+        "full_universe_momentum_low_vol_tilt": RankingModelSpec(
             "momentum_low_vol",
             SCORE_MODEL_LABELS["momentum_low_vol"],
         ),
-        "full_universe_momentum_macro_tilt": ScoreModelDefinition(
+        "full_universe_momentum_macro_tilt": RankingModelSpec(
             "momentum_macro",
             SCORE_MODEL_LABELS["momentum_macro"],
         ),
-        "momentum_top3": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
-        "dual_momentum_top3": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
-        "trailing_momentum_low_vol_universe": ScoreModelDefinition(
+        "momentum_top3": RankingModelSpec("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
+        "dual_momentum_top3": RankingModelSpec("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
+        "trailing_momentum_low_vol_universe": RankingModelSpec(
             "trailing_momentum",
             SCORE_MODEL_LABELS["trailing_momentum"],
         ),
-        "positive_momentum_universe": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
-        "positive_momentum_low_vol_universe": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
-        "positive_momentum_high_volume_universe": ScoreModelDefinition(
+        "positive_momentum_universe": RankingModelSpec("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
+        "positive_momentum_low_vol_universe": RankingModelSpec("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
+        "positive_momentum_high_volume_universe": RankingModelSpec(
             "volume_strength",
             SCORE_MODEL_LABELS["volume_strength"],
         ),
@@ -360,48 +360,48 @@ def build_portfolio_strategy_definition(
         "full_universe_momentum_low_vol_tilt": (),
         "full_universe_momentum_macro_tilt": (),
         "momentum_top3": (
-            FilterRuleDefinition("top_3", FILTER_RULE_LABELS["top_3"]),
+            FilterRuleSpec("top_3", FILTER_RULE_LABELS["top_3"]),
         ),
         "dual_momentum_top3": (
-            FilterRuleDefinition("positive_return", FILTER_RULE_LABELS["positive_return"]),
-            FilterRuleDefinition("top_3", FILTER_RULE_LABELS["top_3"]),
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
+            FilterRuleSpec("top_3", FILTER_RULE_LABELS["top_3"]),
         ),
         "trailing_momentum_low_vol_universe": (
-            FilterRuleDefinition("positive_return", FILTER_RULE_LABELS["positive_return"]),
-            FilterRuleDefinition("low_volatility_half", FILTER_RULE_LABELS["low_volatility_half"]),
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
+            FilterRuleSpec("low_volatility_half", FILTER_RULE_LABELS["low_volatility_half"]),
         ),
         "positive_momentum_universe": (
-            FilterRuleDefinition("positive_return", FILTER_RULE_LABELS["positive_return"]),
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
         ),
         "positive_momentum_low_vol_universe": (
-            FilterRuleDefinition("positive_return", FILTER_RULE_LABELS["positive_return"]),
-            FilterRuleDefinition("low_volatility_half", FILTER_RULE_LABELS["low_volatility_half"]),
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
+            FilterRuleSpec("low_volatility_half", FILTER_RULE_LABELS["low_volatility_half"]),
         ),
         "positive_momentum_high_volume_universe": (
-            FilterRuleDefinition("positive_return", FILTER_RULE_LABELS["positive_return"]),
-            FilterRuleDefinition("high_volume_half", FILTER_RULE_LABELS["high_volume_half"]),
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
+            FilterRuleSpec("high_volume_half", FILTER_RULE_LABELS["high_volume_half"]),
         ),
     }
     fallback_rules = {
-        "full_universe": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
-        "full_universe_momentum_tilt": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
-        "full_universe_momentum_low_vol_tilt": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
-        "full_universe_momentum_macro_tilt": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
-        "momentum_top3": FallbackRuleDefinition("none", FALLBACK_RULE_LABELS["none"]),
-        "dual_momentum_top3": FallbackRuleDefinition("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
-        "trailing_momentum_low_vol_universe": FallbackRuleDefinition(
+        "full_universe": FallbackRuleSpec("none", FALLBACK_RULE_LABELS["none"]),
+        "full_universe_momentum_tilt": FallbackRuleSpec("none", FALLBACK_RULE_LABELS["none"]),
+        "full_universe_momentum_low_vol_tilt": FallbackRuleSpec("none", FALLBACK_RULE_LABELS["none"]),
+        "full_universe_momentum_macro_tilt": FallbackRuleSpec("none", FALLBACK_RULE_LABELS["none"]),
+        "momentum_top3": FallbackRuleSpec("none", FALLBACK_RULE_LABELS["none"]),
+        "dual_momentum_top3": FallbackRuleSpec("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
+        "trailing_momentum_low_vol_universe": FallbackRuleSpec(
             "cash_on_empty",
             FALLBACK_RULE_LABELS["cash_on_empty"],
         ),
-        "positive_momentum_universe": FallbackRuleDefinition("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
-        "positive_momentum_low_vol_universe": FallbackRuleDefinition("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
-        "positive_momentum_high_volume_universe": FallbackRuleDefinition(
+        "positive_momentum_universe": FallbackRuleSpec("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
+        "positive_momentum_low_vol_universe": FallbackRuleSpec("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
+        "positive_momentum_high_volume_universe": FallbackRuleSpec(
             "cash_on_empty",
             FALLBACK_RULE_LABELS["cash_on_empty"],
         ),
     }
 
-    return PortfolioStrategyDefinition(
+    return SelectionSpec(
         key=key or strategy_type,
         strategy_type=strategy_type,
         label=label or PORTFOLIO_STRATEGY_LABELS[strategy_type],
@@ -417,13 +417,13 @@ def build_portfolio_strategy_definition(
     )
 
 
-def build_portfolio_model_definition(
+def build_portfolio_model_spec(
     model_type: str,
     *,
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
-) -> PortfolioModelDefinition:
+) -> PortfolioModelSpec:
     if model_type not in SUPPORTED_PORTFOLIO_MODELS:
         raise ValueError("Unsupported portfolio model.")
 
@@ -436,7 +436,7 @@ def build_portfolio_model_definition(
         "mean_risk_utility_conservative": "期待リターン proxy を弱めに使い、リスクをより強く見る",
     }
 
-    return PortfolioModelDefinition(
+    return PortfolioModelSpec(
         key=key or model_type,
         model_type=model_type,
         label=label or PORTFOLIO_MODEL_LABELS[model_type],
@@ -444,25 +444,25 @@ def build_portfolio_model_definition(
     )
 
 
-def serialize_portfolio_model_definition(model_definition: PortfolioModelDefinition) -> dict:
+def serialize_portfolio_model_spec(model: PortfolioModelSpec) -> dict:
     return {
-        "key": model_definition.key,
-        "modelType": model_definition.model_type,
-        "label": model_definition.label,
-        "description": model_definition.description,
+        "key": model.key,
+        "modelType": model.model_type,
+        "label": model.label,
+        "description": model.description,
     }
 
 
-def build_execution_policy_definition(
+def build_execution_policy_spec(
     *,
     key: str,
     label: str,
     entry: str,
     rebalance_frequency: str,
-) -> ExecutionPolicyDefinition:
+) -> ExecutionPolicySpec:
     if rebalance_frequency not in SUPPORTED_REBALANCE_FREQUENCIES:
         raise ValueError("Unsupported execution policy rebalance frequency.")
-    return ExecutionPolicyDefinition(
+    return ExecutionPolicySpec(
         key=key,
         label=label,
         entry=entry,
@@ -470,38 +470,38 @@ def build_execution_policy_definition(
     )
 
 
-def serialize_execution_policy_definition(execution_policy_definition: ExecutionPolicyDefinition) -> dict:
+def serialize_execution_policy_spec(execution_policy: ExecutionPolicySpec) -> dict:
     return {
-        "key": execution_policy_definition.key,
-        "label": execution_policy_definition.label,
-        "entry": execution_policy_definition.entry,
-        "rebalanceFrequency": execution_policy_definition.rebalance_frequency,
+        "key": execution_policy.key,
+        "label": execution_policy.label,
+        "entry": execution_policy.entry,
+        "rebalanceFrequency": execution_policy.rebalance_frequency,
     }
 
 
-def build_risk_controls_definition(
+def build_risk_controls_spec(
     *,
     max_investment_ratio: float,
     max_weight: float | None = None,
-) -> RiskControlsDefinition:
+) -> RiskControlsSpec:
     if max_investment_ratio <= 0 or max_investment_ratio > 1:
         raise ValueError("Max investment ratio must be between 0 and 1.")
     if max_weight is not None and (max_weight <= 0 or max_weight > 1):
         raise ValueError("Max weight must be between 0 and 1.")
-    return RiskControlsDefinition(
+    return RiskControlsSpec(
         max_investment_ratio=max_investment_ratio,
         max_weight=max_weight,
     )
 
 
-def build_strategy_definition(
+def build_strategy_spec(
     *,
-    investment_universe_definition: InvestmentUniverseDefinition,
+    investment_universe: InvestmentUniverseSpec,
     data_resolution: str = "daily",
-    selection_definition: PortfolioStrategyDefinition,
-    portfolio_model_definition: PortfolioModelDefinition,
-    execution_policy_definition: ExecutionPolicyDefinition | None = None,
-    risk_controls_definition: RiskControlsDefinition,
+    selection: SelectionSpec,
+    portfolio_model: PortfolioModelSpec,
+    execution_policy: ExecutionPolicySpec | None = None,
+    risk_controls: RiskControlsSpec,
     strategy_id: str | None = None,
     version: str = "v1",
     hypothesis: str | None = None,
@@ -509,85 +509,85 @@ def build_strategy_definition(
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
-) -> StrategyDefinition:
+) -> StrategySpec:
     resolved_strategy_id = strategy_id or key or "__".join(
         [
-            selection_definition.key,
-            portfolio_model_definition.key,
+            selection.key,
+            portfolio_model.key,
         ]
     )
     if strategy_id is not None and key is not None and strategy_id != key:
         raise ValueError("strategy_id and key must match when both are provided.")
     strategy_label = label or " × ".join(
         [
-            selection_definition.label,
-            portfolio_model_definition.label,
+            selection.label,
+            portfolio_model.label,
         ]
     )
-    return StrategyDefinition(
+    return StrategySpec(
         strategy_id=resolved_strategy_id,
         version=version,
         label=strategy_label,
         hypothesis=hypothesis,
-        description=description or selection_definition.description,
-        investment_universe_definition=investment_universe_definition,
+        description=description or selection.description,
+        investment_universe=investment_universe,
         data_resolution=data_resolution,
-        selection_definition=selection_definition,
-        portfolio_model_definition=portfolio_model_definition,
-        execution_policy_definition=execution_policy_definition
-        or build_execution_policy_definition(
+        selection=selection,
+        portfolio_model=portfolio_model,
+        execution_policy=execution_policy
+        or build_execution_policy_spec(
             key="annual",
             label="年次",
             entry="train_once_then_periodic_rebalance",
             rebalance_frequency="annual",
         ),
-        risk_controls_definition=risk_controls_definition,
+        risk_controls=risk_controls,
         extensions=tuple(sorted((extensions or {}).items())),
     )
 
 
-def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrategyDefinition) -> dict:
+def serialize_selection_spec(selection: SelectionSpec) -> dict:
     return {
-        "key": strategy_definition.key,
-        "strategyType": strategy_definition.strategy_type,
-        "label": strategy_definition.label,
-        "description": strategy_definition.description,
-        "featureInputs": list(strategy_definition.feature_inputs),
+        "key": selection.key,
+        "strategyType": selection.strategy_type,
+        "label": selection.label,
+        "description": selection.description,
+        "featureInputs": list(selection.feature_inputs),
         "universePolicy": {
-            "key": strategy_definition.universe_policy.key,
-            "label": strategy_definition.universe_policy.label,
+            "key": selection.universe_policy.key,
+            "label": selection.universe_policy.label,
         },
         "scoreModel": {
-            "kind": strategy_definition.score_model.kind,
-            "label": strategy_definition.score_model.label,
+            "kind": selection.score_model.kind,
+            "label": selection.score_model.label,
         },
         "scoreParameters": {
-            key: value for key, value in strategy_definition.score_parameters
+            key: value for key, value in selection.score_parameters
         },
         "filterRules": [
             {
                 "key": filter_rule.key,
                 "label": filter_rule.label,
             }
-            for filter_rule in strategy_definition.filter_rules
+            for filter_rule in selection.filter_rules
         ],
         "fallbackRule": {
-            "key": strategy_definition.fallback_rule.key,
-            "label": strategy_definition.fallback_rule.label,
+            "key": selection.fallback_rule.key,
+            "label": selection.fallback_rule.label,
         },
     }
 
-def serialize_risk_controls_definition(risk_controls_definition: RiskControlsDefinition) -> dict:
+def serialize_risk_controls_spec(risk_controls: RiskControlsSpec) -> dict:
     return {
-        "maxInvestmentPct": round(risk_controls_definition.max_investment_ratio * 100, 1),
-        "maxWeightPct": round(risk_controls_definition.max_weight * 100, 1)
-        if risk_controls_definition.max_weight is not None
+        "maxInvestmentPct": round(risk_controls.max_investment_ratio * 100, 1),
+        "maxWeightPct": round(risk_controls.max_weight * 100, 1)
+        if risk_controls.max_weight is not None
         else None,
     }
 
 
-def serialize_asset_ranking_model_parameters(strategy_definition: StrategyDefinition) -> dict[str, float]:
-    score_parameters = dict(strategy_definition.selection_definition.score_parameters)
+def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str, float]:
+    score_parameters = dict(strategy.selection.score_parameters)
     serialized: dict[str, float] = {}
 
     if "window_days" in score_parameters:
@@ -602,8 +602,8 @@ def serialize_asset_ranking_model_parameters(strategy_definition: StrategyDefini
     return serialized
 
 
-def serialize_tilt_rule(strategy_definition: StrategyDefinition) -> dict | None:
-    score_parameters = dict(strategy_definition.selection_definition.score_parameters)
+def serialize_tilt_rule(strategy: StrategySpec) -> dict | None:
+    score_parameters = dict(strategy.selection.score_parameters)
     if "tilt_strength" not in score_parameters:
         return None
 
@@ -620,117 +620,113 @@ def serialize_tilt_rule(strategy_definition: StrategyDefinition) -> dict | None:
     }
 
 
-def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
+def serialize_strategy_spec(strategy: StrategySpec) -> dict:
     ranking_model = (
         {
-            "kind": strategy_definition.selection_definition.score_model.kind,
-            "label": strategy_definition.selection_definition.score_model.label,
-            "parameters": serialize_asset_ranking_model_parameters(strategy_definition),
+            "kind": strategy.selection.score_model.kind,
+            "label": strategy.selection.score_model.label,
+            "parameters": serialize_asset_ranking_model_parameters(strategy),
         }
-        if strategy_definition.selection_definition.score_model.kind != "none"
+        if strategy.selection.score_model.kind != "none"
         else None
     )
     fallback_rule = (
         {
-            "key": strategy_definition.selection_definition.fallback_rule.key,
-            "label": strategy_definition.selection_definition.fallback_rule.label,
+            "key": strategy.selection.fallback_rule.key,
+            "label": strategy.selection.fallback_rule.label,
         }
-        if strategy_definition.selection_definition.fallback_rule.key != "none"
+        if strategy.selection.fallback_rule.key != "none"
         else None
     )
     return {
-        "kind": "strategy_definition",
+        "kind": "strategy_spec",
         "schemaVersion": "v1",
-        "strategyId": strategy_definition.strategy_id,
-        "version": strategy_definition.version,
-        "label": strategy_definition.label,
-        "hypothesis": strategy_definition.hypothesis,
-        "description": strategy_definition.description,
+        "strategyId": strategy.strategy_id,
+        "version": strategy.version,
+        "label": strategy.label,
+        "hypothesis": strategy.hypothesis,
+        "description": strategy.description,
         "components": {
             "core": {
                 "investmentUniverse": {
-                    "key": strategy_definition.investment_universe_definition.key,
-                    "label": strategy_definition.investment_universe_definition.label,
-                    "assetCount": len(strategy_definition.investment_universe_definition.tickers),
-                    "tickers": list(strategy_definition.investment_universe_definition.tickers),
+                    "key": strategy.investment_universe.key,
+                    "label": strategy.investment_universe.label,
+                    "assetCount": len(strategy.investment_universe.tickers),
+                    "tickers": list(strategy.investment_universe.tickers),
                 },
                 "dataResolution": {
-                    "key": strategy_definition.data_resolution,
-                    "label": strategy_definition.data_resolution,
+                    "key": strategy.data_resolution,
+                    "label": strategy.data_resolution,
                 },
-                "portfolioModel": serialize_portfolio_model_definition(
-                    strategy_definition.portfolio_model_definition
-                ),
-                "executionPolicy": serialize_execution_policy_definition(
-                    strategy_definition.execution_policy_definition
-                ),
+                "portfolioModel": serialize_portfolio_model_spec(strategy.portfolio_model),
+                "executionPolicy": serialize_execution_policy_spec(strategy.execution_policy),
             },
             "optional": {
                 "assetRankingModel": ranking_model,
-                "featureInputs": list(strategy_definition.selection_definition.feature_inputs),
+                "featureInputs": list(strategy.selection.feature_inputs),
                 "filterRules": [
                     {
                         "key": filter_rule.key,
                         "label": filter_rule.label,
                     }
-                    for filter_rule in strategy_definition.selection_definition.filter_rules
+                    for filter_rule in strategy.selection.filter_rules
                 ],
                 "fallbackRule": fallback_rule,
-                "riskControls": serialize_risk_controls_definition(
-                    strategy_definition.risk_controls_definition
-                ),
-                "tiltRule": serialize_tilt_rule(strategy_definition),
+                "riskControls": serialize_risk_controls_spec(strategy.risk_controls),
+                "tiltRule": serialize_tilt_rule(strategy),
             },
         },
         "extensions": {
-            key: value for key, value in strategy_definition.extensions
+            key: value for key, value in strategy.extensions
         },
     }
 
 
-def serialize_asset_ranking_definition(
-    ranking_definition: AssetRankingDefinition,
+def serialize_asset_ranking_spec(
+    ranking_spec: AssetRankingSpec,
 ) -> dict:
-    strategy_definition = ranking_definition.strategy_definition
+    selection = ranking_spec.selection
     return {
-        "key": ranking_definition.key,
-        "label": ranking_definition.label,
-        "description": ranking_definition.description,
+        "kind": "asset_ranking_spec",
+        "schemaVersion": "v1",
+        "key": ranking_spec.key,
+        "label": ranking_spec.label,
+        "description": ranking_spec.description,
         "investmentUniverse": {
-            "key": ranking_definition.investment_universe_definition.key,
-            "label": ranking_definition.investment_universe_definition.label,
-            "assetCount": len(ranking_definition.investment_universe_definition.tickers),
-            "tickers": list(ranking_definition.investment_universe_definition.tickers),
+            "key": ranking_spec.investment_universe.key,
+            "label": ranking_spec.investment_universe.label,
+            "assetCount": len(ranking_spec.investment_universe.tickers),
+            "tickers": list(ranking_spec.investment_universe.tickers),
         },
-        "featureInputs": list(strategy_definition.feature_inputs),
+        "featureInputs": list(selection.feature_inputs),
         "universePolicy": {
-            "key": strategy_definition.universe_policy.key,
-            "label": strategy_definition.universe_policy.label,
+            "key": selection.universe_policy.key,
+            "label": selection.universe_policy.label,
         },
         "rankingModel": {
-            "kind": strategy_definition.score_model.kind,
-            "label": strategy_definition.score_model.label,
+            "kind": selection.score_model.kind,
+            "label": selection.score_model.label,
         },
-        "scoreParameters": extract_ranking_score_parameters(strategy_definition),
+        "scoreParameters": extract_ranking_score_parameters(selection),
         "filterRules": [
             {
                 "key": filter_rule.key,
                 "label": filter_rule.label,
             }
-            for filter_rule in strategy_definition.filter_rules
+            for filter_rule in selection.filter_rules
         ],
         "fallbackRule": {
-            "key": strategy_definition.fallback_rule.key,
-            "label": strategy_definition.fallback_rule.label,
+            "key": selection.fallback_rule.key,
+            "label": selection.fallback_rule.label,
         },
-        "sourceStrategyKeys": list(ranking_definition.source_strategy_keys),
-        "sourceStrategyLabels": list(ranking_definition.source_strategy_labels),
+        "sourceStrategyKeys": list(ranking_spec.source_strategy_keys),
+        "sourceStrategyLabels": list(ranking_spec.source_strategy_labels),
     }
 
 
-def build_asset_ranking_definitions(
-    strategy_definitions: list[StrategyDefinition],
-) -> list[AssetRankingDefinition]:
+def build_asset_ranking_specs(
+    strategies: list[StrategySpec],
+) -> list[AssetRankingSpec]:
     grouped: dict[
         tuple[
             tuple[str, ...],
@@ -741,30 +737,30 @@ def build_asset_ranking_definitions(
             str,
             tuple[tuple[str, float], ...],
         ],
-        list[StrategyDefinition],
+        list[StrategySpec],
     ] = {}
 
-    for strategy in strategy_definitions:
-        selection_definition = strategy.selection_definition
-        if selection_definition.score_model.kind == "none":
+    for strategy in strategies:
+        selection = strategy.selection
+        if selection.score_model.kind == "none":
             continue
         signature = (
-            strategy.investment_universe_definition.tickers,
-            selection_definition.strategy_type,
-            selection_definition.score_model.kind,
-            tuple(selection_definition.feature_inputs),
-            tuple(filter_rule.key for filter_rule in selection_definition.filter_rules),
-            selection_definition.fallback_rule.key,
-            tuple(sorted(extract_ranking_score_parameters(selection_definition).items())),
+            strategy.investment_universe.tickers,
+            selection.strategy_type,
+            selection.score_model.kind,
+            tuple(selection.feature_inputs),
+            tuple(filter_rule.key for filter_rule in selection.filter_rules),
+            selection.fallback_rule.key,
+            tuple(sorted(extract_ranking_score_parameters(selection).items())),
         )
         grouped.setdefault(signature, []).append(strategy)
 
-    ranking_definitions: list[AssetRankingDefinition] = []
+    ranking_specs: list[AssetRankingSpec] = []
     for strategies in grouped.values():
-        representative = strategies[0].selection_definition
+        representative = strategies[0].selection
         filter_label = " / ".join(filter_rule.label for filter_rule in representative.filter_rules)
         label_parts = [
-            strategies[0].investment_universe_definition.label,
+            strategies[0].investment_universe.label,
             representative.universe_policy.label,
             representative.score_model.label,
         ]
@@ -776,34 +772,34 @@ def build_asset_ranking_definitions(
             label_parts.append(parameter_label)
         if filter_label:
             label_parts.append(filter_label)
-        ranking_definitions.append(
-            AssetRankingDefinition(
+        ranking_specs.append(
+            AssetRankingSpec(
                 key=f"ranking__{representative.key}",
                 label=" / ".join(label_parts),
                 description=representative.description,
-                investment_universe_definition=strategies[0].investment_universe_definition,
-                strategy_definition=representative,
+                investment_universe=strategies[0].investment_universe,
+                selection=representative,
                 source_strategy_keys=tuple(strategy.key for strategy in strategies),
                 source_strategy_labels=tuple(strategy.label for strategy in strategies),
             )
         )
 
-    ranking_definitions.sort(key=lambda definition: definition.label)
-    return ranking_definitions
+    ranking_specs.sort(key=lambda ranking_spec: ranking_spec.label)
+    return ranking_specs
 
 
 def extract_ranking_score_parameters(
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
 ) -> dict[str, float]:
-    score_parameters = dict(strategy_definition.score_parameters)
+    score_parameters = dict(selection.score_parameters)
     extracted: dict[str, float] = {}
     if "window_days" in score_parameters:
         extracted["windowDays"] = float(score_parameters["window_days"])
-    if strategy_definition.score_model.kind == "momentum_low_vol":
+    if selection.score_model.kind == "momentum_low_vol":
         extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.7))
         extracted["lowVolWeight"] = float(score_parameters.get("low_vol_weight", 0.3))
         return extracted
-    if strategy_definition.score_model.kind == "momentum_macro":
+    if selection.score_model.kind == "momentum_macro":
         extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.85))
         extracted["macroWeight"] = float(score_parameters.get("macro_weight", 0.15))
         return extracted
@@ -887,7 +883,7 @@ def resolve_cost_model_rates(
 def compare_portfolio_runs(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    strategy_definitions: list[StrategyDefinition],
+    strategies: list[StrategySpec],
     initial_capital: float,
     split_ratio: float,
     execution_assumptions: dict | None = None,
@@ -895,7 +891,7 @@ def compare_portfolio_runs(
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
-    if not strategy_definitions:
+    if not strategies:
         raise ValueError("At least one strategy is required.")
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
@@ -918,11 +914,11 @@ def compare_portfolio_runs(
         cost_model = build_flat_cost_model(commission_pct=transaction_cost * 100, slippage_pct=0.0)
 
     runs: list[dict] = []
-    for strategy_definition in strategy_definitions:
-        rebalance_frequency = strategy_definition.execution_policy_definition.rebalance_frequency
+    for strategy in strategies:
+        rebalance_frequency = strategy.execution_policy.rebalance_frequency
         strategy_universe = [
             asset
-            for asset in strategy_definition.investment_universe_definition.tickers
+            for asset in strategy.investment_universe.tickers
             if asset in closes.columns
         ]
         if len(strategy_universe) < 2:
@@ -945,14 +941,14 @@ def compare_portfolio_runs(
             portfolio_state=portfolio_state,
         )
 
-        selection_definition = strategy_definition.selection_definition
-        model_definition = strategy_definition.portfolio_model_definition
-        risk_controls = strategy_definition.risk_controls_definition
+        selection = strategy.selection
+        portfolio_model = strategy.portfolio_model
+        risk_controls = strategy.risk_controls
         initial_selected_assets, initial_weights = compute_portfolio_allocation(
             history_returns=train_returns,
             volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
-            strategy_definition=selection_definition,
-            model_definition=model_definition,
+            selection=selection,
+            portfolio_model=portfolio_model,
             universe_columns=returns.columns,
             max_investment_ratio=risk_controls.max_investment_ratio,
             max_weight=risk_controls.max_weight,
@@ -964,8 +960,8 @@ def compare_portfolio_runs(
             volumes=strategy_volumes,
             split_index=split_index,
             split_ratio=split_ratio,
-            strategy_definition=selection_definition,
-            model_definition=model_definition,
+            selection=selection,
+            portfolio_model=portfolio_model,
             initial_weights=initial_weights,
             initial_selected_assets=initial_selected_assets,
             max_investment_ratio=risk_controls.max_investment_ratio,
@@ -980,8 +976,8 @@ def compare_portfolio_runs(
             {
                 "kind": "run_result",
                 "schemaVersion": "v1",
-                "key": strategy_definition.key,
-                "strategy": serialize_strategy_definition(strategy_definition),
+                "key": strategy.key,
+                "strategy": serialize_strategy_spec(strategy),
                 "weights": serialize_weights(
                     returns.columns,
                     backtest["latestWeights"],
@@ -1000,7 +996,7 @@ def compare_portfolio_runs(
 def evaluate_strategy_run(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    strategy_definition: StrategyDefinition,
+    strategy: StrategySpec,
     initial_capital: float,
     split_ratio: float,
     execution_assumptions: dict | None = None,
@@ -1011,7 +1007,7 @@ def evaluate_strategy_run(
     return compare_portfolio_runs(
         closes=closes,
         volumes=volumes,
-        strategy_definitions=[strategy_definition],
+        strategies=[strategy],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         execution_assumptions=execution_assumptions,
@@ -1024,7 +1020,7 @@ def evaluate_strategy_run(
 def compare_portfolio_models(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    model_definitions: list[PortfolioModelDefinition],
+    portfolio_models: list[PortfolioModelSpec],
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
@@ -1033,27 +1029,27 @@ def compare_portfolio_models(
     return compare_portfolio_runs(
         closes=closes,
         volumes=volumes,
-        strategy_definitions=[
-            build_strategy_definition(
-                investment_universe_definition=build_investment_universe_definition(
+        strategies=[
+            build_strategy_spec(
+                investment_universe=build_investment_universe_spec(
                     tickers=list(closes.columns),
                     key="ad_hoc_universe",
                     label="Ad hoc universe",
                 ),
-                selection_definition=build_portfolio_strategy_definition("full_universe"),
-                portfolio_model_definition=model_definition,
-                execution_policy_definition=build_execution_policy_definition(
+                selection=build_selection_spec("full_universe"),
+                portfolio_model=portfolio_model,
+                execution_policy=build_execution_policy_spec(
                     key="hold",
                     label="保有",
                     entry="hold",
                     rebalance_frequency="hold",
                 ),
-                risk_controls_definition=build_risk_controls_definition(
+                risk_controls=build_risk_controls_spec(
                     max_investment_ratio=1.0,
                     max_weight=None,
                 ),
             )
-            for model_definition in model_definitions
+            for portfolio_model in portfolio_models
         ],
         initial_capital=initial_capital,
         split_ratio=split_ratio,
@@ -1076,28 +1072,28 @@ def compare_portfolio_models(
 def select_assets(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
 ) -> list[str]:
-    trailing_total_returns = compute_trailing_total_returns(returns, strategy_definition)
+    trailing_total_returns = compute_trailing_total_returns(returns, selection)
 
-    if strategy_definition.strategy_type == "full_universe":
+    if selection.strategy_type == "full_universe":
         return list(returns.columns)
-    if strategy_definition.strategy_type == "full_universe_momentum_tilt":
+    if selection.strategy_type == "full_universe_momentum_tilt":
         return list(returns.columns)
-    if strategy_definition.strategy_type == "full_universe_momentum_low_vol_tilt":
+    if selection.strategy_type == "full_universe_momentum_low_vol_tilt":
         return list(returns.columns)
-    if strategy_definition.strategy_type == "full_universe_momentum_macro_tilt":
+    if selection.strategy_type == "full_universe_momentum_macro_tilt":
         return list(returns.columns)
-    if strategy_definition.strategy_type == "momentum_top3":
+    if selection.strategy_type == "momentum_top3":
         selected = trailing_total_returns.sort_values(ascending=False).head(min(3, len(trailing_total_returns)))
         return list(selected.index)
-    if strategy_definition.strategy_type == "dual_momentum_top3":
+    if selection.strategy_type == "dual_momentum_top3":
         positive_returns = trailing_total_returns[trailing_total_returns > 0]
         if positive_returns.empty:
             return []
         selected = positive_returns.sort_values(ascending=False).head(min(3, len(positive_returns)))
         return list(selected.index)
-    if strategy_definition.strategy_type == "trailing_momentum_low_vol_universe":
+    if selection.strategy_type == "trailing_momentum_low_vol_universe":
         positive_assets = trailing_total_returns[trailing_total_returns > 0].sort_values(ascending=False)
         if positive_assets.empty:
             return []
@@ -1107,12 +1103,12 @@ def select_assets(
         if selected.empty:
             return [str(volatilities.idxmin())]
         return list(selected.index)
-    if strategy_definition.strategy_type == "positive_momentum_universe":
+    if selection.strategy_type == "positive_momentum_universe":
         positive_returns = trailing_total_returns[trailing_total_returns > 0]
         if positive_returns.empty:
             return []
         return list(positive_returns.sort_values(ascending=False).index)
-    if strategy_definition.strategy_type == "positive_momentum_low_vol_universe":
+    if selection.strategy_type == "positive_momentum_low_vol_universe":
         positive_assets = trailing_total_returns[trailing_total_returns > 0].sort_values(ascending=False)
         if positive_assets.empty:
             return []
@@ -1122,7 +1118,7 @@ def select_assets(
         if selected.empty:
             return [str(volatilities.idxmin())]
         return list(selected.index)
-    if strategy_definition.strategy_type == "positive_momentum_high_volume_universe":
+    if selection.strategy_type == "positive_momentum_high_volume_universe":
         if volume_history is None:
             raise ValueError("Volume history is required for the selected portfolio strategy.")
         total_returns = (1 + returns).prod() - 1
@@ -1151,28 +1147,28 @@ def select_assets(
 def compute_strategy_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
 ) -> pd.Series | None:
-    score_kind = strategy_definition.score_model.kind
+    score_kind = selection.score_model.kind
     if score_kind == "none":
         return None
     if score_kind == "trailing_momentum":
-        return compute_trailing_total_returns(returns, strategy_definition)
+        return compute_trailing_total_returns(returns, selection)
     if score_kind == "momentum_low_vol":
-        score_parameters = dict(strategy_definition.score_parameters)
+        score_parameters = dict(selection.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.7))
         low_vol_weight = float(score_parameters.get("low_vol_weight", 0.3))
-        trailing_returns = compute_trailing_total_returns(returns, strategy_definition)
+        trailing_returns = compute_trailing_total_returns(returns, selection)
         momentum_rank = trailing_returns.rank(method="average", pct=True)
         low_vol_rank = (-returns.std()).rank(method="average", pct=True)
         return momentum_weight * momentum_rank + low_vol_weight * low_vol_rank
     if score_kind == "momentum_macro":
-        score_parameters = dict(strategy_definition.score_parameters)
+        score_parameters = dict(selection.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.85))
         macro_weight = float(score_parameters.get("macro_weight", 0.15))
-        trailing_returns = compute_trailing_total_returns(returns, strategy_definition)
+        trailing_returns = compute_trailing_total_returns(returns, selection)
         momentum_rank = trailing_returns.rank(method="average", pct=True)
-        macro_rank = compute_macro_proxy_rank(returns, strategy_definition)
+        macro_rank = compute_macro_proxy_rank(returns, selection)
         return momentum_weight * momentum_rank + macro_weight * macro_rank
     if score_kind == "volume_strength":
         if volume_history is None:
@@ -1183,17 +1179,17 @@ def compute_strategy_score_series(
     raise ValueError("Unsupported score model.")
 
 
-def get_ranking_window_days(strategy_definition: PortfolioStrategyDefinition) -> int:
-    score_parameters = dict(strategy_definition.score_parameters)
+def get_ranking_window_days(selection: SelectionSpec) -> int:
+    score_parameters = dict(selection.score_parameters)
     configured_window = int(score_parameters.get("window_days", 252))
     return max(1, configured_window)
 
 
 def compute_trailing_total_returns(
     returns: pd.DataFrame,
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
 ) -> pd.Series:
-    lookback = min(len(returns), get_ranking_window_days(strategy_definition))
+    lookback = min(len(returns), get_ranking_window_days(selection))
     trailing_returns = returns.iloc[-lookback:]
     return (1 + trailing_returns).prod() - 1
 
@@ -1211,9 +1207,9 @@ def compute_volume_strength(volume_history: pd.DataFrame) -> pd.Series:
 
 def compute_macro_proxy_rank(
     returns: pd.DataFrame,
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
 ) -> pd.Series:
-    trailing_returns = compute_trailing_total_returns(returns, strategy_definition)
+    trailing_returns = compute_trailing_total_returns(returns, selection)
     risk_assets = [asset for asset in ["SPY", "QQQ", "IWM", "EFA", "EEM", "EWJ", "EWZ", "VNQ", "DBC", "USO", "BTC-USD", "ETH-USD"] if asset in trailing_returns.index]
     defensive_assets = [asset for asset in ["TLT", "IEF", "LQD", "HYG", "TIP", "GLD", "SLV", "UUP"] if asset in trailing_returns.index]
     if not risk_assets or not defensive_assets:
@@ -1234,14 +1230,14 @@ def compute_macro_proxy_rank(
     return pd.Series(macro_scores, dtype="float64").rank(method="average", pct=True)
 
 
-def evaluate_asset_ranking_definition(
+def evaluate_asset_ranking_spec(
     returns: pd.DataFrame,
     volumes: pd.DataFrame | None,
     split_ratio: float,
-    ranking_definition: AssetRankingDefinition,
+    ranking_spec: AssetRankingSpec,
 ) -> dict:
     ranking_universe = [
-        asset for asset in ranking_definition.investment_universe_definition.tickers if asset in returns.columns
+        asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
     ]
     returns = returns[ranking_universe]
     volumes = volumes[ranking_universe] if volumes is not None else None
@@ -1252,12 +1248,12 @@ def evaluate_asset_ranking_definition(
     for index in range(2, len(returns)):
         history_returns = returns.iloc[:index]
         history_volumes = volumes.iloc[:index] if volumes is not None else None
-        strategy_definition = ranking_definition.strategy_definition
-        selected_assets = select_assets(history_returns, history_volumes, strategy_definition)
+        selection = ranking_spec.selection
+        selected_assets = select_assets(history_returns, history_volumes, selection)
         if len(selected_assets) < 2:
             continue
 
-        score_series = compute_strategy_score_series(history_returns, history_volumes, strategy_definition)
+        score_series = compute_strategy_score_series(history_returns, history_volumes, selection)
         if score_series is None:
             continue
 
@@ -1297,7 +1293,7 @@ def evaluate_asset_ranking_definition(
         )
 
     return {
-        "rankingDefinition": serialize_asset_ranking_definition(ranking_definition),
+        "rankingSpec": serialize_asset_ranking_spec(ranking_spec),
         "latestTopAssets": latest_top_assets,
         "overall": summarize_ranking_observations(observations),
         "train": summarize_ranking_observations(
@@ -1349,15 +1345,15 @@ def expand_weights(
 def compute_portfolio_allocation(
     history_returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_definition: PortfolioStrategyDefinition,
-    model_definition: PortfolioModelDefinition,
+    selection: SelectionSpec,
+    portfolio_model: PortfolioModelSpec,
     universe_columns: pd.Index,
     max_investment_ratio: float,
     max_weight: float | None,
     previous_weights: np.ndarray | None,
     transaction_cost: float,
 ) -> tuple[list[str], np.ndarray]:
-    selected_assets = select_assets(history_returns, volume_history, strategy_definition)
+    selected_assets = select_assets(history_returns, volume_history, selection)
     if not selected_assets:
         return [], np.zeros(len(universe_columns), dtype="float64")
     strategy_returns = filter_positive_variance_assets(history_returns[selected_assets])
@@ -1375,22 +1371,22 @@ def compute_portfolio_allocation(
     expected_return_proxy = compute_expected_return_proxy(
         returns=strategy_returns,
         volume_history=volume_history[selected_assets] if volume_history is not None else None,
-        strategy_definition=strategy_definition,
+        selection=selection,
     )
     weights = fit_portfolio_model(
         strategy_returns,
-        model_definition,
+        portfolio_model,
         max_investment_ratio=max_investment_ratio,
         max_weight=max_weight,
         previous_weights=selected_previous_weights,
         transaction_cost=transaction_cost,
         expected_return_proxy=expected_return_proxy,
     ) * max_investment_ratio
-    if model_definition.model_type != "mean_risk_utility":
+    if portfolio_model.model_type != "mean_risk_utility":
         weights = apply_strategy_weight_tilt(
             weights=weights,
             history_returns=strategy_returns,
-            strategy_definition=strategy_definition,
+            selection=selection,
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
         )
@@ -1406,18 +1402,18 @@ def apply_strategy_weight_tilt(
     *,
     weights: np.ndarray,
     history_returns: pd.DataFrame,
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
     max_investment_ratio: float,
     max_weight: float | None,
 ) -> np.ndarray:
-    score_parameters = dict(strategy_definition.score_parameters)
+    score_parameters = dict(selection.score_parameters)
     if "tilt_strength" not in score_parameters:
         return weights
 
     score_series = compute_strategy_score_series(
         history_returns,
         None,
-        strategy_definition,
+        selection,
     )
     if score_series is None:
         return weights
@@ -1456,9 +1452,9 @@ def compute_expected_return_proxy(
     *,
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_definition: PortfolioStrategyDefinition,
+    selection: SelectionSpec,
 ) -> np.ndarray | None:
-    score_series = compute_strategy_score_series(returns, volume_history, strategy_definition)
+    score_series = compute_strategy_score_series(returns, volume_history, selection)
     if score_series is None:
         return None
 
@@ -1490,7 +1486,7 @@ def shrink_expected_return_proxy(
 
 def fit_portfolio_model(
     returns: pd.DataFrame,
-    model_definition: PortfolioModelDefinition,
+    portfolio_model: PortfolioModelSpec,
     *,
     max_investment_ratio: float,
     max_weight: float | None,
@@ -1506,9 +1502,9 @@ def fit_portfolio_model(
     if max_weight is not None:
         raw_max_weight = min(1.0, max_weight / max_investment_ratio)
 
-    if model_definition.model_type == "equal_weight":
+    if portfolio_model.model_type == "equal_weight":
         weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif model_definition.model_type == "risk_budgeting":
+    elif portfolio_model.model_type == "risk_budgeting":
         try:
             estimator = RiskBudgeting(
                 max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
@@ -1519,7 +1515,7 @@ def fit_portfolio_model(
             weights = estimator.weights_
         except Exception:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif model_definition.model_type == "minimum_variance":
+    elif portfolio_model.model_type == "minimum_variance":
         try:
             estimator = MeanRisk(
                 max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
@@ -1530,7 +1526,7 @@ def fit_portfolio_model(
             weights = estimator.weights_
         except Exception:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif model_definition.model_type == "hierarchical_risk_parity":
+    elif portfolio_model.model_type == "hierarchical_risk_parity":
         if asset_count <= 2:
             try:
                 estimator = RiskBudgeting(
@@ -1553,7 +1549,7 @@ def fit_portfolio_model(
                 weights = estimator.weights_
             except Exception:
                 weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif model_definition.model_type == "mean_risk_utility":
+    elif portfolio_model.model_type == "mean_risk_utility":
         try:
             estimator = MeanRisk(
                 objective_function=ObjectiveFunction.MAXIMIZE_UTILITY,
@@ -1571,7 +1567,7 @@ def fit_portfolio_model(
             weights = estimator.weights_
         except Exception:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif model_definition.model_type == "mean_risk_utility_conservative":
+    elif portfolio_model.model_type == "mean_risk_utility_conservative":
         try:
             conservative_proxy = shrink_expected_return_proxy(expected_return_proxy, 0.35)
             estimator = MeanRisk(
@@ -1614,8 +1610,8 @@ def run_portfolio_backtest(
     volumes: pd.DataFrame | None,
     split_index: int,
     split_ratio: float,
-    strategy_definition: PortfolioStrategyDefinition,
-    model_definition: PortfolioModelDefinition,
+    selection: SelectionSpec,
+    portfolio_model: PortfolioModelSpec,
     initial_weights: np.ndarray,
     initial_selected_assets: list[str],
     max_investment_ratio: float,
@@ -1653,8 +1649,8 @@ def run_portfolio_backtest(
             current_selected_assets, rebalanced_weights = compute_portfolio_allocation(
                 history_returns=returns.iloc[:index],
                 volume_history=volumes.iloc[:index] if volumes is not None else None,
-                strategy_definition=strategy_definition,
-                model_definition=model_definition,
+                selection=selection,
+                portfolio_model=portfolio_model,
                 universe_columns=returns.columns,
                 max_investment_ratio=max_investment_ratio,
                 max_weight=max_weight,

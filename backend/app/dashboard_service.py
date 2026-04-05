@@ -9,7 +9,7 @@ from app.portfolio import (
     build_risk_controls_definition,
     build_strategy_definition,
     evaluate_asset_ranking_definition,
-    compare_portfolio_candidate,
+    evaluate_strategy_run,
     serialize_asset_ranking_definition,
     serialize_portfolio_model_definition,
     serialize_execution_policy_definition,
@@ -275,6 +275,11 @@ def serialize_study(study: StudyDefinition, dataset_metadata: dict[str, str]) ->
         "id": study.study_id,
         "title": study.title,
         "question": study.question,
+        "selectionPolicy": {
+            "primaryMetric": study.selection_policy.primary_metric,
+            "secondaryMetric": study.selection_policy.secondary_metric,
+            "tertiaryMetric": study.selection_policy.tertiary_metric,
+        },
         "marketUniverse": {
             "assetCount": len(study_tickers),
             "tickers": study_tickers,
@@ -321,6 +326,8 @@ def compact_run_record(record: dict) -> dict:
         "strategyVersion": strategy.get("version"),
         "strategyLabel": strategy.get("label"),
         "strategyHypothesis": strategy.get("hypothesis"),
+        "investmentUniverseLabel": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("label"),
+        "investmentUniverseAssetCount": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("assetCount"),
         "portfolioModelLabel": strategy.get("portfolioModel", {}).get("label"),
         "executionLabel": strategy.get("executionPolicy", {}).get("label"),
         "period": dataset_context.get("period"),
@@ -371,7 +378,7 @@ def build_portfolio_runs(
             runs.append(cached_run)
             continue
 
-        run = compare_portfolio_candidate(
+        run = evaluate_strategy_run(
             closes=closes,
             volumes=volumes,
             strategy_definition=strategy_definition,
@@ -446,7 +453,7 @@ def build_condition_sweep_runs(
                 results.append(cached_run)
                 continue
 
-            run = compare_portfolio_candidate(
+            run = evaluate_strategy_run(
                 closes=closes,
                 volumes=volumes,
                 strategy_definition=effective_strategy,
@@ -603,7 +610,7 @@ def build_parameter_sweep_runs(
                             f"__cap_{str(max_weight).replace('.', '_')}"
                         ),
                         label=family_spec["familyLabel"],
-                        description="Local parameter sweep candidate",
+                        description="Local parameter sweep strategy",
                         score_parameters=score_parameters,
                     )
                     base_strategy = next(
@@ -641,7 +648,7 @@ def build_parameter_sweep_runs(
                         results.append(cached_run)
                         continue
 
-                    run = compare_portfolio_candidate(
+                    run = evaluate_strategy_run(
                         closes=closes,
                         volumes=volumes,
                         strategy_definition=effective_strategy,

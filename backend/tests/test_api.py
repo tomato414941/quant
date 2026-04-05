@@ -165,6 +165,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["study"]["id"] == "etf_portfolio_models_10y"
+    assert payload["study"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
     assert payload["study"]["evaluationContext"]["datasetContext"]["source"] == "test"
     assert payload["study"]["evaluationContext"]["datasetContext"]["period"] == "10y"
     assert payload["study"]["evaluationContext"]["datasetContext"]["sanityPeriods"] == ["3y"]
@@ -175,7 +176,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"] == 70.0
     assert payload["study"]["evaluationContext"]["initialState"]["weights"][0]["asset"] == "CASH"
     assert payload["study"]["evaluationContext"]["initialState"]["weights"][0]["weightPct"] == 15.0
-    assert len(payload["study"]["strategyDefinitions"]) == 22
+    assert len(payload["study"]["strategyDefinitions"]) == 23
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["universePolicy"]["label"]
     assert payload["study"]["strategyDefinitions"][0]["selectionDefinition"]["scoreModel"]["label"]
     assert "filterRules" in payload["study"]["strategyDefinitions"][0]["selectionDefinition"]
@@ -188,25 +189,25 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"
     assert payload["runs"][0]["strategy"]["executionPolicy"]["label"] == "年次"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 44
+    assert payload["runStoreSummary"]["computedRunCount"] == 46
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert payload["sanityChecks"][0]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 22
-    assert len(payload["sanityChecks"][0]["runs"]) == 22
+    assert payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 23
+    assert len(payload["sanityChecks"][0]["runs"]) == 23
 
     second_response = client.get("/api/dashboard")
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 44
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 46
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
-    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 22
+    assert second_payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 23
     assert second_payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"] == 0
 
 
-def test_dashboard_reuses_existing_runs_when_candidate_added(monkeypatch, tmp_path) -> None:
+def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     base_config = copy.deepcopy(main_module.DEFAULT_DASHBOARD_CONFIG)
     config = copy.deepcopy(base_config)
@@ -312,6 +313,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["runKind"] == "dashboard"
     assert payload["recordCount"] == 5
     assert payload["records"][0]["strategyLabel"]
+    assert payload["records"][0]["investmentUniverseLabel"]
     assert payload["records"][0]["portfolioModelLabel"]
     assert payload["records"][0]["commissionPct"] is not None
     assert payload["records"][0]["sharpeRatio"] is not None
@@ -371,9 +373,9 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["study"]["id"] == "etf_portfolio_models_10y"
-    assert payload["resultCount"] == 9
+    assert payload["resultCount"] == 10
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == 9
+    assert payload["runStoreSummary"]["computedRunCount"] == 10
     assert payload["results"][0]["rankingDefinition"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
@@ -382,7 +384,7 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == 9
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == 10
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 

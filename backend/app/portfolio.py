@@ -872,7 +872,7 @@ def compare_portfolio_runs(
     return runs
 
 
-def compare_portfolio_candidate(
+def evaluate_strategy_run(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
     strategy_definition: StrategyDefinition,

@@ -137,10 +137,14 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
     assert payload["comparison"]["executionAssumptions"]["kind"] == "close_execution_assumptions"
     assert payload["comparison"]["executionAssumptions"]["parameters"]["fillPrice"] == "close"
-    assert payload["comparison"]["executionAssumptions"]["costModel"]["kind"] == "flat_cost"
+    assert payload["comparison"]["executionAssumptions"]["costModel"]["kind"] == "asset_specific_linear_cost"
     assert (
         payload["comparison"]["executionAssumptions"]["costModel"]["parameters"]["commissionPct"]
         == 0.05
+    )
+    assert (
+        payload["comparison"]["executionAssumptions"]["costModel"]["parameters"]["slippagePct"]
+        == 0.02
     )
     assert payload["comparison"]["evaluation"]["kind"] == "evaluation_spec"
     assert payload["comparison"]["evaluation"]["schemaVersion"] == "v1"

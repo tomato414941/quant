@@ -288,62 +288,33 @@ ETF_ONLY_INVESTMENT_UNIVERSE = build_investment_universe_spec(
 )
 
 
-def build_multi_asset_daily_cost_model_preset(preset: str) -> CostModelSpec:
-    if preset == "realistic_v1":
-        return build_asset_specific_linear_cost_model_spec(
-            default_commission_pct=0.05,
-            default_slippage_pct=0.02,
-            per_asset_overrides={
-                "SPY": {"commissionPct": 0.02, "slippagePct": 0.01},
-                "QQQ": {"commissionPct": 0.02, "slippagePct": 0.01},
-                "IWM": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "EFA": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "EEM": {"commissionPct": 0.04, "slippagePct": 0.03},
-                "EWJ": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "EWZ": {"commissionPct": 0.05, "slippagePct": 0.05},
-                "VNQ": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "TLT": {"commissionPct": 0.02, "slippagePct": 0.01},
-                "IEF": {"commissionPct": 0.02, "slippagePct": 0.01},
-                "LQD": {"commissionPct": 0.02, "slippagePct": 0.02},
-                "HYG": {"commissionPct": 0.03, "slippagePct": 0.03},
-                "TIP": {"commissionPct": 0.02, "slippagePct": 0.02},
-                "GLD": {"commissionPct": 0.03, "slippagePct": 0.03},
-                "SLV": {"commissionPct": 0.04, "slippagePct": 0.04},
-                "DBC": {"commissionPct": 0.05, "slippagePct": 0.05},
-                "USO": {"commissionPct": 0.06, "slippagePct": 0.06},
-                "UUP": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "BTC-USD": {"commissionPct": 0.10, "slippagePct": 0.15},
-                "ETH-USD": {"commissionPct": 0.10, "slippagePct": 0.15},
-            },
-        )
-    if preset == "strict_v1":
-        return build_asset_specific_linear_cost_model_spec(
-            default_commission_pct=0.08,
-            default_slippage_pct=0.05,
-            per_asset_overrides={
-                "SPY": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "QQQ": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "IWM": {"commissionPct": 0.05, "slippagePct": 0.05},
-                "EFA": {"commissionPct": 0.05, "slippagePct": 0.04},
-                "EEM": {"commissionPct": 0.06, "slippagePct": 0.06},
-                "EWJ": {"commissionPct": 0.05, "slippagePct": 0.04},
-                "EWZ": {"commissionPct": 0.08, "slippagePct": 0.08},
-                "VNQ": {"commissionPct": 0.05, "slippagePct": 0.04},
-                "TLT": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "IEF": {"commissionPct": 0.03, "slippagePct": 0.02},
-                "LQD": {"commissionPct": 0.04, "slippagePct": 0.04},
-                "HYG": {"commissionPct": 0.05, "slippagePct": 0.05},
-                "TIP": {"commissionPct": 0.04, "slippagePct": 0.04},
-                "GLD": {"commissionPct": 0.05, "slippagePct": 0.05},
-                "SLV": {"commissionPct": 0.06, "slippagePct": 0.06},
-                "DBC": {"commissionPct": 0.08, "slippagePct": 0.08},
-                "USO": {"commissionPct": 0.10, "slippagePct": 0.10},
-                "UUP": {"commissionPct": 0.05, "slippagePct": 0.04},
-                "BTC-USD": {"commissionPct": 0.20, "slippagePct": 0.25},
-                "ETH-USD": {"commissionPct": 0.20, "slippagePct": 0.25},
-            },
-        )
-    raise ValueError("Unsupported multi-asset daily cost model preset.")
+def build_realistic_multi_asset_cost_model_spec() -> CostModelSpec:
+    return build_asset_specific_linear_cost_model_spec(
+        default_commission_pct=0.05,
+        default_slippage_pct=0.02,
+        per_asset_overrides={
+            "SPY": {"commissionPct": 0.02, "slippagePct": 0.01},
+            "QQQ": {"commissionPct": 0.02, "slippagePct": 0.01},
+            "IWM": {"commissionPct": 0.03, "slippagePct": 0.02},
+            "EFA": {"commissionPct": 0.03, "slippagePct": 0.02},
+            "EEM": {"commissionPct": 0.04, "slippagePct": 0.03},
+            "EWJ": {"commissionPct": 0.03, "slippagePct": 0.02},
+            "EWZ": {"commissionPct": 0.05, "slippagePct": 0.05},
+            "VNQ": {"commissionPct": 0.03, "slippagePct": 0.02},
+            "TLT": {"commissionPct": 0.02, "slippagePct": 0.01},
+            "IEF": {"commissionPct": 0.02, "slippagePct": 0.01},
+            "LQD": {"commissionPct": 0.02, "slippagePct": 0.02},
+            "HYG": {"commissionPct": 0.03, "slippagePct": 0.03},
+            "TIP": {"commissionPct": 0.02, "slippagePct": 0.02},
+            "GLD": {"commissionPct": 0.03, "slippagePct": 0.03},
+            "SLV": {"commissionPct": 0.04, "slippagePct": 0.04},
+            "DBC": {"commissionPct": 0.05, "slippagePct": 0.05},
+            "USO": {"commissionPct": 0.06, "slippagePct": 0.06},
+            "UUP": {"commissionPct": 0.03, "slippagePct": 0.02},
+            "BTC-USD": {"commissionPct": 0.10, "slippagePct": 0.15},
+            "ETH-USD": {"commissionPct": 0.10, "slippagePct": 0.15},
+        },
+    )
 
 
 def build_condition_variants() -> list[ConditionVariant]:
@@ -398,23 +369,12 @@ REFERENCE_HOLD_EXECUTION_POLICY = build_execution_policy_spec(
     rebalance_frequency="hold",
 )
 
-DEFAULT_CLOSE_EXECUTION_ASSUMPTIONS = build_execution_assumptions_spec(
+DEFAULT_EXECUTION_ASSUMPTIONS = build_execution_assumptions_spec(
     label="終値約定",
     parameters={
         "fillPrice": "close",
     },
-    cost_model=build_cost_model_spec(
-        commission_pct=0.05,
-        slippage_pct=0.0,
-    ),
-)
-
-REALISTIC_DAILY_EXECUTION_ASSUMPTIONS = build_execution_assumptions_spec(
-    label="終値約定",
-    parameters={
-        "fillPrice": "close",
-    },
-    cost_model=build_multi_asset_daily_cost_model_preset("realistic_v1"),
+    cost_model=build_realistic_multi_asset_cost_model_spec(),
 )
 
 DEFAULT_RISK_CONTROLS = build_risk_controls_spec(
@@ -473,7 +433,7 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
             cash_weight=0.15,
         ),
     ),
-    execution_assumptions=DEFAULT_CLOSE_EXECUTION_ASSUMPTIONS,
+    execution_assumptions=DEFAULT_EXECUTION_ASSUMPTIONS,
     evaluation=EvaluationSpec(
         evaluation_settings=EvaluationSettings(
             split_ratio=0.7,

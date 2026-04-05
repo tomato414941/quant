@@ -71,6 +71,7 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 - `Study` は「複数 Strategy を共通の問いで比べる枠」
 
 含まれるもの:
+- Investment Universe
 - Universe Policy
 - Asset Ranking Model
 - Filter Rule
@@ -122,6 +123,18 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 例:
 - 全資産を候補にし、12ヶ月モメンタムで上位優遇 tilt をかけ、HRP で配分し、年次で更新する
 - 上昇資産のみを候補にし、モメンタム上位3へ絞り、候補ゼロなら CASH に逃がす
+
+### Investment Universe
+
+Strategy が実際に投資対象として扱う資産集合そのもの。
+
+例:
+- 20資産マルチアセット
+- crypto only
+
+補足:
+- `Investment Universe` は「何を対象にするか」
+- `Universe Policy` は「その対象集合をどう扱うか」
 
 ### Universe Policy
 

@@ -7,7 +7,6 @@ from app.portfolio import PortfolioState, StrategyDefinition
 
 @dataclass
 class DatasetSpec:
-    tickers: list[str]
     period: str
     frequency: str
     sanity_periods: list[str] = field(default_factory=list)

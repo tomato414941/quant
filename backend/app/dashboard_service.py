@@ -24,14 +24,23 @@ from app.study_models import ConditionVariant, EvaluationContext, StudyDefinitio
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def collect_study_tickers(study: StudyDefinition) -> list[str]:
+    seen: dict[str, None] = {}
+    for strategy_definition in study.strategy_definitions:
+        for ticker in strategy_definition.investment_universe_definition.tickers:
+            seen.setdefault(ticker, None)
+    return list(seen.keys())
+
+
 def build_dashboard_payload(
     study: StudyDefinition,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(study)
+    study_tickers = collect_study_tickers(study)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study.dataset_spec.tickers,
+        tickers=study_tickers,
         period=study.dataset_spec.period,
     )
     runs, run_store_summary = build_portfolio_runs(
@@ -47,7 +56,7 @@ def build_dashboard_payload(
     total_computed_runs = run_store_summary.computed_run_count
     for period in study.dataset_spec.sanity_periods:
         sanity_bundle, sanity_metadata = fetch_market_universe_bundle(
-            tickers=study.dataset_spec.tickers,
+            tickers=study_tickers,
             period=period,
         )
         sanity_runs, sanity_run_store_summary = build_portfolio_runs(
@@ -91,8 +100,9 @@ def build_condition_sweep_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(study)
+    study_tickers = collect_study_tickers(study)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study.dataset_spec.tickers,
+        tickers=study_tickers,
         period=study.dataset_spec.period,
     )
     results, run_store_summary = build_condition_sweep_runs(
@@ -121,8 +131,9 @@ def build_ranking_evaluation_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(study)
+    study_tickers = collect_study_tickers(study)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study.dataset_spec.tickers,
+        tickers=study_tickers,
         period=study.dataset_spec.period,
     )
     results, run_store_summary = build_ranking_evaluation_runs(
@@ -170,8 +181,9 @@ def generate_parameter_sweep_runs_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(study)
+    study_tickers = collect_study_tickers(study)
     market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=study.dataset_spec.tickers,
+        tickers=study_tickers,
         period=study.dataset_spec.period,
     )
     results, run_store_summary = build_parameter_sweep_runs(
@@ -209,7 +221,6 @@ def serialize_dataset_context(
     period_override: str | None = None,
 ) -> dict:
     return {
-        "tickers": study.dataset_spec.tickers,
         "period": period_override or study.dataset_spec.period,
         "sanityPeriods": study.dataset_spec.sanity_periods,
         "frequency": study.dataset_spec.frequency,
@@ -258,13 +269,15 @@ def serialize_study(study: StudyDefinition, dataset_metadata: dict[str, str]) ->
     for strategy_definition in study.strategy_definitions:
         strategies_by_key[strategy_definition.key] = serialize_strategy_definition(strategy_definition)
 
+    study_tickers = collect_study_tickers(study)
+
     return {
         "id": study.study_id,
         "title": study.title,
         "question": study.question,
         "marketUniverse": {
-            "assetCount": len(study.dataset_spec.tickers),
-            "tickers": study.dataset_spec.tickers,
+            "assetCount": len(study_tickers),
+            "tickers": study_tickers,
         },
         "evaluationContext": serialize_evaluation_context(study, dataset_metadata),
         "strategyDefinitions": list(strategies_by_key.values()),
@@ -331,7 +344,6 @@ def build_portfolio_runs(
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
-        "tickers": study.dataset_spec.tickers,
         "period": dataset_period,
         "frequency": study.dataset_spec.frequency,
     }
@@ -388,7 +400,6 @@ def build_condition_sweep_runs(
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
-        "tickers": study.dataset_spec.tickers,
         "period": dataset_period,
         "frequency": study.dataset_spec.frequency,
     }
@@ -477,7 +488,6 @@ def build_ranking_evaluation_runs(
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
-        "tickers": study.dataset_spec.tickers,
         "period": dataset_period,
         "frequency": study.dataset_spec.frequency,
     }
@@ -542,7 +552,6 @@ def build_parameter_sweep_runs(
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     dataset_spec = {
-        "tickers": study.dataset_spec.tickers,
         "period": dataset_period,
         "frequency": study.dataset_spec.frequency,
     }
@@ -603,6 +612,7 @@ def build_parameter_sweep_runs(
                         if strategy.portfolio_model_definition.model_type == "hierarchical_risk_parity"
                     )
                     effective_strategy = build_strategy_definition(
+                        investment_universe_definition=base_strategy.investment_universe_definition,
                         selection_definition=strategy_definition,
                         portfolio_model_definition=base_strategy.portfolio_model_definition,
                         execution_policy_definition=base_strategy.execution_policy_definition,

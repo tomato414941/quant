@@ -89,6 +89,13 @@ class UniversePolicyDefinition:
 
 
 @dataclass(frozen=True)
+class InvestmentUniverseDefinition:
+    key: str
+    label: str
+    tickers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ScoreModelDefinition:
     key: str
     label: str
@@ -149,6 +156,7 @@ class StrategyDefinition:
     label: str
     hypothesis: str
     description: str
+    investment_universe_definition: InvestmentUniverseDefinition
     selection_definition: PortfolioStrategyDefinition
     portfolio_model_definition: PortfolioModelDefinition
     execution_policy_definition: ExecutionPolicyDefinition
@@ -171,9 +179,26 @@ class AssetRankingDefinition:
     key: str
     label: str
     description: str
+    investment_universe_definition: InvestmentUniverseDefinition
     strategy_definition: PortfolioStrategyDefinition
     source_strategy_keys: tuple[str, ...]
     source_strategy_labels: tuple[str, ...]
+
+
+def build_investment_universe_definition(
+    *,
+    tickers: list[str] | tuple[str, ...],
+    key: str,
+    label: str,
+) -> InvestmentUniverseDefinition:
+    normalized_tickers = tuple(dict.fromkeys(ticker.strip().upper() for ticker in tickers if ticker.strip()))
+    if len(normalized_tickers) < 2:
+        raise ValueError("Investment universe must contain at least two tickers.")
+    return InvestmentUniverseDefinition(
+        key=key,
+        label=label,
+        tickers=normalized_tickers,
+    )
 
 
 def build_portfolio_strategy_definition(
@@ -429,6 +454,7 @@ def build_risk_controls_definition(
 
 def build_strategy_definition(
     *,
+    investment_universe_definition: InvestmentUniverseDefinition,
     selection_definition: PortfolioStrategyDefinition,
     portfolio_model_definition: PortfolioModelDefinition,
     execution_policy_definition: ExecutionPolicyDefinition,
@@ -463,6 +489,7 @@ def build_strategy_definition(
         label=strategy_label,
         hypothesis=hypothesis or selection_definition.description,
         description=description or selection_definition.description,
+        investment_universe_definition=investment_universe_definition,
         selection_definition=selection_definition,
         portfolio_model_definition=portfolio_model_definition,
         execution_policy_definition=execution_policy_definition,
@@ -548,8 +575,10 @@ def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> di
         "components": {
             "core": {
                 "investmentUniverse": {
-                    "key": strategy_definition.selection_definition.universe_policy.key,
-                    "label": strategy_definition.selection_definition.universe_policy.label,
+                    "key": strategy_definition.investment_universe_definition.key,
+                    "label": strategy_definition.investment_universe_definition.label,
+                    "assetCount": len(strategy_definition.investment_universe_definition.tickers),
+                    "tickers": list(strategy_definition.investment_universe_definition.tickers),
                 },
                 "portfolioModel": serialize_portfolio_model_definition(
                     strategy_definition.portfolio_model_definition
@@ -600,6 +629,12 @@ def serialize_asset_ranking_definition(
         "key": ranking_definition.key,
         "label": ranking_definition.label,
         "description": ranking_definition.description,
+        "investmentUniverse": {
+            "key": ranking_definition.investment_universe_definition.key,
+            "label": ranking_definition.investment_universe_definition.label,
+            "assetCount": len(ranking_definition.investment_universe_definition.tickers),
+            "tickers": list(ranking_definition.investment_universe_definition.tickers),
+        },
         "featureInputs": list(strategy_definition.feature_inputs),
         "universePolicy": {
             "key": strategy_definition.universe_policy.key,
@@ -630,29 +665,39 @@ def build_asset_ranking_definitions(
     strategy_definitions: list[StrategyDefinition],
 ) -> list[AssetRankingDefinition]:
     grouped: dict[
-        tuple[str, str, tuple[str, ...], tuple[str, ...], str, tuple[tuple[str, float], ...]],
-        list[PortfolioStrategyDefinition],
+        tuple[
+            tuple[str, ...],
+            str,
+            str,
+            tuple[str, ...],
+            tuple[str, ...],
+            str,
+            tuple[tuple[str, float], ...],
+        ],
+        list[StrategyDefinition],
     ] = {}
 
     for strategy in strategy_definitions:
-        strategy_definition = strategy.selection_definition
-        if strategy_definition.score_model.key == "none":
+        selection_definition = strategy.selection_definition
+        if selection_definition.score_model.key == "none":
             continue
         signature = (
-            strategy_definition.strategy_type,
-            strategy_definition.score_model.key,
-            tuple(strategy_definition.feature_inputs),
-            tuple(filter_rule.key for filter_rule in strategy_definition.filter_rules),
-            strategy_definition.fallback_rule.key,
-            tuple(sorted(extract_ranking_score_parameters(strategy_definition).items())),
+            strategy.investment_universe_definition.tickers,
+            selection_definition.strategy_type,
+            selection_definition.score_model.key,
+            tuple(selection_definition.feature_inputs),
+            tuple(filter_rule.key for filter_rule in selection_definition.filter_rules),
+            selection_definition.fallback_rule.key,
+            tuple(sorted(extract_ranking_score_parameters(selection_definition).items())),
         )
-        grouped.setdefault(signature, []).append(strategy_definition)
+        grouped.setdefault(signature, []).append(strategy)
 
     ranking_definitions: list[AssetRankingDefinition] = []
     for strategies in grouped.values():
-        representative = strategies[0]
+        representative = strategies[0].selection_definition
         filter_label = " / ".join(filter_rule.label for filter_rule in representative.filter_rules)
         label_parts = [
+            strategies[0].investment_universe_definition.label,
             representative.universe_policy.label,
             representative.score_model.label,
         ]
@@ -669,6 +714,7 @@ def build_asset_ranking_definitions(
                 key=f"ranking__{representative.key}",
                 label=" / ".join(label_parts),
                 description=representative.description,
+                investment_universe_definition=strategies[0].investment_universe_definition,
                 strategy_definition=representative,
                 source_strategy_keys=tuple(strategy.key for strategy in strategies),
                 source_strategy_labels=tuple(strategy.label for strategy in strategies),
@@ -744,33 +790,42 @@ def compare_portfolio_runs(
     if transaction_cost < 0 or transaction_cost >= 1:
         raise ValueError("Transaction cost must be between 0 and 1.")
 
-    returns = closes.pct_change().dropna()
-    if len(returns) < 6:
-        raise ValueError("At least 6 return rows are required for portfolio comparison.")
-
-    split_index = compute_split_index(len(returns), split_ratio)
-    train_returns = returns.iloc[:split_index]
-    test_returns = returns.iloc[split_index:]
-    benchmark_weights = np.repeat(1.0 / len(returns.columns), len(returns.columns))
-    benchmark_returns = pd.Series(
-        returns.to_numpy(dtype="float64") @ benchmark_weights,
-        index=returns.index,
-        dtype="float64",
-    )
-    initial_portfolio_weights = resolve_initial_weights(
-        universe_columns=returns.columns,
-        portfolio_state=portfolio_state,
-    )
-
     runs: list[dict] = []
     for strategy_definition in strategy_definitions:
+        strategy_universe = [
+            asset
+            for asset in strategy_definition.investment_universe_definition.tickers
+            if asset in closes.columns
+        ]
+        if len(strategy_universe) < 2:
+            raise ValueError("Strategy investment universe must contain at least two available assets.")
+
+        strategy_closes = closes[strategy_universe]
+        strategy_volumes = volumes[strategy_universe] if volumes is not None else None
+        returns = strategy_closes.pct_change().dropna()
+        if len(returns) < 6:
+            raise ValueError("At least 6 return rows are required for portfolio comparison.")
+
+        split_index = compute_split_index(len(returns), split_ratio)
+        train_returns = returns.iloc[:split_index]
+        benchmark_weights = np.repeat(1.0 / len(returns.columns), len(returns.columns))
+        benchmark_returns = pd.Series(
+            returns.to_numpy(dtype="float64") @ benchmark_weights,
+            index=returns.index,
+            dtype="float64",
+        )
+        initial_portfolio_weights = resolve_initial_weights(
+            universe_columns=returns.columns,
+            portfolio_state=portfolio_state,
+        )
+
         selection_definition = strategy_definition.selection_definition
         model_definition = strategy_definition.portfolio_model_definition
         execution_policy = strategy_definition.execution_policy_definition
         risk_controls = strategy_definition.risk_controls_definition
         initial_selected_assets, initial_weights = compute_portfolio_allocation(
             history_returns=train_returns,
-            volume_history=volumes.loc[train_returns.index] if volumes is not None else None,
+            volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
             strategy_definition=selection_definition,
             model_definition=model_definition,
             universe_columns=returns.columns,
@@ -781,7 +836,7 @@ def compare_portfolio_runs(
         )
         backtest = run_portfolio_backtest(
             returns=returns,
-            volumes=volumes,
+            volumes=strategy_volumes,
             split_index=split_index,
             split_ratio=split_ratio,
             strategy_definition=selection_definition,
@@ -851,6 +906,11 @@ def compare_portfolio_models(
         volumes=volumes,
         strategy_definitions=[
             build_strategy_definition(
+                investment_universe_definition=build_investment_universe_definition(
+                    tickers=list(closes.columns),
+                    key="ad_hoc_universe",
+                    label="Ad hoc universe",
+                ),
                 selection_definition=build_portfolio_strategy_definition("full_universe"),
                 portfolio_model_definition=model_definition,
                 execution_policy_definition=build_execution_policy_definition(
@@ -1028,6 +1088,11 @@ def evaluate_asset_ranking_definition(
     split_ratio: float,
     ranking_definition: AssetRankingDefinition,
 ) -> dict:
+    ranking_universe = [
+        asset for asset in ranking_definition.investment_universe_definition.tickers if asset in returns.columns
+    ]
+    returns = returns[ranking_universe]
+    volumes = volumes[ranking_universe] if volumes is not None else None
     split_index = compute_split_index(len(returns), split_ratio)
     observations: list[dict] = []
     latest_top_assets: list[str] = []

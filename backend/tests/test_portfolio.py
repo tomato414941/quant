@@ -2,6 +2,7 @@ import pandas as pd
 
 from app.portfolio import (
     build_execution_policy_definition,
+    build_investment_universe_definition,
     build_portfolio_model_definition,
     build_portfolio_state,
     build_portfolio_strategy_definition,
@@ -20,6 +21,24 @@ def make_strategy(
     max_weight: float | None = None,
 ):
     return build_strategy_definition(
+        investment_universe_definition=build_investment_universe_definition(
+            tickers=[
+                "SPY",
+                "QQQ",
+                "IWM",
+                "EFA",
+                "EEM",
+                "TLT",
+                "IEF",
+                "LQD",
+                "HYG",
+                "GLD",
+                "BTC-USD",
+                "ETH-USD",
+            ],
+            key="test_universe",
+            label="Test universe",
+        ),
         selection_definition=build_portfolio_strategy_definition(strategy_type),
         portfolio_model_definition=build_portfolio_model_definition(model_type),
         execution_policy_definition=build_execution_policy_definition(

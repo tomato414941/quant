@@ -105,7 +105,7 @@ class ConditionVariant:
 
 
 @dataclass
-class ComparisonDefinition:
+class ComparisonSpec:
     comparison_id: str
     title: str
     question: str

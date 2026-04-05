@@ -14,14 +14,14 @@ from app.portfolio import (
     serialize_portfolio_state,
     serialize_strategy_definition,
 )
-from app.comparison_models import ComparisonDefinition, ConditionVariant, EvaluationSpec
+from app.comparison_models import ComparisonSpec, ConditionVariant, EvaluationSpec
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_definition
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def collect_comparison_tickers(comparison: ComparisonDefinition) -> list[str]:
+def collect_comparison_tickers(comparison: ComparisonSpec) -> list[str]:
     seen: dict[str, None] = {}
     for strategy_definition in (
         comparison.candidate_strategy_definitions + comparison.reference_strategy_definitions
@@ -32,7 +32,7 @@ def collect_comparison_tickers(comparison: ComparisonDefinition) -> list[str]:
 
 
 def build_dashboard_payload(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
@@ -134,7 +134,7 @@ def build_dashboard_payload(
 
 
 def build_condition_sweep_payload(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
@@ -165,7 +165,7 @@ def build_condition_sweep_payload(
 
 
 def build_ranking_evaluation_payload(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
@@ -192,7 +192,7 @@ def build_ranking_evaluation_payload(
 
 
 def build_run_catalog_payload(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     *,
     limit: int = 50,
     run_kind: str | None = None,
@@ -215,7 +215,7 @@ def build_run_catalog_payload(
 
 
 def generate_parameter_sweep_runs_payload(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
@@ -246,7 +246,7 @@ def generate_parameter_sweep_runs_payload(
     }
 
 
-def build_run_result_store(comparison: ComparisonDefinition) -> FileRunResultStore:
+def build_run_result_store(comparison: ComparisonSpec) -> FileRunResultStore:
     root_dir = Path(comparison.result_store_dir)
     if not root_dir.is_absolute():
         root_dir = PROJECT_ROOT / root_dir
@@ -254,7 +254,7 @@ def build_run_result_store(comparison: ComparisonDefinition) -> FileRunResultSto
 
 
 def serialize_dataset_context(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     dataset_metadata: dict[str, str],
     *,
     period_override: str | None = None,
@@ -280,7 +280,7 @@ def serialize_cost_model_from_definition(cost_model_definition) -> dict:
     }
 
 
-def serialize_execution_assumptions(comparison: ComparisonDefinition) -> dict:
+def serialize_execution_assumptions(comparison: ComparisonSpec) -> dict:
     return {
         "kind": comparison.execution_assumptions_definition.kind,
         "label": comparison.execution_assumptions_definition.label,
@@ -302,7 +302,7 @@ def serialize_evaluation_settings(evaluation_spec: EvaluationSpec) -> dict:
 
 
 def serialize_evaluation_spec(
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     dataset_metadata: dict[str, str],
     *,
     period_override: str | None = None,
@@ -319,7 +319,7 @@ def serialize_evaluation_spec(
     }
 
 
-def serialize_comparison(comparison: ComparisonDefinition, dataset_metadata: dict[str, str]) -> dict:
+def serialize_comparison(comparison: ComparisonSpec, dataset_metadata: dict[str, str]) -> dict:
     comparison_tickers = collect_comparison_tickers(comparison)
     return {
         "kind": "strategy_comparison",
@@ -410,7 +410,7 @@ def compact_run_record(record: dict) -> dict:
 
 def build_strategy_runs(
     *,
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     strategy_definitions: list,
     closes,
     volumes,
@@ -469,7 +469,7 @@ def build_strategy_runs(
 
 def build_condition_sweep_runs(
     *,
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     closes,
     volumes,
     dataset_period: str,
@@ -571,7 +571,7 @@ def build_condition_sweep_runs(
 
 def build_ranking_evaluation_runs(
     *,
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     closes,
     volumes,
     dataset_period: str,
@@ -636,7 +636,7 @@ def build_ranking_evaluation_runs(
 
 def build_parameter_sweep_runs(
     *,
-    comparison: ComparisonDefinition,
+    comparison: ComparisonSpec,
     closes,
     volumes,
     dataset_period: str,

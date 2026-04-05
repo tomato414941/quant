@@ -122,9 +122,9 @@ def test_healthcheck() -> None:
 
 def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     response = client.get("/api/dashboard")
 
@@ -239,13 +239,13 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
 
 def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    base_config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
+    base_config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config = copy.deepcopy(base_config)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
     config.candidate_strategy_definitions = [config.candidate_strategy_definitions[0]]
     config.reference_strategy_definitions = []
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     first_response = client.get("/api/dashboard")
 
@@ -269,7 +269,7 @@ def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_pat
 
 def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
     config.dataset_spec.sanity_periods = []
     config.candidate_strategy_definitions = [config.candidate_strategy_definitions[0]]
@@ -290,7 +290,7 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
             max_weight=None,
         ),
     ]
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     first_response = client.get("/api/condition-sweep")
 
@@ -331,9 +331,9 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
 
 def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     dashboard_response = client.get("/api/dashboard")
     assert dashboard_response.status_code == 200
@@ -356,9 +356,9 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
 
 def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     response = client.post("/api/runs/generate-parameter-sweep")
 
@@ -400,9 +400,9 @@ def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
 
 def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_CONFIG)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_CONFIG", config)
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     response = client.get("/api/ranking-evaluation")
 

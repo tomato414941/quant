@@ -10,7 +10,7 @@ from app.portfolio import (
     build_strategy_definition,
 )
 from app.comparison_models import (
-    ComparisonDefinition,
+    ComparisonSpec,
     ConditionVariant,
     DatasetSpec,
     EvaluationSpec,
@@ -437,7 +437,7 @@ REFERENCE_EQUAL_WEIGHT_WITH_CASH = build_strategy_definition(
 )
 
 
-DEFAULT_COMPARISON_CONFIG = ComparisonDefinition(
+DEFAULT_COMPARISON_SPEC = ComparisonSpec(
     comparison_id="etf_portfolio_models_10y",
     title="有望Strategyの探索",
     question="共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",

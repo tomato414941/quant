@@ -33,6 +33,13 @@ class EvaluationContext:
 
 
 @dataclass
+class SelectionPolicy:
+    primary_metric: str
+    secondary_metric: str
+    tertiary_metric: str
+
+
+@dataclass
 class ConditionVariant:
     key: str
     label: str
@@ -48,6 +55,7 @@ class StudyDefinition:
     question: str
     dataset_spec: DatasetSpec
     evaluation_context: EvaluationContext
+    selection_policy: SelectionPolicy
     strategy_definitions: list[StrategyDefinition]
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"

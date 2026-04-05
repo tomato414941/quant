@@ -1,23 +1,28 @@
-.decision-shell {
+.workspace-shell {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
   padding: 24px 16px 48px;
+  display: grid;
+  gap: 20px;
 }
 
-.decision-card {
-  width: min(760px, 100%);
-  padding: 28px;
+.workspace-header,
+.panel,
+.subpanel {
   border: 1px solid var(--border);
   border-radius: 28px;
   background:
-    radial-gradient(circle at top right, rgba(180, 91, 42, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(180, 91, 42, 0.14), transparent 28%),
     linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(247, 240, 231, 0.94));
   box-shadow: 0 24px 60px rgba(55, 36, 20, 0.08);
 }
 
-.decision-kicker {
-  margin: 0 0 12px;
+.workspace-header,
+.panel {
+  padding: 24px;
+}
+
+.panel-kicker {
+  margin: 0 0 10px;
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.16em;
@@ -25,51 +30,65 @@
   color: var(--accent-strong);
 }
 
-.decision-card h1 {
+.workspace-header h1,
+.panel-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2.3rem, 8vw, 4.8rem);
   font-weight: 600;
-  line-height: 0.92;
-  letter-spacing: -0.06em;
+  letter-spacing: -0.05em;
 }
 
-.decision-summary {
-  max-width: 54ch;
-  margin: 18px 0 0;
+.workspace-header h1 {
+  font-size: clamp(2.2rem, 7vw, 4.2rem);
+  line-height: 0.94;
+}
+
+.panel-title {
+  font-size: clamp(1.55rem, 4vw, 2.3rem);
+  line-height: 1;
+}
+
+.panel-summary {
+  max-width: 60ch;
+  margin: 14px 0 0;
   color: var(--muted);
-  font-size: 1rem;
 }
 
 .error-text {
   color: var(--danger);
 }
 
-.decision-highlight {
-  margin-top: 24px;
-  padding: 18px;
-  border-radius: 20px;
-  background: rgba(255, 249, 241, 0.92);
-  border: 1px solid rgba(103, 82, 61, 0.08);
+.workspace-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
 }
 
-.decision-highlight h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(1.5rem, 5vw, 2.4rem);
-  font-weight: 550;
-  line-height: 1;
-  letter-spacing: -0.04em;
+.workspace-nav button {
+  border: 1px solid rgba(103, 82, 61, 0.12);
+  background: rgba(255, 252, 248, 0.92);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
 }
 
-.decision-metrics {
+.workspace-nav button.is-active {
+  background: var(--accent-strong);
+  color: white;
+  border-color: var(--accent-strong);
+}
+
+.metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 18px;
 }
 
-.decision-metrics article {
+.metric-grid article {
   display: grid;
   gap: 6px;
   padding: 14px 16px;
@@ -78,32 +97,32 @@
   border: 1px solid rgba(103, 82, 61, 0.08);
 }
 
-.decision-metrics span {
+.metric-grid span {
   font-size: 0.8rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
-.decision-metrics strong {
+.metric-grid strong {
   font-family: var(--font-display);
-  font-size: 1.55rem;
+  font-size: 1.5rem;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.05em;
 }
 
-.decision-details {
+.section-grid {
   display: grid;
-  gap: 12px;
-  margin: 22px 0 0;
+  gap: 16px;
+  margin-top: 20px;
 }
 
-.decision-section {
-  margin-top: 24px;
+.subpanel {
+  padding: 20px;
 }
 
-.decision-section h3 {
+.subpanel h3 {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
@@ -112,40 +131,84 @@
   color: var(--accent-strong);
 }
 
-.decision-details div {
+.detail-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 0;
+}
+
+.detail-list div {
   display: grid;
   gap: 4px;
   padding-top: 12px;
   border-top: 1px solid rgba(103, 82, 61, 0.08);
 }
 
-.decision-details dt {
+.detail-list dt {
   font-size: 0.8rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.decision-details dd {
+.detail-list dd {
   margin: 0;
   font-size: 0.98rem;
 }
 
-@media (min-width: 720px) {
-  .decision-shell {
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 18px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 12px 10px;
+  border-top: 1px solid rgba(103, 82, 61, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.data-table td strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.data-table td span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+@media (min-width: 920px) {
+  .workspace-shell {
     padding: 32px 24px 72px;
   }
 
-  .decision-card {
-    padding: 32px;
-  }
-
-  .decision-metrics {
+  .metric-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .decision-details {
+  .section-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 20px;
+  }
+
+  .detail-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 18px;
   }
 }

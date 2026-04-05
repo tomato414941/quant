@@ -15,6 +15,7 @@ from app.study_models import (
     DatasetSpec,
     EvaluationContext,
     EvaluationSettings,
+    SelectionPolicy,
     StudyDefinition,
 )
 
@@ -191,6 +192,31 @@ DEFAULT_INVESTMENT_UNIVERSE = build_investment_universe_definition(
     ],
 )
 
+ETF_ONLY_INVESTMENT_UNIVERSE = build_investment_universe_definition(
+    key="global_etf_only_v1",
+    label="18資産ETF",
+    tickers=[
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+        "VNQ",
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP",
+    ],
+)
+
 
 def build_condition_variants() -> list[ConditionVariant]:
     variants: list[ConditionVariant] = []
@@ -280,6 +306,11 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             },
             cash_weight=0.15,
         ),
+    ),
+    selection_policy=SelectionPolicy(
+        primary_metric="sharpe_ratio",
+        secondary_metric="total_return",
+        tertiary_metric="max_drawdown",
     ),
     strategy_definitions=[
         build_strategy_definition(
@@ -435,6 +466,17 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
+        ),
+        build_strategy_definition(
+            investment_universe_definition=ETF_ONLY_INVESTMENT_UNIVERSE,
+            selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+            portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
+            execution_policy_definition=ANNUAL_EXECUTION_POLICY,
+            risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            strategy_id="etf_only__full_universe_momentum_tilt_weak_top__hierarchical_risk_parity__annual",
+            label="ETF限定モメンタム傾斜 最良 上位優遇 × HRP × 年次",
+            hypothesis="暗号資産を外したETFユニバースでも、弱い上位優遇モメンタム傾斜が有効かを確かめる",
+            description="18資産ETFに限定して、局所探索で最良だった上位優遇モメンタム傾斜をHRPに載せる",
         ),
     ],
     condition_variants=build_condition_variants(),

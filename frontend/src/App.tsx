@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './App.css'
 
 type SummaryMetrics = {
+  cagrPct?: number
   totalReturnPct: number
   sharpeRatio: number
   maxDrawdownPct: number
@@ -25,10 +26,14 @@ type InvestmentUniverse = {
 }
 
 type StrategyDefinition = {
+  kind?: string
+  schemaVersion?: string
   strategyId: string
   version: string
   label: string
-  hypothesis: string
+  hypothesis: string | null
+  description?: string
+  extensions?: Record<string, unknown>
   components: {
     core: {
       investmentUniverse: InvestmentUniverse
@@ -43,6 +48,8 @@ type StrategyDefinition = {
       executionPolicy: {
         key: string
         label: string
+        entry: string
+        rebalanceFrequency: string
       }
     }
     optional: {
@@ -60,12 +67,28 @@ type StrategyDefinition = {
 }
 
 type PortfolioRun = {
+  kind?: string
+  schemaVersion?: string
   key: string
   strategy: StrategyDefinition
   summary: SummaryMetrics
   splitAnalysis: {
-    test: {
+    config: {
+      splitRatioPct: number
+    }
+    train: {
+      benchmark: SummaryMetrics
+      dayCount: number
+      endDate: string
       portfolio: SummaryMetrics
+      startDate: string
+    }
+    test: {
+      benchmark: SummaryMetrics
+      dayCount: number
+      endDate: string
+      portfolio: SummaryMetrics
+      startDate: string
     }
   }
 }
@@ -81,16 +104,24 @@ type DashboardResult = {
       tertiaryMetric: string
     }
     evaluationContext: {
+      kind?: string
+      schemaVersion?: string
       datasetContext: {
         period: string
         sanityPeriods: string[]
+        source: string
+        alignedStartDate: string
+        alignedEndDate: string
+        rowCount: number
       }
       evaluationSettings: {
         splitRatioPct: number
+        initialCapital: number
         benchmark: string
       }
       costAssumptions: {
         commissionPct: number
+        slippagePct: number
       }
     }
   }
@@ -105,228 +136,83 @@ function formatPercent(value: number): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
-function formatWeightCap(value: number | null): string {
-  return value === null ? '上限なし' : `${value.toFixed(1)}%`
-}
-
-function formatBenchmarkLabel(value: string): string {
-  if (value === 'equal_weight_buy_and_hold_with_cash') {
-    return '等金額買い持ち + CASH'
+function formatMetricValue(value: string | number | null | undefined): string {
+  if (value === null) {
+    return 'null'
+  }
+  if (value === undefined) {
+    return '-'
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? value.toString() : value.toFixed(2)
   }
   return value
 }
 
-function formatDataResolutionLabel(value: string): string {
-  if (value === 'daily') {
-    return '日次'
-  }
-  if (value === 'weekly') {
-    return '週次'
-  }
-  if (value === 'monthly') {
-    return '月次'
-  }
-  return value
+function formatJson(value: unknown): string {
+  return JSON.stringify(value, null, 2)
 }
 
-function formatMetricLabel(value: string): string {
-  if (value === 'sharpe_ratio') {
-    return 'シャープレシオ'
-  }
-  if (value === 'total_return') {
-    return '総リターン'
-  }
-  if (value === 'max_drawdown') {
-    return '最大ドローダウン'
-  }
-  return value
+function DataListRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="data-list-row">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  )
 }
 
-function formatRiskControls(maxInvestmentPct: number, maxWeightPct: number | null): string {
-  return `${maxInvestmentPct.toFixed(0)}%投資 / ${formatWeightCap(maxWeightPct)}`
+function ValueList({ values }: { values: string[] }) {
+  return (
+    <ul className="value-list">
+      {values.map((value) => (
+        <li key={value}>{value}</li>
+      ))}
+    </ul>
+  )
 }
 
-function formatFilters(filters: StrategyComponent[]): string {
-  if (filters.length === 0) {
-    return 'なし'
-  }
-  return filters.map((filter) => filter.label).join(' / ')
-}
-
-function formatFeatureInputs(values: string[]): string {
-  const labels = values.map((value) => {
-    if (value === 'close') {
-      return '価格'
-    }
-    if (value === 'volume') {
-      return '出来高'
-    }
-    return value
-  })
-  return labels.join(' + ')
-}
-
-function formatWindowDays(value: number): string {
-  const knownWindows: Record<number, string> = {
-    21: '1ヶ月',
-    63: '3ヶ月',
-    126: '6ヶ月',
-    252: '12ヶ月',
-  }
-  return knownWindows[value] ?? `${value.toFixed(0)}日`
-}
-
-function formatRankingModelSummary(model: StrategyComponentWithParameters | null): string {
-  if (!model) {
-    return '使わない'
-  }
-
-  const parts = [model.label]
-  const parameterLabels: string[] = []
-
-  if (typeof model.parameters.windowDays === 'number') {
-    parameterLabels.push(`窓 ${formatWindowDays(model.parameters.windowDays)}`)
-  }
-  if (typeof model.parameters.momentumWeight === 'number') {
-    parameterLabels.push(`モメンタム ${model.parameters.momentumWeight.toFixed(2)}`)
-  }
-  if (typeof model.parameters.lowVolWeight === 'number') {
-    parameterLabels.push(`低ボラ ${model.parameters.lowVolWeight.toFixed(2)}`)
-  }
-  if (typeof model.parameters.macroWeight === 'number') {
-    parameterLabels.push(`マクロ ${model.parameters.macroWeight.toFixed(2)}`)
-  }
-
-  if (parameterLabels.length > 0) {
-    parts.push(`(${parameterLabels.join(' / ')})`)
-  }
-  return parts.join(' ')
-}
-
-function formatTiltShape(value: number | undefined): string {
-  if (value === 1) {
-    return '上位優遇'
-  }
-  if (value === 2) {
-    return 'softmax'
-  }
-  return '線形'
-}
-
-function formatTiltRuleSummary(rule: StrategyComponentWithParameters | null): string {
-  if (!rule) {
-    return '使わない'
-  }
-
-  const strength = typeof rule.parameters.strength === 'number' ? rule.parameters.strength.toFixed(2) : '-'
-  const shape = formatTiltShape(rule.parameters.shape)
-  return `${shape} / 強度 ${strength}`
-}
-
-function buildStrategyDetails(strategy: StrategyDefinition): Array<{ label: string; value: string }> {
-  const details = [
-    {
-      label: '投資対象',
-      value: `${strategy.components.core.investmentUniverse.label} (${strategy.components.core.investmentUniverse.assetCount}資産)`,
-    },
-    {
-      label: 'データ粒度',
-      value: formatDataResolutionLabel(strategy.components.core.dataResolution.label),
-    },
-    {
-      label: '配分',
-      value: strategy.components.core.portfolioModel.label,
-    },
-    {
-      label: '執行',
-      value: strategy.components.core.executionPolicy.label,
-    },
-    {
-      label: 'リスク制御',
-      value: formatRiskControls(
-        strategy.components.optional.riskControls.maxInvestmentPct,
-        strategy.components.optional.riskControls.maxWeightPct,
-      ),
-    },
-  ]
-
-  if (strategy.components.optional.assetRankingModel) {
-    details.splice(2, 0, {
-      label: '資産評価',
-      value: formatRankingModelSummary(strategy.components.optional.assetRankingModel),
-    })
-  }
-
-  if (strategy.components.optional.tiltRule) {
-    details.splice(3, 0, {
-      label: '重み付け',
-      value: formatTiltRuleSummary(strategy.components.optional.tiltRule),
-    })
-  }
-
-  if (strategy.components.optional.featureInputs.length > 0) {
-    details.splice(2, 0, {
-      label: '入力データ',
-      value: formatFeatureInputs(strategy.components.optional.featureInputs),
-    })
-  }
-
-  if (strategy.components.optional.filterRules.length > 0) {
-    details.splice(details.length - 2, 0, {
-      label: 'フィルタ',
-      value: formatFilters(strategy.components.optional.filterRules),
-    })
-  }
-
-  if (strategy.components.optional.fallbackRule) {
-    details.push({
-      label: 'フォールバック',
-      value: strategy.components.optional.fallbackRule.label,
-    })
-  }
-
-  return details
-}
-
-function buildEvaluationDetails(dashboard: DashboardResult): Array<{ label: string; value: string }> {
-  return [
-    {
-      label: '評価期間',
-      value: dashboard.study.evaluationContext.datasetContext.period,
-    },
-    {
-      label: '補助確認',
-      value: dashboard.study.evaluationContext.datasetContext.sanityPeriods.join(' / ') || 'なし',
-    },
-    {
-      label: '手数料',
-      value: `${dashboard.study.evaluationContext.costAssumptions.commissionPct.toFixed(2)}%`,
-    },
-    {
-      label: '分割',
-      value: `学習 ${dashboard.study.evaluationContext.evaluationSettings.splitRatioPct.toFixed(1)}% / 検証 ${(
-        100 - dashboard.study.evaluationContext.evaluationSettings.splitRatioPct
-      ).toFixed(1)}%`,
-    },
-    {
-      label: 'ベンチマーク',
-      value: formatBenchmarkLabel(dashboard.study.evaluationContext.evaluationSettings.benchmark),
-    },
-    {
-      label: '選定基準',
-      value: [
-        formatMetricLabel(dashboard.study.selectionPolicy.primaryMetric),
-        formatMetricLabel(dashboard.study.selectionPolicy.secondaryMetric),
-        formatMetricLabel(dashboard.study.selectionPolicy.tertiaryMetric),
-      ].join(' → '),
-    },
-  ]
+function FlipCard({
+  title,
+  face,
+  onToggle,
+  front,
+  back,
+  className,
+}: {
+  title: string
+  face: 'front' | 'back'
+  onToggle: () => void
+  front: ReactNode
+  back: unknown
+  className?: string
+}) {
+  return (
+    <section className={`subpanel ${className ?? ''}`.trim()}>
+      <div className="subpanel-header">
+        <h3>{title}</h3>
+        <button type="button" className="flip-button" onClick={onToggle}>
+          {face === 'front' ? 'JSON' : '項目表示'}
+        </button>
+      </div>
+      {face === 'front' ? front : <pre className="raw-block">{formatJson(back)}</pre>}
+    </section>
+  )
 }
 
 function App() {
   const [dashboard, setDashboard] = useState<DashboardResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [cardFaces, setCardFaces] = useState<{
+    strategy: 'front' | 'back'
+    evaluation: 'front' | 'back'
+    result: 'front' | 'back'
+  }>({
+    strategy: 'front',
+    evaluation: 'front',
+    result: 'front',
+  })
   const hasLoadedRef = useRef(false)
 
   useEffect(() => {
@@ -377,8 +263,15 @@ function App() {
   }, [dashboard])
 
   const bestRun = sortedRuns[0] ?? null
-  const strategyDetails = bestRun ? buildStrategyDetails(bestRun.strategy) : []
-  const evaluationDetails = dashboard ? buildEvaluationDetails(dashboard) : []
+  const rawRunResult = bestRun
+    ? {
+        kind: bestRun.kind,
+        schemaVersion: bestRun.schemaVersion,
+        key: bestRun.key,
+        summary: bestRun.summary,
+        splitAnalysis: bestRun.splitAnalysis,
+      }
+    : null
 
   if (loading && !dashboard) {
     return (
@@ -404,53 +297,263 @@ function App() {
     <main className="workspace-shell">
       <section className="panel">
         <h2 className="panel-title">{bestRun.strategy.label}</h2>
-        {bestRun.strategy.hypothesis ? (
-          <p className="panel-summary">{bestRun.strategy.hypothesis}</p>
-        ) : null}
-
-        <div className="metric-grid">
-          <article>
-            <span>シャープレシオ</span>
-            <strong>{bestRun.summary.sharpeRatio.toFixed(2)}</strong>
-          </article>
-          <article>
-            <span>総リターン</span>
-            <strong>{formatPercent(bestRun.summary.totalReturnPct)}</strong>
-          </article>
-          <article>
-            <span>最大ドローダウン</span>
-            <strong>{formatPercent(-bestRun.summary.maxDrawdownPct)}</strong>
-          </article>
-          <article>
-            <span>検証リターン</span>
-            <strong>{formatPercent(bestRun.splitAnalysis.test.portfolio.totalReturnPct)}</strong>
-          </article>
-        </div>
 
         <div className="section-grid">
-          <section className="subpanel">
-            <h3>Strategy</h3>
-            <dl className="detail-list">
-              {strategyDetails.map((detail) => (
-                <div key={detail.label}>
-                  <dt>{detail.label}</dt>
-                  <dd>{detail.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
+          <FlipCard
+            title="Strategy"
+            face={cardFaces.strategy}
+            onToggle={() =>
+              setCardFaces((current) => ({
+                ...current,
+                strategy: current.strategy === 'front' ? 'back' : 'front',
+              }))
+            }
+            back={bestRun.strategy}
+            front={
+              <div className="card-body">
+                <dl className="data-list">
+                  <DataListRow label="strategyId" value={bestRun.strategy.strategyId} />
+                  <DataListRow label="version" value={bestRun.strategy.version} />
+                  <DataListRow label="label" value={bestRun.strategy.label} />
+                  <DataListRow label="hypothesis" value={bestRun.strategy.hypothesis ?? 'null'} />
+                  <DataListRow
+                    label="investmentUniverse.key"
+                    value={bestRun.strategy.components.core.investmentUniverse.key}
+                  />
+                  <DataListRow
+                    label="investmentUniverse.label"
+                    value={bestRun.strategy.components.core.investmentUniverse.label}
+                  />
+                  <DataListRow
+                    label="investmentUniverse.assetCount"
+                    value={bestRun.strategy.components.core.investmentUniverse.assetCount}
+                  />
+                  <DataListRow
+                    label="investmentUniverse.tickers"
+                    value={<ValueList values={bestRun.strategy.components.core.investmentUniverse.tickers} />}
+                  />
+                  <DataListRow
+                    label="dataResolution"
+                    value={bestRun.strategy.components.core.dataResolution.label}
+                  />
+                  <DataListRow
+                    label="portfolioModel"
+                    value={`${bestRun.strategy.components.core.portfolioModel.label} (${bestRun.strategy.components.core.portfolioModel.key})`}
+                  />
+                  <DataListRow
+                    label="executionPolicy"
+                    value={`${bestRun.strategy.components.core.executionPolicy.label} (${bestRun.strategy.components.core.executionPolicy.key})`}
+                  />
+                  <DataListRow
+                    label="executionPolicy.entry"
+                    value={bestRun.strategy.components.core.executionPolicy.entry}
+                  />
+                  <DataListRow
+                    label="executionPolicy.rebalanceFrequency"
+                    value={bestRun.strategy.components.core.executionPolicy.rebalanceFrequency}
+                  />
+                  <DataListRow
+                    label="featureInputs"
+                    value={<ValueList values={bestRun.strategy.components.optional.featureInputs} />}
+                  />
+                  <DataListRow
+                    label="assetRankingModel"
+                    value={
+                      bestRun.strategy.components.optional.assetRankingModel
+                        ? `${bestRun.strategy.components.optional.assetRankingModel.label} (${bestRun.strategy.components.optional.assetRankingModel.key})`
+                        : 'null'
+                    }
+                  />
+                  {bestRun.strategy.components.optional.assetRankingModel ? (
+                    <DataListRow
+                      label="assetRankingModel.parameters"
+                      value={
+                        <pre className="inline-json">
+                          {formatJson(bestRun.strategy.components.optional.assetRankingModel.parameters)}
+                        </pre>
+                      }
+                    />
+                  ) : null}
+                  <DataListRow
+                    label="filterRules"
+                    value={
+                      bestRun.strategy.components.optional.filterRules.length > 0 ? (
+                        <ValueList
+                          values={bestRun.strategy.components.optional.filterRules.map(
+                            (rule) => `${rule.label} (${rule.key})`,
+                          )}
+                        />
+                      ) : (
+                        '[]'
+                      )
+                    }
+                  />
+                  <DataListRow
+                    label="fallbackRule"
+                    value={
+                      bestRun.strategy.components.optional.fallbackRule
+                        ? `${bestRun.strategy.components.optional.fallbackRule.label} (${bestRun.strategy.components.optional.fallbackRule.key})`
+                        : 'null'
+                    }
+                  />
+                  <DataListRow
+                    label="tiltRule"
+                    value={
+                      bestRun.strategy.components.optional.tiltRule
+                        ? `${bestRun.strategy.components.optional.tiltRule.label} (${bestRun.strategy.components.optional.tiltRule.key})`
+                        : 'null'
+                    }
+                  />
+                  {bestRun.strategy.components.optional.tiltRule ? (
+                    <DataListRow
+                      label="tiltRule.parameters"
+                      value={
+                        <pre className="inline-json">
+                          {formatJson(bestRun.strategy.components.optional.tiltRule.parameters)}
+                        </pre>
+                      }
+                    />
+                  ) : null}
+                  <DataListRow
+                    label="riskControls.maxInvestmentPct"
+                    value={formatMetricValue(
+                      bestRun.strategy.components.optional.riskControls.maxInvestmentPct,
+                    )}
+                  />
+                  <DataListRow
+                    label="riskControls.maxWeightPct"
+                    value={formatMetricValue(bestRun.strategy.components.optional.riskControls.maxWeightPct)}
+                  />
+                </dl>
+              </div>
+            }
+          />
 
-          <section className="subpanel">
-            <h3>Evaluation Context</h3>
-            <dl className="detail-list">
-              {evaluationDetails.map((detail) => (
-                <div key={detail.label}>
-                  <dt>{detail.label}</dt>
-                  <dd>{detail.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
+          <FlipCard
+            title="Evaluation Context"
+            face={cardFaces.evaluation}
+            onToggle={() =>
+              setCardFaces((current) => ({
+                ...current,
+                evaluation: current.evaluation === 'front' ? 'back' : 'front',
+              }))
+            }
+            back={dashboard.study.evaluationContext}
+            front={
+              <div className="card-body">
+                <dl className="data-list">
+                  <DataListRow
+                    label="datasetContext.period"
+                    value={dashboard.study.evaluationContext.datasetContext.period}
+                  />
+                  <DataListRow
+                    label="datasetContext.sanityPeriods"
+                    value={
+                      <ValueList values={dashboard.study.evaluationContext.datasetContext.sanityPeriods} />
+                    }
+                  />
+                  <DataListRow
+                    label="datasetContext.source"
+                    value={dashboard.study.evaluationContext.datasetContext.source}
+                  />
+                  <DataListRow
+                    label="datasetContext.alignedStartDate"
+                    value={dashboard.study.evaluationContext.datasetContext.alignedStartDate}
+                  />
+                  <DataListRow
+                    label="datasetContext.alignedEndDate"
+                    value={dashboard.study.evaluationContext.datasetContext.alignedEndDate}
+                  />
+                  <DataListRow
+                    label="datasetContext.rowCount"
+                    value={dashboard.study.evaluationContext.datasetContext.rowCount}
+                  />
+                  <DataListRow
+                    label="evaluationSettings.splitRatioPct"
+                    value={formatMetricValue(
+                      dashboard.study.evaluationContext.evaluationSettings.splitRatioPct,
+                    )}
+                  />
+                  <DataListRow
+                    label="evaluationSettings.initialCapital"
+                    value={formatMetricValue(
+                      dashboard.study.evaluationContext.evaluationSettings.initialCapital,
+                    )}
+                  />
+                  <DataListRow
+                    label="evaluationSettings.benchmark"
+                    value={dashboard.study.evaluationContext.evaluationSettings.benchmark}
+                  />
+                  <DataListRow
+                    label="costAssumptions.commissionPct"
+                    value={formatMetricValue(
+                      dashboard.study.evaluationContext.costAssumptions.commissionPct,
+                    )}
+                  />
+                  <DataListRow
+                    label="costAssumptions.slippagePct"
+                    value={formatMetricValue(
+                      dashboard.study.evaluationContext.costAssumptions.slippagePct,
+                    )}
+                  />
+                </dl>
+              </div>
+            }
+          />
+
+          <FlipCard
+            title="Run Result"
+            className="section-span-full"
+            face={cardFaces.result}
+            onToggle={() =>
+              setCardFaces((current) => ({
+                ...current,
+                result: current.result === 'front' ? 'back' : 'front',
+              }))
+            }
+            back={rawRunResult}
+            front={
+              <div className="card-body">
+                <dl className="data-list">
+                  <DataListRow label="key" value={bestRun.key} />
+                  <DataListRow label="summary.totalReturnPct" value={formatPercent(bestRun.summary.totalReturnPct)} />
+                  <DataListRow label="summary.cagrPct" value={formatPercent(bestRun.summary.cagrPct ?? 0)} />
+                  <DataListRow label="summary.sharpeRatio" value={formatMetricValue(bestRun.summary.sharpeRatio)} />
+                  <DataListRow
+                    label="summary.maxDrawdownPct"
+                    value={formatPercent(-bestRun.summary.maxDrawdownPct)}
+                  />
+                  <DataListRow label="summary.turnoverPct" value={formatPercent(bestRun.summary.turnoverPct)} />
+                  <DataListRow
+                    label="splitAnalysis.config.splitRatioPct"
+                    value={formatMetricValue(bestRun.splitAnalysis.config.splitRatioPct)}
+                  />
+                  <DataListRow label="train.startDate" value={bestRun.splitAnalysis.train.startDate} />
+                  <DataListRow label="train.endDate" value={bestRun.splitAnalysis.train.endDate} />
+                  <DataListRow label="train.dayCount" value={bestRun.splitAnalysis.train.dayCount} />
+                  <DataListRow
+                    label="train.portfolio"
+                    value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.train.portfolio)}</pre>}
+                  />
+                  <DataListRow
+                    label="train.benchmark"
+                    value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.train.benchmark)}</pre>}
+                  />
+                  <DataListRow label="test.startDate" value={bestRun.splitAnalysis.test.startDate} />
+                  <DataListRow label="test.endDate" value={bestRun.splitAnalysis.test.endDate} />
+                  <DataListRow label="test.dayCount" value={bestRun.splitAnalysis.test.dayCount} />
+                  <DataListRow
+                    label="test.portfolio"
+                    value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.test.portfolio)}</pre>}
+                  />
+                  <DataListRow
+                    label="test.benchmark"
+                    value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.test.benchmark)}</pre>}
+                  />
+                </dl>
+              </div>
+            }
+          />
         </div>
       </section>
     </main>

@@ -167,12 +167,16 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["id"] == "etf_portfolio_models_10y"
     assert payload["study"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
     assert payload["study"]["evaluationContext"]["datasetContext"]["source"] == "test"
+    assert payload["study"]["evaluationContext"]["kind"] == "evaluation_context"
+    assert payload["study"]["evaluationContext"]["schemaVersion"] == "v1"
     assert payload["study"]["evaluationContext"]["datasetContext"]["period"] == "10y"
     assert payload["study"]["evaluationContext"]["datasetContext"]["sanityPeriods"] == ["3y"]
     assert payload["study"]["evaluationContext"]["datasetContext"]["alignedStartDate"] == "2025-01-01"
     assert payload["study"]["evaluationContext"]["datasetContext"]["alignedEndDate"] == "2025-01-07"
     assert payload["study"]["evaluationContext"]["datasetContext"]["rowCount"] == 7
     assert payload["study"]["strategyDefinitions"][0]["components"]["core"]["dataResolution"]["label"] == "daily"
+    assert payload["study"]["strategyDefinitions"][0]["kind"] == "strategy_definition"
+    assert payload["study"]["strategyDefinitions"][0]["schemaVersion"] == "v1"
     assert payload["study"]["evaluationContext"]["costAssumptions"]["commissionPct"] == 0.05
     assert payload["study"]["evaluationContext"]["evaluationSettings"]["splitRatioPct"] == 70.0
     assert payload["study"]["initialPortfolioState"]["weights"][0]["asset"] == "CASH"
@@ -192,6 +196,8 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["study"]["marketUniverse"]["assetCount"] == 20
     assert len(payload["study"]["marketUniverse"]["tickers"]) == 20
     assert payload["runs"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
+    assert payload["runs"][0]["kind"] == "run_result"
+    assert payload["runs"][0]["schemaVersion"] == "v1"
     assert payload["runs"][0]["strategy"]["components"]["core"]["investmentUniverse"]["label"] == "20資産マルチアセット"
     assert payload["runs"][0]["strategy"]["components"]["core"]["portfolioModel"]["label"] == "等金額配分"
     assert payload["comparisonSeries"][0]["date"] == "2025-01-02"

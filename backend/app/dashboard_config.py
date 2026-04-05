@@ -43,8 +43,8 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK = build_portfolio_strategy_definition(
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP = build_portfolio_strategy_definition(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top",
-    label="全資産モメンタム傾斜 最良 上位優遇 12ヶ月",
-    description="全ETFを候補に残しつつ、局所探索で最良だった上位優遇モメンタム傾斜で重みを調整する",
+    label="全資産モメンタム傾斜 上位優遇 12ヶ月",
+    description="全ETFを候補に残しつつ、12ヶ月モメンタムの上位優遇傾斜で重みを調整する",
     score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 252},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M = build_portfolio_strategy_definition(
@@ -330,6 +330,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
     ),
     strategy_definitions=[
         build_strategy_definition(
+            strategy_id="stg-fu-eq-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE,
             portfolio_model_definition=EQUAL_WEIGHT,
@@ -337,6 +338,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-rb-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE,
             portfolio_model_definition=RISK_BUDGETING,
@@ -344,6 +346,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-minvar-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE,
             portfolio_model_definition=MINIMUM_VARIANCE,
@@ -351,6 +354,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -358,34 +362,43 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-lin025-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した弱いモメンタム傾斜は、分散を保ちながら成績を改善しやすい",
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-top035-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した上位優遇型のモメンタム傾斜は、分散を保ちながらSharpeを改善しやすい",
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo6-top035-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した6ヶ月モメンタムの上位優遇傾斜は、中期の強さを取り込みやすい",
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo3-top035-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
+            hypothesis="全資産を残した3ヶ月モメンタムの上位優遇傾斜は、短期の強さを取り込みやすい",
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momolv7030-top025-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -393,6 +406,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momolv8515-top025-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -400,6 +414,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momomac8515-top025-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -407,6 +422,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-top035-mru-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
             portfolio_model_definition=MEAN_RISK_UTILITY,
@@ -414,6 +430,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-top035-mruc-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
             portfolio_model_definition=MEAN_RISK_UTILITY_CONSERVATIVE,
@@ -421,6 +438,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-soft025-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -428,6 +446,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-lin050-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -435,6 +454,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-fu-momo12-lin100-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=FULL_UNIVERSE_MOMENTUM_TILT_STRONG,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -442,6 +462,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-top3-eq-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=MOMENTUM_TOP3,
             portfolio_model_definition=EQUAL_WEIGHT,
@@ -449,6 +470,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-top3-rb-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=MOMENTUM_TOP3,
             portfolio_model_definition=RISK_BUDGETING,
@@ -456,6 +478,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-top3-minvar-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=MOMENTUM_TOP3,
             portfolio_model_definition=MINIMUM_VARIANCE,
@@ -463,6 +486,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-top3-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=MOMENTUM_TOP3,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -470,6 +494,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-dualtop3-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=DUAL_MOMENTUM_TOP3,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -477,6 +502,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-poslowvol-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -484,6 +510,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-trailmomlowvol-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=TRAILING_MOMENTUM_LOW_VOL_UNIVERSE,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -491,6 +518,7 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
         ),
         build_strategy_definition(
+            strategy_id="stg-posvol-hrp-ann",
             investment_universe_definition=DEFAULT_INVESTMENT_UNIVERSE,
             selection_definition=POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE,
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
@@ -503,10 +531,10 @@ DEFAULT_DASHBOARD_CONFIG = StudyDefinition(
             portfolio_model_definition=HIERARCHICAL_RISK_PARITY,
             execution_policy_definition=ANNUAL_EXECUTION_POLICY,
             risk_controls_definition=DEFAULT_RISK_CONTROLS,
-            strategy_id="etf_only__full_universe_momentum_tilt_weak_top__hierarchical_risk_parity__annual",
-            label="ETF限定モメンタム傾斜 最良 上位優遇 × HRP × 年次",
-            hypothesis="暗号資産を外したETFユニバースでも、弱い上位優遇モメンタム傾斜が有効かを確かめる",
-            description="18資産ETFに限定して、局所探索で最良だった上位優遇モメンタム傾斜をHRPに載せる",
+            strategy_id="stg-etf-momo12-top035-hrp-ann",
+            label="ETF限定モメンタム傾斜 上位優遇 12ヶ月 × HRP × 年次",
+            hypothesis="暗号資産を外したETFユニバースでも、上位優遇型のモメンタム傾斜が有効に働く可能性がある",
+            description="18資産ETFに限定して、12ヶ月モメンタムの上位優遇傾斜をHRPに載せる",
         ),
     ],
     condition_variants=build_condition_variants(),

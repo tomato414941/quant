@@ -154,7 +154,7 @@ class StrategyDefinition:
     strategy_id: str
     version: str
     label: str
-    hypothesis: str
+    hypothesis: str | None
     description: str
     investment_universe_definition: InvestmentUniverseDefinition
     data_resolution: str
@@ -491,7 +491,7 @@ def build_strategy_definition(
         strategy_id=resolved_strategy_id,
         version=version,
         label=strategy_label,
-        hypothesis=hypothesis or selection_definition.description,
+        hypothesis=hypothesis,
         description=description or selection_definition.description,
         investment_universe_definition=investment_universe_definition,
         data_resolution=data_resolution,
@@ -606,6 +606,8 @@ def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> di
         else None
     )
     return {
+        "kind": "strategy_definition",
+        "schemaVersion": "v1",
         "strategyId": strategy_definition.strategy_id,
         "version": strategy_definition.version,
         "label": strategy_definition.label,
@@ -887,6 +889,8 @@ def compare_portfolio_runs(
 
         runs.append(
             {
+                "kind": "run_result",
+                "schemaVersion": "v1",
                 "key": strategy_definition.key,
                 "strategy": serialize_strategy_definition(strategy_definition),
                 "weights": serialize_weights(

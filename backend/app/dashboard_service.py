@@ -252,6 +252,8 @@ def serialize_evaluation_context(
     period_override: str | None = None,
 ) -> dict:
     return {
+        "kind": "evaluation_context",
+        "schemaVersion": "v1",
         "datasetContext": serialize_dataset_context(
             study,
             dataset_metadata,

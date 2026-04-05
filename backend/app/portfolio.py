@@ -57,8 +57,7 @@ UNIVERSE_POLICY_LABELS = {
 }
 SCORE_MODEL_LABELS = {
     "none": "シグナルなし",
-    "momentum": "モメンタム",
-    "trailing_momentum_12m": "モメンタム",
+    "trailing_momentum": "モメンタム",
     "momentum_low_vol": "12ヶ月モメンタム+低ボラ",
     "momentum_macro": "12ヶ月モメンタム+マクロproxy",
     "volatility": "ボラティリティ",
@@ -92,7 +91,7 @@ class InvestmentUniverseDefinition:
 
 @dataclass(frozen=True)
 class ScoreModelDefinition:
-    key: str
+    kind: str
     label: str
 
 
@@ -307,8 +306,8 @@ def build_portfolio_strategy_definition(
     score_models = {
         "full_universe": ScoreModelDefinition("none", SCORE_MODEL_LABELS["none"]),
         "full_universe_momentum_tilt": ScoreModelDefinition(
-            "trailing_momentum_12m",
-            SCORE_MODEL_LABELS["trailing_momentum_12m"],
+            "trailing_momentum",
+            SCORE_MODEL_LABELS["trailing_momentum"],
         ),
         "full_universe_momentum_low_vol_tilt": ScoreModelDefinition(
             "momentum_low_vol",
@@ -318,14 +317,14 @@ def build_portfolio_strategy_definition(
             "momentum_macro",
             SCORE_MODEL_LABELS["momentum_macro"],
         ),
-        "momentum_top3": ScoreModelDefinition("momentum", SCORE_MODEL_LABELS["momentum"]),
-        "dual_momentum_top3": ScoreModelDefinition("momentum", SCORE_MODEL_LABELS["momentum"]),
+        "momentum_top3": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
+        "dual_momentum_top3": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
         "trailing_momentum_low_vol_universe": ScoreModelDefinition(
-            "trailing_momentum_12m",
-            SCORE_MODEL_LABELS["trailing_momentum_12m"],
+            "trailing_momentum",
+            SCORE_MODEL_LABELS["trailing_momentum"],
         ),
-        "positive_momentum_universe": ScoreModelDefinition("momentum", SCORE_MODEL_LABELS["momentum"]),
-        "positive_momentum_low_vol_universe": ScoreModelDefinition("momentum", SCORE_MODEL_LABELS["momentum"]),
+        "positive_momentum_universe": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
+        "positive_momentum_low_vol_universe": ScoreModelDefinition("trailing_momentum", SCORE_MODEL_LABELS["trailing_momentum"]),
         "positive_momentum_high_volume_universe": ScoreModelDefinition(
             "volume_strength",
             SCORE_MODEL_LABELS["volume_strength"],
@@ -546,7 +545,7 @@ def serialize_portfolio_strategy_definition(strategy_definition: PortfolioStrate
             "label": strategy_definition.universe_policy.label,
         },
         "scoreModel": {
-            "key": strategy_definition.score_model.key,
+            "kind": strategy_definition.score_model.kind,
             "label": strategy_definition.score_model.label,
         },
         "scoreParameters": {
@@ -612,7 +611,7 @@ def serialize_tilt_rule(strategy_definition: StrategyDefinition) -> dict | None:
         parameters["shape"] = float(score_parameters["tilt_shape"])
 
     return {
-        "key": "ranking_weight_tilt",
+        "kind": "ranking_weight_tilt",
         "label": "ランキング連動ティルト",
         "parameters": parameters,
     }
@@ -621,11 +620,11 @@ def serialize_tilt_rule(strategy_definition: StrategyDefinition) -> dict | None:
 def serialize_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
     ranking_model = (
         {
-            "key": strategy_definition.selection_definition.score_model.key,
+            "kind": strategy_definition.selection_definition.score_model.kind,
             "label": strategy_definition.selection_definition.score_model.label,
             "parameters": serialize_asset_ranking_model_parameters(strategy_definition),
         }
-        if strategy_definition.selection_definition.score_model.key != "none"
+        if strategy_definition.selection_definition.score_model.kind != "none"
         else None
     )
     fallback_rule = (
@@ -706,7 +705,7 @@ def serialize_asset_ranking_definition(
             "label": strategy_definition.universe_policy.label,
         },
         "rankingModel": {
-            "key": strategy_definition.score_model.key,
+            "kind": strategy_definition.score_model.kind,
             "label": strategy_definition.score_model.label,
         },
         "scoreParameters": extract_ranking_score_parameters(strategy_definition),
@@ -744,12 +743,12 @@ def build_asset_ranking_definitions(
 
     for strategy in strategy_definitions:
         selection_definition = strategy.selection_definition
-        if selection_definition.score_model.key == "none":
+        if selection_definition.score_model.kind == "none":
             continue
         signature = (
             strategy.investment_universe_definition.tickers,
             selection_definition.strategy_type,
-            selection_definition.score_model.key,
+            selection_definition.score_model.kind,
             tuple(selection_definition.feature_inputs),
             tuple(filter_rule.key for filter_rule in selection_definition.filter_rules),
             selection_definition.fallback_rule.key,
@@ -797,11 +796,11 @@ def extract_ranking_score_parameters(
     extracted: dict[str, float] = {}
     if "window_days" in score_parameters:
         extracted["windowDays"] = float(score_parameters["window_days"])
-    if strategy_definition.score_model.key == "momentum_low_vol":
+    if strategy_definition.score_model.kind == "momentum_low_vol":
         extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.7))
         extracted["lowVolWeight"] = float(score_parameters.get("low_vol_weight", 0.3))
         return extracted
-    if strategy_definition.score_model.key == "momentum_macro":
+    if strategy_definition.score_model.kind == "momentum_macro":
         extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.85))
         extracted["macroWeight"] = float(score_parameters.get("macro_weight", 0.15))
         return extracted
@@ -1072,12 +1071,12 @@ def compute_strategy_score_series(
     volume_history: pd.DataFrame | None,
     strategy_definition: PortfolioStrategyDefinition,
 ) -> pd.Series | None:
-    score_key = strategy_definition.score_model.key
-    if score_key == "none":
+    score_kind = strategy_definition.score_model.kind
+    if score_kind == "none":
         return None
-    if score_key in {"momentum", "trailing_momentum_12m"}:
+    if score_kind == "trailing_momentum":
         return compute_trailing_total_returns(returns, strategy_definition)
-    if score_key == "momentum_low_vol":
+    if score_kind == "momentum_low_vol":
         score_parameters = dict(strategy_definition.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.7))
         low_vol_weight = float(score_parameters.get("low_vol_weight", 0.3))
@@ -1085,7 +1084,7 @@ def compute_strategy_score_series(
         momentum_rank = trailing_returns.rank(method="average", pct=True)
         low_vol_rank = (-returns.std()).rank(method="average", pct=True)
         return momentum_weight * momentum_rank + low_vol_weight * low_vol_rank
-    if score_key == "momentum_macro":
+    if score_kind == "momentum_macro":
         score_parameters = dict(strategy_definition.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.85))
         macro_weight = float(score_parameters.get("macro_weight", 0.15))
@@ -1093,11 +1092,11 @@ def compute_strategy_score_series(
         momentum_rank = trailing_returns.rank(method="average", pct=True)
         macro_rank = compute_macro_proxy_rank(returns, strategy_definition)
         return momentum_weight * momentum_rank + macro_weight * macro_rank
-    if score_key == "volume_strength":
+    if score_kind == "volume_strength":
         if volume_history is None:
             raise ValueError("Volume history is required for the selected ranking model.")
         return compute_volume_strength(volume_history)
-    if score_key == "volatility":
+    if score_kind == "volatility":
         return -returns.std()
     raise ValueError("Unsupported score model.")
 

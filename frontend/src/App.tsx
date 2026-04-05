@@ -14,7 +14,9 @@ type StrategyComponent = {
   label: string
 }
 
-type StrategyComponentWithParameters = StrategyComponent & {
+type StrategyModelWithParameters = {
+  kind: string
+  label: string
   parameters: Record<string, number>
 }
 
@@ -53,11 +55,11 @@ type StrategyDefinition = {
       }
     }
     optional: {
-      assetRankingModel: StrategyComponentWithParameters | null
+      assetRankingModel: StrategyModelWithParameters | null
       featureInputs: string[]
       filterRules: StrategyComponent[]
       fallbackRule: StrategyComponent | null
-      tiltRule: StrategyComponentWithParameters | null
+      tiltRule: StrategyModelWithParameters | null
       riskControls: {
         maxInvestmentPct: number
         maxWeightPct: number | null
@@ -374,7 +376,7 @@ function App() {
                     label="assetRankingModel"
                     value={
                       bestRun.strategy.components.optional.assetRankingModel
-                        ? `${bestRun.strategy.components.optional.assetRankingModel.label} (${bestRun.strategy.components.optional.assetRankingModel.key})`
+                        ? `${bestRun.strategy.components.optional.assetRankingModel.label} (${bestRun.strategy.components.optional.assetRankingModel.kind})`
                         : 'null'
                     }
                   />
@@ -414,7 +416,7 @@ function App() {
                     label="tiltRule"
                     value={
                       bestRun.strategy.components.optional.tiltRule
-                        ? `${bestRun.strategy.components.optional.tiltRule.label} (${bestRun.strategy.components.optional.tiltRule.key})`
+                        ? `${bestRun.strategy.components.optional.tiltRule.label} (${bestRun.strategy.components.optional.tiltRule.kind})`
                         : 'null'
                     }
                   />
@@ -505,7 +507,7 @@ function App() {
                       label="assetRankingModel"
                       value={
                         referenceRun.strategy.components.optional.assetRankingModel
-                          ? `${referenceRun.strategy.components.optional.assetRankingModel.label} (${referenceRun.strategy.components.optional.assetRankingModel.key})`
+                          ? `${referenceRun.strategy.components.optional.assetRankingModel.label} (${referenceRun.strategy.components.optional.assetRankingModel.kind})`
                           : 'null'
                       }
                     />
@@ -535,7 +537,7 @@ function App() {
                       label="tiltRule"
                       value={
                         referenceRun.strategy.components.optional.tiltRule
-                          ? `${referenceRun.strategy.components.optional.tiltRule.label} (${referenceRun.strategy.components.optional.tiltRule.key})`
+                          ? `${referenceRun.strategy.components.optional.tiltRule.label} (${referenceRun.strategy.components.optional.tiltRule.kind})`
                           : 'null'
                       }
                     />

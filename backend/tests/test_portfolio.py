@@ -180,7 +180,7 @@ def test_compute_trade_cost_increases_when_liquidity_is_lower() -> None:
         portfolio_equity=10_000.0,
         price_snapshot=price_snapshot,
         volume_history=high_liquidity_volumes,
-        adv_window_days=20,
+        adv_window_bars=20,
         min_adv_notional=1_000_000.0,
     )
     low_liquidity_cost = compute_trade_cost(
@@ -190,7 +190,7 @@ def test_compute_trade_cost_increases_when_liquidity_is_lower() -> None:
         portfolio_equity=10_000.0,
         price_snapshot=price_snapshot,
         volume_history=low_liquidity_volumes,
-        adv_window_days=20,
+        adv_window_bars=20,
         min_adv_notional=1_000_000.0,
     )
 

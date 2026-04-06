@@ -161,7 +161,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         == 0.08
     )
     assert (
-        payload["comparison"]["executionAssumptions"]["costModel"]["parameters"]["advWindowDays"]
+        payload["comparison"]["executionAssumptions"]["costModel"]["parameters"]["advWindowBars"]
         == 20.0
     )
     assert payload["comparison"]["evaluation"]["kind"] == "evaluation_spec"

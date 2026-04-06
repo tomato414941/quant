@@ -73,7 +73,7 @@ def build_asset_specific_adv_cost_model_spec(
     default_commission_pct: float,
     default_slippage_pct: float = 0.0,
     default_impact_coefficient_pct: float = 0.0,
-    adv_window_days: int = 20,
+    adv_window_bars: int = 20,
     min_adv_notional: float = 1_000_000.0,
     per_asset_overrides: dict[str, dict[str, float]] | None = None,
 ) -> CostModelSpec:
@@ -83,7 +83,7 @@ def build_asset_specific_adv_cost_model_spec(
             "commissionPct": float(default_commission_pct),
             "slippagePct": float(default_slippage_pct),
             "impactCoefficientPct": float(default_impact_coefficient_pct),
-            "advWindowDays": float(adv_window_days),
+            "advWindowBars": float(adv_window_bars),
             "minAdvNotional": float(min_adv_notional),
         },
         per_asset_overrides=per_asset_overrides or {},

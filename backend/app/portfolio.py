@@ -860,7 +860,7 @@ def resolve_cost_model_inputs(
     default_impact_rate = impact_rate_from_parameters(parameters)
     linear_rates = np.repeat(default_rate, len(universe_columns)).astype("float64")
     impact_rates = np.repeat(default_impact_rate, len(universe_columns)).astype("float64")
-    adv_window_days = max(1, int(float(parameters.get("advWindowDays", 20))))
+    adv_window_bars = max(1, int(float(parameters.get("advWindowBars", 20))))
     min_adv_notional = float(parameters.get("minAdvNotional", 1_000_000.0))
 
     if kind == "flat_cost":
@@ -868,7 +868,7 @@ def resolve_cost_model_inputs(
             "defaultLinearRate": default_rate,
             "linearRates": linear_rates,
             "impactRates": impact_rates,
-            "advWindowDays": adv_window_days,
+            "advWindowBars": adv_window_bars,
             "minAdvNotional": min_adv_notional,
         }
     if kind not in {"asset_specific_linear_cost", "asset_specific_adv_cost"}:
@@ -886,7 +886,7 @@ def resolve_cost_model_inputs(
         "defaultLinearRate": default_rate,
         "linearRates": linear_rates,
         "impactRates": impact_rates,
-        "advWindowDays": adv_window_days,
+        "advWindowBars": adv_window_bars,
         "minAdvNotional": min_adv_notional,
     }
 
@@ -899,7 +899,7 @@ def compute_trade_cost(
     portfolio_equity: float,
     price_snapshot: pd.Series | None,
     volume_history: pd.DataFrame | None,
-    adv_window_days: int,
+    adv_window_bars: int,
     min_adv_notional: float,
 ) -> float:
     linear_cost = float(np.dot(weight_delta, linear_cost_rates))
@@ -912,7 +912,7 @@ def compute_trade_cost(
     ):
         return linear_cost
 
-    recent_volumes = volume_history.tail(adv_window_days)
+    recent_volumes = volume_history.tail(adv_window_bars)
     if recent_volumes.empty:
         return linear_cost
 
@@ -983,7 +983,7 @@ def compare_portfolio_runs(
         default_transaction_cost = float(cost_inputs["defaultLinearRate"])
         asset_transaction_costs = np.asarray(cost_inputs["linearRates"], dtype="float64")
         asset_impact_costs = np.asarray(cost_inputs["impactRates"], dtype="float64")
-        adv_window_days = int(cost_inputs["advWindowDays"])
+        adv_window_bars = int(cost_inputs["advWindowBars"])
         min_adv_notional = float(cost_inputs["minAdvNotional"])
 
         split_index = compute_split_index(len(returns), split_ratio)
@@ -1024,7 +1024,7 @@ def compare_portfolio_runs(
             transaction_cost=default_transaction_cost,
             asset_transaction_costs=asset_transaction_costs,
             asset_impact_costs=asset_impact_costs,
-            adv_window_days=adv_window_days,
+            adv_window_bars=adv_window_bars,
             min_adv_notional=min_adv_notional,
             max_weight=risk_controls.max_weight,
             rebalance_frequency=rebalance_frequency,
@@ -1736,7 +1736,7 @@ def run_portfolio_backtest(
     transaction_cost: float,
     asset_transaction_costs: np.ndarray,
     asset_impact_costs: np.ndarray,
-    adv_window_days: int,
+    adv_window_bars: int,
     min_adv_notional: float,
     max_weight: float | None,
     rebalance_frequency: str,
@@ -1767,7 +1767,7 @@ def run_portfolio_backtest(
                 portfolio_equity=portfolio_equity,
                 price_snapshot=closes.iloc[index],
                 volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
-                adv_window_days=adv_window_days,
+                adv_window_bars=adv_window_bars,
                 min_adv_notional=min_adv_notional,
             )
         elif index > split_index and should_rebalance(
@@ -1796,7 +1796,7 @@ def run_portfolio_backtest(
                 portfolio_equity=portfolio_equity,
                 price_snapshot=closes.iloc[index - 1],
                 volume_history=volumes.iloc[:index] if volumes is not None else None,
-                adv_window_days=adv_window_days,
+                adv_window_bars=adv_window_bars,
                 min_adv_notional=min_adv_notional,
             )
             current_weights = rebalanced_weights

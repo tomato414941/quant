@@ -301,7 +301,7 @@ def build_realistic_multi_asset_cost_model_spec() -> CostModelSpec:
         default_commission_pct=0.05,
         default_slippage_pct=0.02,
         default_impact_coefficient_pct=0.08,
-        adv_window_days=20,
+        adv_window_bars=20,
         min_adv_notional=1_000_000.0,
         per_asset_overrides={
             "SPY": {"commissionPct": 0.02, "slippagePct": 0.01, "impactCoefficientPct": 0.02},

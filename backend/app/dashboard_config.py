@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.portfolio import (
+    build_prediction_target_spec,
     build_execution_policy_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
@@ -386,6 +387,27 @@ DEFAULT_EXECUTION_ASSUMPTIONS = build_execution_assumptions_spec(
     },
     cost_model=build_realistic_multi_asset_cost_model_spec(),
 )
+
+DEFAULT_PREDICTION_TARGET_SPECS = [
+    build_prediction_target_spec(
+        key="next_1bar_excess_return",
+        label="次の1bar超過収益",
+        kind="forward_excess_return",
+        horizon_spec=window_spec(unit="bars", value=1),
+    ),
+    build_prediction_target_spec(
+        key="next_5bar_excess_return",
+        label="次の5bar超過収益",
+        kind="forward_excess_return",
+        horizon_spec=window_spec(unit="bars", value=5),
+    ),
+    build_prediction_target_spec(
+        key="next_10bar_excess_return",
+        label="次の10bar超過収益",
+        kind="forward_excess_return",
+        horizon_spec=window_spec(unit="bars", value=10),
+    ),
+]
 
 DEFAULT_RISK_CONTROLS = build_risk_controls_spec(
     max_investment_ratio=1.0,

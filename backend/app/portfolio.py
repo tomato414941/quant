@@ -179,6 +179,46 @@ class AssetRankingSpec:
     source_strategy_labels: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PredictionTargetSpec:
+    key: str
+    label: str
+    kind: str
+    horizon_spec: tuple[tuple[str, object], ...]
+    baseline: str
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    key: str
+    label: str
+    inputs: tuple[str, ...]
+    parameters: tuple[tuple[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class PredictionModelSpec:
+    key: str
+    kind: str
+    label: str
+    parameters: tuple[tuple[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class PredictionSpec:
+    key: str
+    label: str
+    description: str
+    timeframe: TimeframeSpec
+    investment_universe: InvestmentUniverseSpec
+    feature_spec: FeatureSpec
+    model_spec: PredictionModelSpec
+    target_spec: PredictionTargetSpec
+    selection: SelectionSpec
+    source_strategy_keys: tuple[str, ...]
+    source_strategy_labels: tuple[str, ...]
+
+
 def validate_split_ratio(split_ratio: float) -> None:
     if split_ratio <= 0 or split_ratio >= 1:
         raise ValueError("Split ratio must be between 0 and 1.")
@@ -743,6 +783,101 @@ def serialize_asset_ranking_spec(
     }
 
 
+def build_prediction_target_spec(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    horizon_spec: dict[str, object],
+    baseline: str = "cross_sectional_mean",
+) -> PredictionTargetSpec:
+    if kind not in {"forward_excess_return"}:
+        raise ValueError("Unsupported prediction target kind.")
+    return PredictionTargetSpec(
+        key=key,
+        label=label,
+        kind=kind,
+        horizon_spec=tuple(sorted(horizon_spec.items())),
+        baseline=baseline,
+    )
+
+
+def serialize_prediction_target_spec(
+    target_spec: PredictionTargetSpec,
+) -> dict:
+    return {
+        "kind": "prediction_target_spec",
+        "schemaVersion": "v1",
+        "key": target_spec.key,
+        "label": target_spec.label,
+        "targetKind": target_spec.kind,
+        "horizonSpec": {
+            key: value for key, value in target_spec.horizon_spec
+        },
+        "baseline": target_spec.baseline,
+    }
+
+
+def build_feature_spec(
+    *,
+    key: str,
+    label: str,
+    inputs: tuple[str, ...],
+    parameters: dict[str, object] | None = None,
+) -> FeatureSpec:
+    return FeatureSpec(
+        key=key,
+        label=label,
+        inputs=inputs,
+        parameters=tuple(sorted((parameters or {}).items())),
+    )
+
+
+def serialize_feature_spec(
+    feature_spec: FeatureSpec,
+) -> dict:
+    return {
+        "kind": "feature_spec",
+        "schemaVersion": "v1",
+        "key": feature_spec.key,
+        "label": feature_spec.label,
+        "inputs": list(feature_spec.inputs),
+        "parameters": {
+            key: value for key, value in feature_spec.parameters
+        },
+    }
+
+
+def build_prediction_model_spec(
+    *,
+    key: str,
+    kind: str,
+    label: str,
+    parameters: dict[str, object] | None = None,
+) -> PredictionModelSpec:
+    return PredictionModelSpec(
+        key=key,
+        kind=kind,
+        label=label,
+        parameters=tuple(sorted((parameters or {}).items())),
+    )
+
+
+def serialize_prediction_model_spec(
+    model_spec: PredictionModelSpec,
+) -> dict:
+    return {
+        "kind": "prediction_model_spec",
+        "schemaVersion": "v1",
+        "key": model_spec.key,
+        "modelKind": model_spec.kind,
+        "label": model_spec.label,
+        "parameters": {
+            key: value for key, value in model_spec.parameters
+        },
+    }
+
+
 def freeze_parameter_value(value: object) -> object:
     if isinstance(value, dict):
         return tuple((str(key), freeze_parameter_value(nested_value)) for key, nested_value in sorted(value.items()))
@@ -826,6 +961,65 @@ def build_asset_ranking_specs(
     return ranking_specs
 
 
+def build_prediction_specs(
+    ranking_specs: list[AssetRankingSpec],
+    target_specs: list[PredictionTargetSpec],
+) -> list[PredictionSpec]:
+    prediction_specs: list[PredictionSpec] = []
+    for ranking_spec in ranking_specs:
+        ranking_parameters = extract_ranking_score_parameters(ranking_spec.selection)
+        feature_spec = build_feature_spec(
+            key=f"features__{ranking_spec.key}",
+            label=f"{ranking_spec.selection.score_model.label} features",
+            inputs=tuple(ranking_spec.selection.feature_inputs),
+            parameters={
+                **ranking_parameters,
+                "featureKeys": ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength"),
+            },
+        )
+        model_specs = [
+            build_prediction_model_spec(
+                key=f"model__{ranking_spec.key}__signal",
+                kind="ranking_signal_model",
+                label=f"{ranking_spec.selection.score_model.label} signal",
+                parameters={
+                    "scoreModelKind": ranking_spec.selection.score_model.kind,
+                    **ranking_parameters,
+                },
+            ),
+            build_prediction_model_spec(
+                key=f"model__{ranking_spec.key}__linear",
+                kind="linear_regression",
+                label=f"{ranking_spec.selection.score_model.label} linear",
+                parameters={
+                    "scoreModelKind": ranking_spec.selection.score_model.kind,
+                    "fitMode": "expanding",
+                    "minTrainSamples": 50,
+                    **ranking_parameters,
+                },
+            ),
+        ]
+        for target_spec in target_specs:
+            for model_spec in model_specs:
+                prediction_specs.append(
+                    PredictionSpec(
+                        key=f"prediction__{ranking_spec.key}__{model_spec.kind}__{target_spec.key}",
+                        label=f"{ranking_spec.label} / {model_spec.label} -> {target_spec.label}",
+                        description=ranking_spec.description,
+                        timeframe=ranking_spec.timeframe,
+                        investment_universe=ranking_spec.investment_universe,
+                        feature_spec=feature_spec,
+                        model_spec=model_spec,
+                        target_spec=target_spec,
+                        selection=ranking_spec.selection,
+                        source_strategy_keys=ranking_spec.source_strategy_keys,
+                        source_strategy_labels=ranking_spec.source_strategy_labels,
+                    )
+                )
+    prediction_specs.sort(key=lambda prediction_spec: prediction_spec.label)
+    return prediction_specs
+
+
 def extract_ranking_score_parameters(
     selection: SelectionSpec,
 ) -> dict[str, object]:
@@ -842,6 +1036,36 @@ def extract_ranking_score_parameters(
         extracted["macroWeight"] = float(score_parameters.get("macro_weight", 0.15))
         return extracted
     return extracted
+
+
+def serialize_prediction_spec(
+    prediction_spec: PredictionSpec,
+) -> dict:
+    return {
+        "kind": "prediction_spec",
+        "schemaVersion": "v1",
+        "key": prediction_spec.key,
+        "label": prediction_spec.label,
+        "description": prediction_spec.description,
+        "timeframe": {
+            "key": prediction_spec.timeframe.key,
+            "label": prediction_spec.timeframe.label,
+            "yfinanceInterval": prediction_spec.timeframe.yfinance_interval,
+            "barsPerYear": prediction_spec.timeframe.bars_per_year,
+            "barSeconds": prediction_spec.timeframe.bar_seconds,
+        },
+        "investmentUniverse": {
+            "key": prediction_spec.investment_universe.key,
+            "label": prediction_spec.investment_universe.label,
+            "assetCount": len(prediction_spec.investment_universe.tickers),
+            "tickers": list(prediction_spec.investment_universe.tickers),
+        },
+        "featureSpec": serialize_feature_spec(prediction_spec.feature_spec),
+        "modelSpec": serialize_prediction_model_spec(prediction_spec.model_spec),
+        "targetSpec": serialize_prediction_target_spec(prediction_spec.target_spec),
+        "sourceStrategyKeys": list(prediction_spec.source_strategy_keys),
+        "sourceStrategyLabels": list(prediction_spec.source_strategy_labels),
+    }
 
 
 def convert_window_spec_to_bars(
@@ -868,6 +1092,14 @@ def convert_window_spec_to_bars(
     else:
         raise ValueError("Unsupported windowSpec unit.")
     return max(1, int(round(configured_bars)))
+
+
+def convert_horizon_spec_to_bars(
+    horizon_spec: dict[str, object],
+    *,
+    bars_per_year: float,
+) -> int:
+    return convert_window_spec_to_bars(horizon_spec, bars_per_year=bars_per_year)
 
 
 def build_portfolio_state(
@@ -1392,6 +1624,49 @@ def compute_macro_proxy_rank(
     return pd.Series(macro_scores, dtype="float64").rank(method="average", pct=True)
 
 
+def compute_prediction_feature_frame(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    selection: SelectionSpec,
+    *,
+    bars_per_year: float,
+) -> pd.DataFrame:
+    trailing_returns = compute_trailing_total_returns(
+        returns,
+        selection,
+        bars_per_year=bars_per_year,
+    )
+    score_series = compute_strategy_score_series(
+        returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+    )
+    if score_series is None:
+        score_series = pd.Series(0.0, index=returns.columns, dtype="float64")
+    vol_series = (-returns.std()).rank(method="average", pct=True)
+    macro_series = compute_macro_proxy_rank(
+        returns,
+        selection,
+        bars_per_year=bars_per_year,
+    )
+    if volume_history is not None:
+        volume_series = compute_volume_strength(volume_history).rank(method="average", pct=True)
+    else:
+        volume_series = pd.Series(0.0, index=returns.columns, dtype="float64")
+
+    feature_frame = pd.DataFrame(
+        {
+            "score": score_series.reindex(returns.columns).fillna(0.0),
+            "momentum": trailing_returns.rank(method="average", pct=True).reindex(returns.columns).fillna(0.0),
+            "lowVolRank": vol_series.reindex(returns.columns).fillna(0.0),
+            "macroRank": macro_series.reindex(returns.columns).fillna(0.0),
+            "volumeStrength": volume_series.reindex(returns.columns).fillna(0.0),
+        }
+    )
+    return feature_frame.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+
+
 def evaluate_asset_ranking_spec(
     returns: pd.DataFrame,
     volumes: pd.DataFrame | None,
@@ -1479,6 +1754,173 @@ def evaluate_asset_ranking_spec(
     }
 
 
+def evaluate_prediction_spec(
+    returns: pd.DataFrame,
+    volumes: pd.DataFrame | None,
+    split_ratio: float,
+    prediction_spec: PredictionSpec,
+    *,
+    bars_per_year: float,
+) -> dict:
+    ranking_spec = AssetRankingSpec(
+        key=prediction_spec.key,
+        label=prediction_spec.label,
+        description=prediction_spec.description,
+        timeframe=prediction_spec.timeframe,
+        investment_universe=prediction_spec.investment_universe,
+        selection=prediction_spec.selection,
+        source_strategy_keys=prediction_spec.source_strategy_keys,
+        source_strategy_labels=prediction_spec.source_strategy_labels,
+    )
+    target_spec = prediction_spec.target_spec
+    ranking_universe = [
+        asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
+    ]
+    returns = returns[ranking_universe]
+    volumes = volumes[ranking_universe] if volumes is not None else None
+    split_index = compute_split_index(len(returns), split_ratio)
+    target_horizon_bars = convert_horizon_spec_to_bars(
+        {key: value for key, value in target_spec.horizon_spec},
+        bars_per_year=bars_per_year,
+    )
+    observations: list[dict] = []
+    latest_top_assets: list[str] = []
+    latest_scores: list[dict[str, float | str]] = []
+    feature_names = ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength")
+    feature_count = len(feature_names)
+    train_sample_count = 0
+    xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
+    xty = np.zeros(feature_count + 1, dtype="float64")
+    model_parameters = {key: value for key, value in prediction_spec.model_spec.parameters}
+    min_train_samples = int(model_parameters.get("minTrainSamples", 1))
+
+    for index in range(2, len(returns) - target_horizon_bars + 1):
+        history_returns = returns.iloc[:index]
+        history_volumes = volumes.iloc[:index] if volumes is not None else None
+        selection = ranking_spec.selection
+        selected_assets = select_assets(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        if len(selected_assets) < 2:
+            continue
+
+        score_series = compute_strategy_score_series(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        if score_series is None:
+            continue
+        feature_frame = compute_prediction_feature_frame(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+
+        selected_scores = score_series.loc[selected_assets].dropna()
+        if len(selected_scores) < 2 or selected_scores.nunique() < 2:
+            continue
+
+        forward_window = returns.iloc[index : index + target_horizon_bars]
+        if len(forward_window) < target_horizon_bars:
+            continue
+        forward_returns = ((1 + forward_window).prod() - 1).loc[selected_scores.index].dropna()
+        if len(forward_returns) < 2:
+            continue
+
+        aligned_scores = selected_scores.loc[forward_returns.index]
+        aligned_features = feature_frame.loc[forward_returns.index, list(feature_names)].astype("float64")
+        if len(aligned_scores) < 2 or aligned_scores.nunique() < 2 or forward_returns.nunique() < 2:
+            continue
+
+        if target_spec.baseline == "cross_sectional_mean":
+            target_values = forward_returns - float(forward_returns.mean())
+        else:
+            raise ValueError("Unsupported prediction target baseline.")
+
+        if target_values.nunique() < 2:
+            continue
+
+        if prediction_spec.model_spec.kind == "ranking_signal_model":
+            prediction_values = aligned_scores
+        elif prediction_spec.model_spec.kind == "linear_regression":
+            design_matrix = np.column_stack(
+                [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+            )
+            if train_sample_count < min_train_samples:
+                xtx += design_matrix.T @ design_matrix
+                xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
+                train_sample_count += len(aligned_features)
+                continue
+            beta = np.linalg.pinv(xtx) @ xty
+            prediction_array = design_matrix @ beta
+            prediction_values = pd.Series(
+                prediction_array,
+                index=aligned_features.index,
+                dtype="float64",
+            )
+            if prediction_values.nunique() < 2:
+                xtx += design_matrix.T @ design_matrix
+                xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
+                train_sample_count += len(aligned_features)
+                continue
+        else:
+            raise ValueError("Unsupported prediction model kind.")
+
+        group_size = max(1, len(aligned_scores) // 3)
+        ordered_scores = prediction_values.sort_values(ascending=False)
+        top_assets = list(ordered_scores.head(group_size).index)
+        bottom_assets = list(ordered_scores.tail(group_size).index)
+        top_return = float(forward_returns.loc[top_assets].mean())
+        bottom_return = float(forward_returns.loc[bottom_assets].mean())
+        rank_ic = prediction_values.rank().corr(target_values.rank(), method="pearson")
+        pearson_corr = prediction_values.corr(target_values, method="pearson")
+        if pd.isna(rank_ic) or pd.isna(pearson_corr):
+            continue
+
+        latest_top_assets = top_assets
+        latest_scores = [
+            {"asset": str(asset), "score": round(float(score), 6)}
+            for asset, score in ordered_scores.head(5).items()
+        ]
+        observations.append(
+            {
+                "date": str(returns.index[index]),
+                "rankIc": float(rank_ic),
+                "pearsonCorr": float(pearson_corr),
+                "topReturn": top_return,
+                "bottomReturn": bottom_return,
+                "topMinusBottom": top_return - bottom_return,
+                "assetCount": len(aligned_scores),
+                "segment": "train" if index < split_index else "test",
+            }
+        )
+        design_matrix = np.column_stack(
+            [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+        )
+        xtx += design_matrix.T @ design_matrix
+        xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
+        train_sample_count += len(aligned_features)
+
+    return {
+        "predictionSpec": serialize_prediction_spec(prediction_spec),
+        "latestTopAssets": latest_top_assets,
+        "latestScores": latest_scores,
+        "overall": summarize_prediction_observations(observations),
+        "train": summarize_prediction_observations(
+            [observation for observation in observations if observation["segment"] == "train"]
+        ),
+        "test": summarize_prediction_observations(
+            [observation for observation in observations if observation["segment"] == "test"]
+        ),
+    }
+
+
 def summarize_ranking_observations(observations: list[dict]) -> dict:
     if not observations:
         return {
@@ -1496,6 +1938,39 @@ def summarize_ranking_observations(observations: list[dict]) -> dict:
     return {
         "observationCount": len(observations),
         "meanRankIc": round(float(np.mean([observation["rankIc"] for observation in observations])), 4),
+        "meanTopReturnPct": round(float(np.mean([observation["topReturn"] for observation in observations])) * 100, 2),
+        "meanBottomReturnPct": round(
+            float(np.mean([observation["bottomReturn"] for observation in observations])) * 100,
+            2,
+        ),
+        "meanTopMinusBottomPct": round(float(np.mean(top_minus_bottom_values)) * 100, 2),
+        "hitRatePct": round(hit_count / len(observations) * 100, 2),
+        "meanAssetCount": round(float(np.mean([observation["assetCount"] for observation in observations])), 2),
+    }
+
+
+def summarize_prediction_observations(observations: list[dict]) -> dict:
+    if not observations:
+        return {
+            "observationCount": 0,
+            "meanRankIc": None,
+            "meanPearsonCorr": None,
+            "meanTopReturnPct": None,
+            "meanBottomReturnPct": None,
+            "meanTopMinusBottomPct": None,
+            "hitRatePct": None,
+            "meanAssetCount": None,
+        }
+
+    top_minus_bottom_values = [observation["topMinusBottom"] for observation in observations]
+    hit_count = sum(1 for value in top_minus_bottom_values if value > 0)
+    return {
+        "observationCount": len(observations),
+        "meanRankIc": round(float(np.mean([observation["rankIc"] for observation in observations])), 4),
+        "meanPearsonCorr": round(
+            float(np.mean([observation["pearsonCorr"] for observation in observations])),
+            4,
+        ),
         "meanTopReturnPct": round(float(np.mean([observation["topReturn"] for observation in observations])) * 100, 2),
         "meanBottomReturnPct": round(
             float(np.mean([observation["bottomReturn"] for observation in observations])) * 100,

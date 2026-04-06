@@ -409,6 +409,73 @@ def test_momentum_window_spec_changes_ranking_scores() -> None:
     assert long_scores["SPY"] > long_scores["QQQ"]
 
 
+def test_prediction_supplement_changes_momentum_scores() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106, 107, 108, 109],
+            "QQQ": [100, 103, 105, 107, 108, 110, 112, 113, 115],
+            "TLT": [100, 100, 99, 100, 101, 102, 101, 101, 102],
+        },
+        index=[
+            "2025-01-01",
+            "2025-01-02",
+            "2025-01-03",
+            "2025-01-04",
+            "2025-01-05",
+            "2025-01-06",
+            "2025-01-07",
+            "2025-01-08",
+            "2025-01-09",
+        ],
+    )
+    volumes = pd.DataFrame(
+        {
+            "SPY": [1_000_000, 1_020_000, 1_010_000, 1_030_000, 1_040_000, 1_050_000, 1_045_000, 1_060_000, 1_070_000],
+            "QQQ": [900_000, 940_000, 960_000, 970_000, 990_000, 1_000_000, 1_010_000, 1_030_000, 1_050_000],
+            "TLT": [800_000, 805_000, 810_000, 815_000, 820_000, 825_000, 830_000, 835_000, 840_000],
+        },
+        index=closes.index,
+    )
+    returns = closes.pct_change().dropna()
+    volume_history = volumes.loc[returns.index]
+
+    baseline_selection = build_selection_spec(
+        "full_universe_momentum_tilt",
+        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "windowSpec": {"unit": "bars", "value": 3}},
+    )
+    supplemented_selection = build_selection_spec(
+        "full_universe_momentum_tilt",
+        score_parameters={
+            "tilt_strength": 0.35,
+            "tilt_shape": 1.0,
+            "windowSpec": {"unit": "bars", "value": 3},
+            "predictionSupplement": {
+                "horizonSpec": {"unit": "bars", "value": 2},
+                "minTrainSamples": 3,
+                "signalWeight": 0.8,
+                "linearWeight": 0.2,
+            },
+        },
+    )
+
+    baseline_scores = compute_strategy_score_series(
+        returns,
+        volume_history,
+        baseline_selection,
+        bars_per_year=252,
+    )
+    supplemented_scores = compute_strategy_score_series(
+        returns,
+        volume_history,
+        supplemented_selection,
+        bars_per_year=252,
+    )
+
+    assert baseline_scores is not None
+    assert supplemented_scores is not None
+    assert not baseline_scores.equals(supplemented_scores)
+
+
 def test_convert_window_spec_to_bars_supports_duration_units() -> None:
     assert convert_window_spec_to_bars({"unit": "bars", "value": 8}, bars_per_year=252) == 8
     assert convert_window_spec_to_bars({"unit": "days", "value": 5}, bars_per_year=252) == 5

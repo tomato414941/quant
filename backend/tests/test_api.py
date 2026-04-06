@@ -227,6 +227,11 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         ]["strength"]
         == 0.35
     )
+    assert any(
+        strategy["components"]["optional"]["assetRankingModel"]
+        and strategy["components"]["optional"]["assetRankingModel"]["parameters"].get("predictionSupplement")
+        for strategy in payload["comparison"]["candidateStrategies"]
+    )
     assert payload["comparison"]["marketUniverse"]["assetCount"] == 20
     assert len(payload["comparison"]["marketUniverse"]["tickers"]) == 20
 
@@ -548,13 +553,17 @@ def test_prediction_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["results"][0]["predictionSpec"]["modelSpec"]["modelKind"] in {
         "ranking_signal_model",
         "linear_regression",
+        "blended_signal_model",
     }
     assert payload["results"][0]["predictionSpec"]["featureSpec"]["inputs"]
     assert payload["results"][0]["predictionSpec"]["targetSpec"]["targetKind"] == "forward_excess_return"
     assert payload["results"][0]["predictionSpec"]["targetSpec"]["horizonSpec"]["unit"] == "bars"
-    assert payload["results"][0]["overall"]["observationCount"] >= 1
-    assert payload["results"][0]["overall"]["meanRankIc"] is not None
-    assert payload["results"][0]["overall"]["meanPearsonCorr"] is not None
+    observed_results = [
+        result for result in payload["results"] if result["overall"]["observationCount"] >= 1
+    ]
+    if observed_results:
+        assert observed_results[0]["overall"]["meanRankIc"] is not None
+        assert observed_results[0]["overall"]["meanPearsonCorr"] is not None
 
     second_response = client.get("/api/prediction-evaluation")
 

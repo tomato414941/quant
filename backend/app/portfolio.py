@@ -27,6 +27,7 @@ PORTFOLIO_MODEL_LABELS = {
     "mean_risk_utility_conservative": "MeanRisk効用最大化 弱",
 }
 SUPPORTED_REBALANCE_SCHEDULES = {"hold", "every_bar", "month_end", "quarter_end", "year_end"}
+PREDICTION_FEATURE_NAMES = ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength")
 SUPPORTED_PORTFOLIO_STRATEGIES = {
     "full_universe",
     "full_universe_momentum_tilt",
@@ -647,6 +648,8 @@ def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str
         serialized["lowVolWeight"] = float(score_parameters["low_vol_weight"])
     if "macro_weight" in score_parameters:
         serialized["macroWeight"] = float(score_parameters["macro_weight"])
+    if "predictionSupplement" in score_parameters:
+        serialized["predictionSupplement"] = dict(score_parameters["predictionSupplement"])
 
     return serialized
 
@@ -995,6 +998,19 @@ def build_prediction_specs(
                     "scoreModelKind": ranking_spec.selection.score_model.kind,
                     "fitMode": "expanding",
                     "minTrainSamples": 50,
+                    **ranking_parameters,
+                },
+            ),
+            build_prediction_model_spec(
+                key=f"model__{ranking_spec.key}__blend",
+                kind="blended_signal_model",
+                label=f"{ranking_spec.selection.score_model.label} blend",
+                parameters={
+                    "scoreModelKind": ranking_spec.selection.score_model.kind,
+                    "fitMode": "expanding",
+                    "minTrainSamples": 50,
+                    "signalWeight": 0.8,
+                    "linearWeight": 0.2,
                     **ranking_parameters,
                 },
             ),
@@ -1518,7 +1534,7 @@ def select_assets(
     raise ValueError("Unsupported portfolio strategy.")
 
 
-def compute_strategy_score_series(
+def compute_strategy_score_series_base(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
     selection: SelectionSpec,
@@ -1561,6 +1577,13 @@ def compute_strategy_score_series(
     if score_kind == "volatility":
         return -returns.std()
     raise ValueError("Unsupported score model.")
+
+
+def extract_prediction_supplement(selection: SelectionSpec) -> dict[str, object] | None:
+    prediction_supplement = dict(selection.score_parameters).get("predictionSupplement")
+    if isinstance(prediction_supplement, dict):
+        return prediction_supplement
+    return None
 
 
 def get_ranking_window_bars(selection: SelectionSpec, *, bars_per_year: float) -> int:
@@ -1636,7 +1659,7 @@ def compute_prediction_feature_frame(
         selection,
         bars_per_year=bars_per_year,
     )
-    score_series = compute_strategy_score_series(
+    score_series = compute_strategy_score_series_base(
         returns,
         volume_history,
         selection,
@@ -1665,6 +1688,164 @@ def compute_prediction_feature_frame(
         }
     )
     return feature_frame.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+
+
+def fit_linear_prediction_beta(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    selection: SelectionSpec,
+    *,
+    bars_per_year: float,
+    horizon_spec: dict[str, object],
+    min_train_samples: int,
+) -> np.ndarray | None:
+    target_horizon_bars = convert_horizon_spec_to_bars(horizon_spec, bars_per_year=bars_per_year)
+    if len(returns) <= target_horizon_bars + 2:
+        return None
+
+    feature_count = len(PREDICTION_FEATURE_NAMES)
+    xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
+    xty = np.zeros(feature_count + 1, dtype="float64")
+    train_sample_count = 0
+
+    for index in range(2, len(returns) - target_horizon_bars + 1):
+        history_returns = returns.iloc[:index]
+        history_volumes = volume_history.iloc[:index] if volume_history is not None else None
+        selected_assets = select_assets(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        if len(selected_assets) < 2:
+            continue
+
+        base_scores = compute_strategy_score_series_base(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        if base_scores is None:
+            continue
+
+        selected_scores = base_scores.loc[selected_assets].dropna()
+        if len(selected_scores) < 2 or selected_scores.nunique() < 2:
+            continue
+
+        feature_frame = compute_prediction_feature_frame(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        aligned_features = feature_frame.loc[selected_scores.index, list(PREDICTION_FEATURE_NAMES)].astype("float64")
+
+        forward_window = returns.iloc[index : index + target_horizon_bars]
+        if len(forward_window) < target_horizon_bars:
+            continue
+        forward_returns = ((1 + forward_window).prod() - 1).loc[selected_scores.index].dropna()
+        if len(forward_returns) < 2 or forward_returns.nunique() < 2:
+            continue
+
+        aligned_features = aligned_features.loc[forward_returns.index]
+        if len(aligned_features) < 2:
+            continue
+
+        target_values = forward_returns - float(forward_returns.mean())
+        if target_values.nunique() < 2:
+            continue
+
+        design_matrix = np.column_stack(
+            [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+        )
+        xtx += design_matrix.T @ design_matrix
+        xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
+        train_sample_count += len(aligned_features)
+
+    if train_sample_count < min_train_samples:
+        return None
+    return np.linalg.pinv(xtx) @ xty
+
+
+def compute_prediction_supplemented_score_series(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    selection: SelectionSpec,
+    *,
+    bars_per_year: float,
+    base_score_series: pd.Series,
+) -> pd.Series:
+    prediction_supplement = extract_prediction_supplement(selection)
+    if prediction_supplement is None:
+        return base_score_series
+
+    horizon_spec = prediction_supplement.get("horizonSpec")
+    if not isinstance(horizon_spec, dict):
+        return base_score_series
+
+    beta = fit_linear_prediction_beta(
+        returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+        horizon_spec=horizon_spec,
+        min_train_samples=int(prediction_supplement.get("minTrainSamples", 50)),
+    )
+    if beta is None:
+        return base_score_series
+
+    feature_frame = compute_prediction_feature_frame(
+        returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+    )
+    aligned_features = feature_frame.loc[base_score_series.index, list(PREDICTION_FEATURE_NAMES)].astype("float64")
+    design_matrix = np.column_stack(
+        [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+    )
+    linear_prediction_values = pd.Series(
+        design_matrix @ beta,
+        index=aligned_features.index,
+        dtype="float64",
+    )
+    if linear_prediction_values.nunique() < 2:
+        return base_score_series
+
+    signal_weight = float(prediction_supplement.get("signalWeight", 0.8))
+    linear_weight = float(prediction_supplement.get("linearWeight", 0.2))
+    blended_scores = (
+        signal_weight * standardize_prediction_series(base_score_series)
+        + linear_weight * standardize_prediction_series(linear_prediction_values)
+    )
+    if blended_scores.nunique() < 2:
+        return base_score_series
+    return blended_scores
+
+
+def compute_strategy_score_series(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    selection: SelectionSpec,
+    *,
+    bars_per_year: float,
+) -> pd.Series | None:
+    base_score_series = compute_strategy_score_series_base(
+        returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+    )
+    if base_score_series is None:
+        return None
+    return compute_prediction_supplemented_score_series(
+        returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+        base_score_series=base_score_series,
+    )
 
 
 def evaluate_asset_ranking_spec(
@@ -1793,6 +1974,8 @@ def evaluate_prediction_spec(
     xty = np.zeros(feature_count + 1, dtype="float64")
     model_parameters = {key: value for key, value in prediction_spec.model_spec.parameters}
     min_train_samples = int(model_parameters.get("minTrainSamples", 1))
+    signal_weight = float(model_parameters.get("signalWeight", 0.8))
+    linear_weight = float(model_parameters.get("linearWeight", 0.2))
 
     for index in range(2, len(returns) - target_horizon_bars + 1):
         history_returns = returns.iloc[:index]
@@ -1848,7 +2031,7 @@ def evaluate_prediction_spec(
 
         if prediction_spec.model_spec.kind == "ranking_signal_model":
             prediction_values = aligned_scores
-        elif prediction_spec.model_spec.kind == "linear_regression":
+        elif prediction_spec.model_spec.kind in {"linear_regression", "blended_signal_model"}:
             design_matrix = np.column_stack(
                 [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
             )
@@ -1859,16 +2042,28 @@ def evaluate_prediction_spec(
                 continue
             beta = np.linalg.pinv(xtx) @ xty
             prediction_array = design_matrix @ beta
-            prediction_values = pd.Series(
+            linear_prediction_values = pd.Series(
                 prediction_array,
                 index=aligned_features.index,
                 dtype="float64",
             )
-            if prediction_values.nunique() < 2:
+            if linear_prediction_values.nunique() < 2:
                 xtx += design_matrix.T @ design_matrix
                 xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
                 train_sample_count += len(aligned_features)
                 continue
+            if prediction_spec.model_spec.kind == "linear_regression":
+                prediction_values = linear_prediction_values
+            else:
+                prediction_values = (
+                    signal_weight * standardize_prediction_series(aligned_scores)
+                    + linear_weight * standardize_prediction_series(linear_prediction_values)
+                )
+                if prediction_values.nunique() < 2:
+                    xtx += design_matrix.T @ design_matrix
+                    xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
+                    train_sample_count += len(aligned_features)
+                    continue
         else:
             raise ValueError("Unsupported prediction model kind.")
 
@@ -1980,6 +2175,15 @@ def summarize_prediction_observations(observations: list[dict]) -> dict:
         "hitRatePct": round(hit_count / len(observations) * 100, 2),
         "meanAssetCount": round(float(np.mean([observation["assetCount"] for observation in observations])), 2),
     }
+
+
+def standardize_prediction_series(series: pd.Series) -> pd.Series:
+    centered = series - float(series.mean())
+    std = float(series.std(ddof=0))
+    if std <= 0:
+        return pd.Series(0.0, index=series.index, dtype="float64")
+    standardized = centered / std
+    return standardized.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
 def expand_weights(

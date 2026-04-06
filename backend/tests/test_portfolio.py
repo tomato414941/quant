@@ -8,6 +8,7 @@ from app.portfolio import (
     build_selection_spec,
     build_strategy_spec,
     compare_portfolio_runs,
+    compute_trade_cost,
     compute_strategy_score_series,
     should_rebalance,
 )
@@ -151,6 +152,49 @@ def test_compare_portfolio_runs_returns_strategy_combinations() -> None:
     assert any(row["asset"] == "CASH" and row["weightPct"] == 20.0 for row in payload[0]["weights"])
     assert payload[0]["summary"]["turnoverPct"] >= 80.0
     assert len(payload[0]["series"]) == 6
+
+
+def test_compute_trade_cost_increases_when_liquidity_is_lower() -> None:
+    weight_delta = pd.Series([0.2, 0.2], index=["SPY", "BTC-USD"]).to_numpy(dtype="float64")
+    linear_cost_rates = pd.Series([0.0003, 0.0025], index=["SPY", "BTC-USD"]).to_numpy(dtype="float64")
+    impact_cost_rates = pd.Series([0.0002, 0.0025], index=["SPY", "BTC-USD"]).to_numpy(dtype="float64")
+    price_snapshot = pd.Series({"SPY": 500.0, "BTC-USD": 60_000.0}, dtype="float64")
+
+    high_liquidity_volumes = pd.DataFrame(
+        {
+            "SPY": [10_000_000.0, 11_000_000.0, 9_500_000.0],
+            "BTC-USD": [3_000.0, 3_200.0, 3_100.0],
+        }
+    )
+    low_liquidity_volumes = pd.DataFrame(
+        {
+            "SPY": [2_000_000.0, 2_100_000.0, 1_900_000.0],
+            "BTC-USD": [300.0, 320.0, 310.0],
+        }
+    )
+
+    high_liquidity_cost = compute_trade_cost(
+        weight_delta=weight_delta,
+        linear_cost_rates=linear_cost_rates,
+        impact_cost_rates=impact_cost_rates,
+        portfolio_equity=10_000.0,
+        price_snapshot=price_snapshot,
+        volume_history=high_liquidity_volumes,
+        adv_window_days=20,
+        min_adv_notional=1_000_000.0,
+    )
+    low_liquidity_cost = compute_trade_cost(
+        weight_delta=weight_delta,
+        linear_cost_rates=linear_cost_rates,
+        impact_cost_rates=impact_cost_rates,
+        portfolio_equity=10_000.0,
+        price_snapshot=price_snapshot,
+        volume_history=low_liquidity_volumes,
+        adv_window_days=20,
+        min_adv_notional=1_000_000.0,
+    )
+
+    assert low_liquidity_cost > high_liquidity_cost
 
 
 def test_dual_momentum_can_fall_back_to_cash() -> None:

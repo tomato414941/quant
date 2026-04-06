@@ -855,19 +855,33 @@ def cost_rate_from_parameters(parameters: dict[str, float]) -> float:
     return (commission_pct + slippage_pct) / 100
 
 
-def resolve_cost_model_rates(
+def impact_rate_from_parameters(parameters: dict[str, float]) -> float:
+    return float(parameters.get("impactCoefficientPct", 0.0)) / 100
+
+
+def resolve_cost_model_inputs(
     *,
     universe_columns: pd.Index,
     cost_model: dict,
-) -> tuple[float, np.ndarray]:
+) -> dict[str, np.ndarray | float | int]:
     kind = cost_model.get("kind", "flat_cost")
     parameters = cost_model.get("parameters", {})
     default_rate = cost_rate_from_parameters(parameters)
-    rates = np.repeat(default_rate, len(universe_columns)).astype("float64")
+    default_impact_rate = impact_rate_from_parameters(parameters)
+    linear_rates = np.repeat(default_rate, len(universe_columns)).astype("float64")
+    impact_rates = np.repeat(default_impact_rate, len(universe_columns)).astype("float64")
+    adv_window_days = max(1, int(float(parameters.get("advWindowDays", 20))))
+    min_adv_notional = float(parameters.get("minAdvNotional", 1_000_000.0))
 
     if kind == "flat_cost":
-        return default_rate, rates
-    if kind != "asset_specific_linear_cost":
+        return {
+            "defaultLinearRate": default_rate,
+            "linearRates": linear_rates,
+            "impactRates": impact_rates,
+            "advWindowDays": adv_window_days,
+            "minAdvNotional": min_adv_notional,
+        }
+    if kind not in {"asset_specific_linear_cost", "asset_specific_adv_cost"}:
         raise ValueError("Unsupported cost model.")
 
     overrides = cost_model.get("perAssetOverrides", {})
@@ -875,9 +889,51 @@ def resolve_cost_model_rates(
         override = overrides.get(str(asset))
         if not override:
             continue
-        rates[index] = cost_rate_from_parameters(override)
+        linear_rates[index] = cost_rate_from_parameters(override)
+        impact_rates[index] = impact_rate_from_parameters({**parameters, **override})
 
-    return default_rate, rates
+    return {
+        "defaultLinearRate": default_rate,
+        "linearRates": linear_rates,
+        "impactRates": impact_rates,
+        "advWindowDays": adv_window_days,
+        "minAdvNotional": min_adv_notional,
+    }
+
+
+def compute_trade_cost(
+    *,
+    weight_delta: np.ndarray,
+    linear_cost_rates: np.ndarray,
+    impact_cost_rates: np.ndarray,
+    portfolio_equity: float,
+    price_snapshot: pd.Series | None,
+    volume_history: pd.DataFrame | None,
+    adv_window_days: int,
+    min_adv_notional: float,
+) -> float:
+    linear_cost = float(np.dot(weight_delta, linear_cost_rates))
+    if (
+        portfolio_equity <= 0
+        or price_snapshot is None
+        or volume_history is None
+        or len(volume_history) == 0
+        or np.allclose(impact_cost_rates, 0.0)
+    ):
+        return linear_cost
+
+    recent_volumes = volume_history.tail(adv_window_days)
+    if recent_volumes.empty:
+        return linear_cost
+
+    aligned_prices = price_snapshot.reindex(recent_volumes.columns).astype("float64")
+    adv_shares = recent_volumes.mean(axis=0).astype("float64")
+    adv_notional = np.maximum((adv_shares * aligned_prices).to_numpy(dtype="float64"), min_adv_notional)
+    trade_notional = weight_delta * float(portfolio_equity)
+    participation = np.clip(trade_notional / adv_notional, 0.0, None)
+    impact_rates = impact_cost_rates * np.sqrt(participation)
+    impact_cost = float(np.dot(weight_delta, impact_rates))
+    return linear_cost + impact_cost
 
 
 def compare_portfolio_runs(
@@ -929,10 +985,15 @@ def compare_portfolio_runs(
         returns = strategy_closes.pct_change().dropna()
         if len(returns) < 6:
             raise ValueError("At least 6 return rows are required for portfolio comparison.")
-        default_transaction_cost, asset_transaction_costs = resolve_cost_model_rates(
+        cost_inputs = resolve_cost_model_inputs(
             universe_columns=returns.columns,
             cost_model=cost_model,
         )
+        default_transaction_cost = float(cost_inputs["defaultLinearRate"])
+        asset_transaction_costs = np.asarray(cost_inputs["linearRates"], dtype="float64")
+        asset_impact_costs = np.asarray(cost_inputs["impactRates"], dtype="float64")
+        adv_window_days = int(cost_inputs["advWindowDays"])
+        min_adv_notional = float(cost_inputs["minAdvNotional"])
 
         split_index = compute_split_index(len(returns), split_ratio)
         train_returns = returns.iloc[:split_index]
@@ -956,6 +1017,7 @@ def compare_portfolio_runs(
             transaction_cost=default_transaction_cost,
         )
         backtest = run_portfolio_backtest(
+            closes=strategy_closes,
             returns=returns,
             volumes=strategy_volumes,
             split_index=split_index,
@@ -968,6 +1030,9 @@ def compare_portfolio_runs(
             initial_capital=initial_capital,
             transaction_cost=default_transaction_cost,
             asset_transaction_costs=asset_transaction_costs,
+            asset_impact_costs=asset_impact_costs,
+            adv_window_days=adv_window_days,
+            min_adv_notional=min_adv_notional,
             max_weight=risk_controls.max_weight,
             rebalance_frequency=rebalance_frequency,
         )
@@ -1606,6 +1671,7 @@ def build_equal_weight_fallback(asset_count: int, raw_max_weight: float | None) 
 
 
 def run_portfolio_backtest(
+    closes: pd.DataFrame,
     returns: pd.DataFrame,
     volumes: pd.DataFrame | None,
     split_index: int,
@@ -1618,6 +1684,9 @@ def run_portfolio_backtest(
     initial_capital: float,
     transaction_cost: float,
     asset_transaction_costs: np.ndarray,
+    asset_impact_costs: np.ndarray,
+    adv_window_days: int,
+    min_adv_notional: float,
     max_weight: float | None,
     rebalance_frequency: str,
 ) -> dict:
@@ -1640,7 +1709,16 @@ def run_portfolio_backtest(
         trade_cost = 0.0
         if index == 0:
             trade_turnover = float(np.abs(current_weights).sum())
-            trade_cost = float(np.dot(np.abs(current_weights), asset_transaction_costs))
+            trade_cost = compute_trade_cost(
+                weight_delta=np.abs(current_weights),
+                linear_cost_rates=asset_transaction_costs,
+                impact_cost_rates=asset_impact_costs,
+                portfolio_equity=portfolio_equity,
+                price_snapshot=closes.iloc[index],
+                volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
+                adv_window_days=adv_window_days,
+                min_adv_notional=min_adv_notional,
+            )
         elif index > split_index and should_rebalance(
             previous_date=returns.index[index - 1],
             current_date=date,
@@ -1659,7 +1737,16 @@ def run_portfolio_backtest(
             )
             weight_delta = np.abs(rebalanced_weights - current_weights)
             trade_turnover = float(weight_delta.sum())
-            trade_cost = float(np.dot(weight_delta, asset_transaction_costs))
+            trade_cost = compute_trade_cost(
+                weight_delta=weight_delta,
+                linear_cost_rates=asset_transaction_costs,
+                impact_cost_rates=asset_impact_costs,
+                portfolio_equity=portfolio_equity,
+                price_snapshot=closes.iloc[index - 1],
+                volume_history=volumes.iloc[:index] if volumes is not None else None,
+                adv_window_days=adv_window_days,
+                min_adv_notional=min_adv_notional,
+            )
             current_weights = rebalanced_weights
             latest_weights = rebalanced_weights.copy()
             latest_selected_assets = list(current_selected_assets)

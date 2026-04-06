@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v17"
+RUN_STORE_LOGIC_VERSION = "v23"
 
 
 @dataclass(frozen=True)
@@ -103,7 +103,7 @@ def build_run_spec(
     *,
     run_kind: str,
     strategy: dict,
-    market_data: dict,
+    market_slice: dict,
     evaluation: dict,
     execution_assumptions: dict,
     portfolio_state: dict,
@@ -116,13 +116,11 @@ def build_run_spec(
         "logicVersion": RUN_STORE_LOGIC_VERSION,
         "runKind": run_kind,
         "strategy": strategy,
-        "marketData": market_data,
+        "marketSlice": market_slice,
+        "portfolioState": portfolio_state,
+        "capitalBase": capital_base,
         "evaluation": evaluation,
         "executionAssumptions": execution_assumptions,
-        "runInput": {
-            "portfolioState": portfolio_state,
-            "capitalBase": capital_base,
-        },
     }
     if generation is not None:
         run_spec["generation"] = generation

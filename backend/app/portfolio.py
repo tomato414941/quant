@@ -7,6 +7,7 @@ import statistics
 import numpy as np
 import pandas as pd
 from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
+from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, TimeframeSpec
 
 
 SUPPORTED_PORTFOLIO_MODELS = {
@@ -25,7 +26,7 @@ PORTFOLIO_MODEL_LABELS = {
     "mean_risk_utility": "MeanRisk効用最大化",
     "mean_risk_utility_conservative": "MeanRisk効用最大化 弱",
 }
-SUPPORTED_REBALANCE_FREQUENCIES = {"hold", "daily", "monthly", "quarterly", "annual"}
+SUPPORTED_REBALANCE_SCHEDULES = {"hold", "every_bar", "month_end", "quarter_end", "year_end"}
 SUPPORTED_PORTFOLIO_STRATEGIES = {
     "full_universe",
     "full_universe_momentum_tilt",
@@ -113,7 +114,7 @@ class SelectionSpec:
     feature_inputs: tuple[str, ...]
     universe_policy: UniversePolicySpec
     score_model: RankingModelSpec
-    score_parameters: tuple[tuple[str, float], ...]
+    score_parameters: tuple[tuple[str, object], ...]
     filter_rules: tuple[FilterRuleSpec, ...]
     fallback_rule: FallbackRuleSpec
 
@@ -131,7 +132,7 @@ class ExecutionPolicySpec:
     key: str
     label: str
     entry: str
-    rebalance_frequency: str
+    rebalance_schedule: str
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ class StrategySpec:
     label: str
     hypothesis: str | None
     description: str
+    timeframe: TimeframeSpec
     investment_universe: InvestmentUniverseSpec
     selection: SelectionSpec
     portfolio_model: PortfolioModelSpec
@@ -170,6 +172,7 @@ class AssetRankingSpec:
     key: str
     label: str
     description: str
+    timeframe: TimeframeSpec
     investment_universe: InvestmentUniverseSpec
     selection: SelectionSpec
     source_strategy_keys: tuple[str, ...]
@@ -234,7 +237,7 @@ def build_selection_spec(
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
-    score_parameters: dict[str, float] | None = None,
+    score_parameters: dict[str, object] | None = None,
 ) -> SelectionSpec:
     if strategy_type not in SUPPORTED_PORTFOLIO_STRATEGIES:
         raise ValueError("Unsupported portfolio strategy.")
@@ -328,27 +331,30 @@ def build_selection_spec(
     }
     default_score_parameters = {
         "full_universe": {},
-        "full_universe_momentum_tilt": {"tilt_strength": 0.5, "window_months": 12},
+        "full_universe_momentum_tilt": {
+            "tilt_strength": 0.5,
+            "windowSpec": {"unit": "bars", "value": 252},
+        },
         "full_universe_momentum_low_vol_tilt": {
             "tilt_strength": 0.25,
             "tilt_shape": 1.0,
-            "window_months": 12,
+            "windowSpec": {"unit": "bars", "value": 252},
             "momentum_weight": 0.7,
             "low_vol_weight": 0.3,
         },
         "full_universe_momentum_macro_tilt": {
             "tilt_strength": 0.25,
             "tilt_shape": 1.0,
-            "window_months": 12,
+            "windowSpec": {"unit": "bars", "value": 252},
             "momentum_weight": 0.85,
             "macro_weight": 0.15,
         },
-        "momentum_top3": {"window_months": 12},
-        "dual_momentum_top3": {"window_months": 12},
-        "trailing_momentum_low_vol_universe": {"window_months": 12},
-        "positive_momentum_universe": {"window_months": 12},
-        "positive_momentum_low_vol_universe": {"window_months": 12},
-        "positive_momentum_high_volume_universe": {"window_months": 12},
+        "momentum_top3": {"windowSpec": {"unit": "bars", "value": 252}},
+        "dual_momentum_top3": {"windowSpec": {"unit": "bars", "value": 252}},
+        "trailing_momentum_low_vol_universe": {"windowSpec": {"unit": "bars", "value": 252}},
+        "positive_momentum_universe": {"windowSpec": {"unit": "bars", "value": 252}},
+        "positive_momentum_low_vol_universe": {"windowSpec": {"unit": "bars", "value": 252}},
+        "positive_momentum_high_volume_universe": {"windowSpec": {"unit": "bars", "value": 252}},
     }
     filter_rules = {
         "full_universe": (),
@@ -397,6 +403,15 @@ def build_selection_spec(
         ),
     }
 
+    normalized_score_parameters = dict(default_score_parameters[strategy_type])
+    if score_parameters is not None:
+        normalized_score_parameters.update(score_parameters)
+    if "window_bars" in normalized_score_parameters and "windowSpec" not in normalized_score_parameters:
+        normalized_score_parameters["windowSpec"] = {
+            "unit": "bars",
+            "value": int(round(float(normalized_score_parameters.pop("window_bars")))),
+        }
+
     return SelectionSpec(
         key=key or strategy_type,
         strategy_type=strategy_type,
@@ -405,9 +420,7 @@ def build_selection_spec(
         feature_inputs=feature_inputs[strategy_type],
         universe_policy=universe_policies[strategy_type],
         score_model=score_models[strategy_type],
-        score_parameters=tuple(
-            sorted((score_parameters or default_score_parameters[strategy_type]).items())
-        ),
+        score_parameters=tuple(sorted(normalized_score_parameters.items())),
         filter_rules=filter_rules[strategy_type],
         fallback_rule=fallback_rules[strategy_type],
     )
@@ -454,15 +467,15 @@ def build_execution_policy_spec(
     key: str,
     label: str,
     entry: str,
-    rebalance_frequency: str,
+    rebalance_schedule: str,
 ) -> ExecutionPolicySpec:
-    if rebalance_frequency not in SUPPORTED_REBALANCE_FREQUENCIES:
-        raise ValueError("Unsupported execution policy rebalance frequency.")
+    if rebalance_schedule not in SUPPORTED_REBALANCE_SCHEDULES:
+        raise ValueError("Unsupported execution policy rebalance schedule.")
     return ExecutionPolicySpec(
         key=key,
         label=label,
         entry=entry,
-        rebalance_frequency=rebalance_frequency,
+        rebalance_schedule=rebalance_schedule,
     )
 
 
@@ -471,7 +484,7 @@ def serialize_execution_policy_spec(execution_policy: ExecutionPolicySpec) -> di
         "key": execution_policy.key,
         "label": execution_policy.label,
         "entry": execution_policy.entry,
-        "rebalanceFrequency": execution_policy.rebalance_frequency,
+        "rebalanceSchedule": execution_policy.rebalance_schedule,
     }
 
 
@@ -492,6 +505,7 @@ def build_risk_controls_spec(
 
 def build_strategy_spec(
     *,
+    timeframe: TimeframeSpec | None = None,
     investment_universe: InvestmentUniverseSpec,
     selection: SelectionSpec,
     portfolio_model: PortfolioModelSpec,
@@ -525,15 +539,16 @@ def build_strategy_spec(
         label=strategy_label,
         hypothesis=hypothesis,
         description=description or selection.description,
+        timeframe=timeframe or DEFAULT_DAILY_TIMEFRAME,
         investment_universe=investment_universe,
         selection=selection,
         portfolio_model=portfolio_model,
         execution_policy=execution_policy
         or build_execution_policy_spec(
-            key="annual",
+            key="year_end",
             label="年次",
             entry="train_once_then_periodic_rebalance",
-            rebalance_frequency="annual",
+            rebalance_schedule="year_end",
         ),
         risk_controls=risk_controls,
         extensions=tuple(sorted((extensions or {}).items())),
@@ -580,12 +595,12 @@ def serialize_risk_controls_spec(risk_controls: RiskControlsSpec) -> dict:
     }
 
 
-def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str, float]:
+def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str, object]:
     score_parameters = dict(strategy.selection.score_parameters)
-    serialized: dict[str, float] = {}
+    serialized: dict[str, object] = {}
 
-    if "window_months" in score_parameters:
-        serialized["windowMonths"] = float(score_parameters["window_months"])
+    if "windowSpec" in score_parameters:
+        serialized["windowSpec"] = dict(score_parameters["windowSpec"])
     if "momentum_weight" in score_parameters:
         serialized["momentumWeight"] = float(score_parameters["momentum_weight"])
     if "low_vol_weight" in score_parameters:
@@ -642,6 +657,13 @@ def serialize_strategy_spec(strategy: StrategySpec) -> dict:
         "description": strategy.description,
         "components": {
             "core": {
+                "dataResolution": {
+                    "key": strategy.timeframe.key,
+                    "label": strategy.timeframe.label,
+                    "yfinanceInterval": strategy.timeframe.yfinance_interval,
+                    "barsPerYear": strategy.timeframe.bars_per_year,
+                    "barSeconds": strategy.timeframe.bar_seconds,
+                },
                 "investmentUniverse": {
                     "key": strategy.investment_universe.key,
                     "label": strategy.investment_universe.label,
@@ -682,6 +704,13 @@ def serialize_asset_ranking_spec(
         "key": ranking_spec.key,
         "label": ranking_spec.label,
         "description": ranking_spec.description,
+        "timeframe": {
+            "key": ranking_spec.timeframe.key,
+            "label": ranking_spec.timeframe.label,
+            "yfinanceInterval": ranking_spec.timeframe.yfinance_interval,
+            "barsPerYear": ranking_spec.timeframe.bars_per_year,
+            "barSeconds": ranking_spec.timeframe.bar_seconds,
+        },
         "investmentUniverse": {
             "key": ranking_spec.investment_universe.key,
             "label": ranking_spec.investment_universe.label,
@@ -714,6 +743,14 @@ def serialize_asset_ranking_spec(
     }
 
 
+def freeze_parameter_value(value: object) -> object:
+    if isinstance(value, dict):
+        return tuple((str(key), freeze_parameter_value(nested_value)) for key, nested_value in sorted(value.items()))
+    if isinstance(value, list):
+        return tuple(freeze_parameter_value(item) for item in value)
+    return value
+
+
 def build_asset_ranking_specs(
     strategies: list[StrategySpec],
 ) -> list[AssetRankingSpec]:
@@ -735,13 +772,17 @@ def build_asset_ranking_specs(
         if selection.score_model.kind == "none":
             continue
         signature = (
+            strategy.timeframe.key,
             strategy.investment_universe.tickers,
             selection.strategy_type,
             selection.score_model.kind,
             tuple(selection.feature_inputs),
             tuple(filter_rule.key for filter_rule in selection.filter_rules),
             selection.fallback_rule.key,
-            tuple(sorted(extract_ranking_score_parameters(selection).items())),
+            tuple(
+                (key, freeze_parameter_value(value))
+                for key, value in sorted(extract_ranking_score_parameters(selection).items())
+            ),
         )
         grouped.setdefault(signature, []).append(strategy)
 
@@ -750,6 +791,7 @@ def build_asset_ranking_specs(
         representative = strategies[0].selection
         filter_label = " / ".join(filter_rule.label for filter_rule in representative.filter_rules)
         label_parts = [
+            strategies[0].timeframe.label,
             strategies[0].investment_universe.label,
             representative.universe_policy.label,
             representative.score_model.label,
@@ -757,7 +799,12 @@ def build_asset_ranking_specs(
         ranking_score_parameters = extract_ranking_score_parameters(representative)
         if ranking_score_parameters:
             parameter_label = ", ".join(
-                f"{key}={value:.2f}" for key, value in ranking_score_parameters.items()
+                (
+                    f"{key}={value['value']} {value['unit']}"
+                    if isinstance(value, dict) and "unit" in value and "value" in value
+                    else f"{key}={float(value):.2f}"
+                )
+                for key, value in ranking_score_parameters.items()
             )
             label_parts.append(parameter_label)
         if filter_label:
@@ -767,6 +814,7 @@ def build_asset_ranking_specs(
                 key=f"ranking__{representative.key}",
                 label=" / ".join(label_parts),
                 description=representative.description,
+                timeframe=strategies[0].timeframe,
                 investment_universe=strategies[0].investment_universe,
                 selection=representative,
                 source_strategy_keys=tuple(strategy.key for strategy in strategies),
@@ -780,11 +828,11 @@ def build_asset_ranking_specs(
 
 def extract_ranking_score_parameters(
     selection: SelectionSpec,
-) -> dict[str, float]:
+) -> dict[str, object]:
     score_parameters = dict(selection.score_parameters)
-    extracted: dict[str, float] = {}
-    if "window_months" in score_parameters:
-        extracted["windowMonths"] = float(score_parameters["window_months"])
+    extracted: dict[str, object] = {}
+    if "windowSpec" in score_parameters:
+        extracted["windowSpec"] = dict(score_parameters["windowSpec"])
     if selection.score_model.kind == "momentum_low_vol":
         extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.7))
         extracted["lowVolWeight"] = float(score_parameters.get("low_vol_weight", 0.3))
@@ -794,6 +842,32 @@ def extract_ranking_score_parameters(
         extracted["macroWeight"] = float(score_parameters.get("macro_weight", 0.15))
         return extracted
     return extracted
+
+
+def convert_window_spec_to_bars(
+    window_spec: dict[str, object],
+    *,
+    bars_per_year: float,
+) -> int:
+    unit = str(window_spec.get("unit", "bars"))
+    value = float(window_spec.get("value", bars_per_year))
+    bars_per_trading_day = bars_per_year / 252
+    bars_per_week = bars_per_year / 52
+    bars_per_month = bars_per_year / 12
+
+    if unit == "bars":
+        configured_bars = value
+    elif unit == "days":
+        configured_bars = value * bars_per_trading_day
+    elif unit == "weeks":
+        configured_bars = value * bars_per_week
+    elif unit == "months":
+        configured_bars = value * bars_per_month
+    elif unit == "years":
+        configured_bars = value * bars_per_year
+    else:
+        raise ValueError("Unsupported windowSpec unit.")
+    return max(1, int(round(configured_bars)))
 
 
 def build_portfolio_state(
@@ -962,7 +1036,7 @@ def compare_portfolio_runs(
 
     runs: list[dict] = []
     for strategy in strategies:
-        rebalance_frequency = strategy.execution_policy.rebalance_frequency
+        rebalance_schedule = strategy.execution_policy.rebalance_schedule
         strategy_universe = [
             asset
             for asset in strategy.investment_universe.tickers
@@ -1027,7 +1101,7 @@ def compare_portfolio_runs(
             adv_window_bars=adv_window_bars,
             min_adv_notional=min_adv_notional,
             max_weight=risk_controls.max_weight,
-            rebalance_frequency=rebalance_frequency,
+            rebalance_schedule=rebalance_schedule,
         )
 
         runs.append(
@@ -1103,7 +1177,7 @@ def compare_portfolio_models(
                     key="hold",
                     label="保有",
                     entry="hold",
-                    rebalance_frequency="hold",
+                    rebalance_schedule="hold",
                 ),
                 risk_controls=build_risk_controls_spec(
                     max_investment_ratio=1.0,
@@ -1259,9 +1333,10 @@ def compute_strategy_score_series(
 
 def get_ranking_window_bars(selection: SelectionSpec, *, bars_per_year: float) -> int:
     score_parameters = dict(selection.score_parameters)
-    configured_months = float(score_parameters.get("window_months", 12))
-    configured_bars = int(round(configured_months * bars_per_year / 12))
-    return max(1, configured_bars)
+    window_spec = score_parameters.get("windowSpec")
+    if isinstance(window_spec, dict):
+        return convert_window_spec_to_bars(window_spec, bars_per_year=bars_per_year)
+    return max(1, int(round(float(bars_per_year))))
 
 
 def compute_trailing_total_returns(
@@ -1739,7 +1814,7 @@ def run_portfolio_backtest(
     adv_window_bars: int,
     min_adv_notional: float,
     max_weight: float | None,
-    rebalance_frequency: str,
+    rebalance_schedule: str,
 ) -> dict:
     portfolio_equity = initial_capital
     portfolio_returns: list[float] = []
@@ -1773,7 +1848,7 @@ def run_portfolio_backtest(
         elif index > split_index and should_rebalance(
             previous_date=returns.index[index - 1],
             current_date=date,
-            rebalance_frequency=rebalance_frequency,
+            rebalance_schedule=rebalance_schedule,
         ):
             current_selected_assets, rebalanced_weights = compute_portfolio_allocation(
                 history_returns=returns.iloc[:index],
@@ -1885,10 +1960,10 @@ def summarize_segment_from_returns(
     return {
         "startDate": dates[0],
         "endDate": dates[-1],
-        "dayCount": len(dates),
-        "portfolio": summarize_metrics_from_daily_returns(
+        "barCount": len(dates),
+        "portfolio": summarize_metrics_from_bar_returns(
             dates=dates,
-            daily_returns=portfolio_returns,
+            bar_returns=portfolio_returns,
             bars_per_year=bars_per_year,
             equity_key="portfolioEquity",
             turnover=turnover,
@@ -1916,23 +1991,23 @@ def compute_split_index(length: int, split_ratio: float) -> int:
     return split_index
 
 
-def summarize_metrics_from_daily_returns(
+def summarize_metrics_from_bar_returns(
     dates: list[str],
-    daily_returns: list[float],
+    bar_returns: list[float],
     bars_per_year: float,
     equity_key: str,
     turnover: float,
 ) -> dict:
     equity = 100.0
     series = []
-    for date, daily_return in zip(dates, daily_returns, strict=True):
-        equity *= 1 + daily_return
+    for date, bar_return in zip(dates, bar_returns, strict=True):
+        equity *= 1 + bar_return
         series.append({"date": date, equity_key: round(equity, 2)})
     return summarize_portfolio_metrics(
         final_value=equity,
         initial_value=100.0,
-        periods=len(daily_returns),
-        returns=daily_returns,
+        periods=len(bar_returns),
+        returns=bar_returns,
         bars_per_year=bars_per_year,
         series=series,
         equity_key=equity_key,
@@ -1940,21 +2015,21 @@ def summarize_metrics_from_daily_returns(
     )
 
 
-def should_rebalance(previous_date, current_date, rebalance_frequency: str) -> bool:
-    if rebalance_frequency == "hold":
+def should_rebalance(previous_date, current_date, rebalance_schedule: str) -> bool:
+    if rebalance_schedule == "hold":
         return False
 
     previous_timestamp = pd.Timestamp(previous_date)
     current_timestamp = pd.Timestamp(current_date)
-    if rebalance_frequency == "daily":
+    if rebalance_schedule == "every_bar":
         return previous_timestamp.normalize() != current_timestamp.normalize()
-    if rebalance_frequency == "monthly":
+    if rebalance_schedule == "month_end":
         return previous_timestamp.month != current_timestamp.month or previous_timestamp.year != current_timestamp.year
-    if rebalance_frequency == "quarterly":
+    if rebalance_schedule == "quarter_end":
         return previous_timestamp.quarter != current_timestamp.quarter or previous_timestamp.year != current_timestamp.year
-    if rebalance_frequency == "annual":
+    if rebalance_schedule == "year_end":
         return previous_timestamp.year != current_timestamp.year
-    raise ValueError("Unsupported rebalance frequency.")
+    raise ValueError("Unsupported rebalance schedule.")
 
 
 def resolve_initial_weights(

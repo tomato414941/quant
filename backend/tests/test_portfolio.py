@@ -8,6 +8,7 @@ from app.portfolio import (
     build_selection_spec,
     build_strategy_spec,
     compare_portfolio_runs,
+    convert_window_spec_to_bars,
     compute_trade_cost,
     compute_strategy_score_series,
     should_rebalance,
@@ -35,7 +36,7 @@ def make_strategy(
     *,
     max_investment_ratio: float = 1.0,
     max_weight: float | None = None,
-    score_parameters: dict[str, float] | None = None,
+    score_parameters: dict[str, float | str | bool] | None = None,
 ):
     return build_strategy_spec(
         investment_universe=build_investment_universe_spec(
@@ -363,7 +364,7 @@ def test_full_universe_momentum_tilt_overweights_stronger_assets() -> None:
     assert tilted_weight_map["TLT"] < baseline_weight_map["TLT"]
 
 
-def test_momentum_window_months_changes_ranking_scores() -> None:
+def test_momentum_window_spec_changes_ranking_scores() -> None:
     closes = pd.DataFrame(
         {
             "SPY": [100, 104, 108, 112, 116, 120, 124],
@@ -382,11 +383,11 @@ def test_momentum_window_months_changes_ranking_scores() -> None:
     returns = closes.pct_change().dropna()
     short_window_strategy = build_selection_spec(
         "full_universe_momentum_tilt",
-        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 0.1},
+        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "windowSpec": {"unit": "bars", "value": 2}},
     )
     long_window_strategy = build_selection_spec(
         "full_universe_momentum_tilt",
-        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 0.3},
+        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "windowSpec": {"unit": "bars", "value": 6}},
     )
 
     short_scores = compute_strategy_score_series(
@@ -408,9 +409,17 @@ def test_momentum_window_months_changes_ranking_scores() -> None:
     assert long_scores["SPY"] > long_scores["QQQ"]
 
 
-def test_should_rebalance_supports_daily_frequency() -> None:
-    assert should_rebalance("2025-01-01", "2025-01-02", "daily") is True
-    assert should_rebalance("2025-01-01", "2025-01-01", "daily") is False
+def test_convert_window_spec_to_bars_supports_duration_units() -> None:
+    assert convert_window_spec_to_bars({"unit": "bars", "value": 8}, bars_per_year=252) == 8
+    assert convert_window_spec_to_bars({"unit": "days", "value": 5}, bars_per_year=252) == 5
+    assert convert_window_spec_to_bars({"unit": "weeks", "value": 2}, bars_per_year=252) == 10
+    assert convert_window_spec_to_bars({"unit": "months", "value": 3}, bars_per_year=252) == 63
+    assert convert_window_spec_to_bars({"unit": "years", "value": 1}, bars_per_year=252) == 252
+
+
+def test_should_rebalance_supports_every_bar_schedule() -> None:
+    assert should_rebalance("2025-01-01", "2025-01-02", "every_bar") is True
+    assert should_rebalance("2025-01-01", "2025-01-01", "every_bar") is False
 
 
 def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
@@ -450,7 +459,7 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         execution_assumptions={
             "kind": "close_execution_assumptions",
             "label": "終値約定",
-            "parameters": {"entry": "hold", "rebalanceFrequency": "hold"},
+            "parameters": {"entry": "hold", "rebalanceSchedule": "hold"},
             "costModel": {
                 "kind": "flat_cost",
                 "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},
@@ -473,7 +482,7 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         execution_assumptions={
             "kind": "close_execution_assumptions",
             "label": "終値約定",
-            "parameters": {"entry": "hold", "rebalanceFrequency": "hold"},
+            "parameters": {"entry": "hold", "rebalanceSchedule": "hold"},
             "costModel": {
                 "kind": "asset_specific_linear_cost",
                 "parameters": {"commissionPct": 0.1, "slippagePct": 0.0},

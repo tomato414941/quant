@@ -16,6 +16,7 @@ from app.portfolio import (
 )
 from app.comparison_models import ComparisonSpec, ConditionVariant, EvaluationSpec
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_spec
+from app.timeframe_models import TimeframeSpec
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -31,65 +32,118 @@ def collect_comparison_tickers(comparison: ComparisonSpec) -> list[str]:
     return list(seen.keys())
 
 
+def collect_comparison_timeframes(comparison: ComparisonSpec) -> list[TimeframeSpec]:
+    seen: dict[str, TimeframeSpec] = {}
+    for strategy in (
+        comparison.candidate_strategies + comparison.reference_strategies
+    ):
+        seen.setdefault(strategy.timeframe.key, strategy.timeframe)
+    return sorted(
+        seen.values(),
+        key=lambda timeframe: (timeframe.bar_seconds, timeframe.key),
+    )
+
+
+def collect_required_market_fields(comparison: ComparisonSpec) -> list[str]:
+    fields: dict[str, None] = {"close": None}
+    for strategy in (
+        comparison.candidate_strategies + comparison.reference_strategies
+    ):
+        for field in strategy.selection.feature_inputs:
+            fields.setdefault(field, None)
+    if comparison.run_spec.execution_assumptions.cost_model.kind == "asset_specific_adv_cost":
+        fields.setdefault("volume", None)
+    return list(fields.keys())
+
+
+def fetch_market_data_by_timeframe(
+    comparison: ComparisonSpec,
+    *,
+    period: str,
+    fetch_market_universe_bundle,
+) -> tuple[dict[str, dict], dict[str, dict], list[str], list[TimeframeSpec]]:
+    comparison_tickers = collect_comparison_tickers(comparison)
+    timeframes = collect_comparison_timeframes(comparison)
+    bundles_by_timeframe: dict[str, dict] = {}
+    metadata_by_timeframe: dict[str, dict] = {}
+
+    for timeframe in timeframes:
+        market_bundle, metadata = fetch_market_universe_bundle(
+            tickers=comparison_tickers,
+            period=period,
+            timeframe=timeframe.yfinance_interval,
+        )
+        bundles_by_timeframe[timeframe.key] = market_bundle
+        metadata_by_timeframe[timeframe.key] = metadata
+
+    return bundles_by_timeframe, metadata_by_timeframe, comparison_tickers, timeframes
+
+
 def build_dashboard_payload(
     comparison: ComparisonSpec,
     *,
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
-    comparison_tickers = collect_comparison_tickers(comparison)
-    market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=comparison_tickers,
-        period=comparison.market_data.period,
-        timeframe=comparison.market_data.timeframe.yfinance_interval,
+    (
+        market_bundles_by_timeframe,
+        metadata_by_timeframe,
+        comparison_tickers,
+        comparison_timeframes,
+    ) = fetch_market_data_by_timeframe(
+        comparison,
+        period=comparison.run_spec.market_slice.period,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     candidate_runs, candidate_run_store_summary = build_strategy_runs(
         comparison=comparison,
         strategy_specs=comparison.candidate_strategies,
-        closes=market_bundle["closes"],
-        volumes=market_bundle["volumes"],
-        market_data_period=comparison.market_data.period,
-        dataset_metadata=metadata,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
     )
     reference_runs, reference_run_store_summary = build_strategy_runs(
         comparison=comparison,
         strategy_specs=comparison.reference_strategies,
-        closes=market_bundle["closes"],
-        volumes=market_bundle["volumes"],
-        market_data_period=comparison.market_data.period,
-        dataset_metadata=metadata,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
     )
     sanity_checks = []
+    required_fields = collect_required_market_fields(comparison)
     total_cached_runs = (
         candidate_run_store_summary.cached_run_count + reference_run_store_summary.cached_run_count
     )
     total_computed_runs = (
         candidate_run_store_summary.computed_run_count + reference_run_store_summary.computed_run_count
     )
-    for period in comparison.market_data.sanity_periods:
-        sanity_bundle, sanity_metadata = fetch_market_universe_bundle(
-            tickers=comparison_tickers,
+    for period in comparison.run_spec.market_slice.sanity_periods:
+        (
+            sanity_bundles_by_timeframe,
+            sanity_metadata_by_timeframe,
+            _sanity_tickers,
+            sanity_timeframes,
+        ) = fetch_market_data_by_timeframe(
+            comparison,
             period=period,
-            timeframe=comparison.market_data.timeframe.yfinance_interval,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
         sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
             comparison=comparison,
             strategy_specs=comparison.candidate_strategies,
-            closes=sanity_bundle["closes"],
-            volumes=sanity_bundle["volumes"],
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
             market_data_period=period,
-            dataset_metadata=sanity_metadata,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
         )
         sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
             comparison=comparison,
             strategy_specs=comparison.reference_strategies,
-            closes=sanity_bundle["closes"],
-            volumes=sanity_bundle["volumes"],
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
             market_data_period=period,
-            dataset_metadata=sanity_metadata,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
         )
         total_cached_runs += (
@@ -105,7 +159,9 @@ def build_dashboard_payload(
                 "period": period,
                 "evaluation": serialize_evaluation(
                     comparison,
-                    sanity_metadata,
+                    sanity_metadata_by_timeframe,
+                    sanity_timeframes,
+                    fields=required_fields,
                     period_override=period,
                 ),
                 "runStoreSummary": {
@@ -124,7 +180,11 @@ def build_dashboard_payload(
         )
 
     return {
-        "comparison": serialize_comparison(comparison, metadata),
+        "comparison": serialize_comparison(
+            comparison,
+            metadata_by_timeframe,
+            comparison_timeframes,
+        ),
         "candidateRuns": candidate_runs,
         "referenceRuns": reference_runs,
         "runStoreSummary": {
@@ -141,22 +201,29 @@ def build_condition_sweep_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
-    comparison_tickers = collect_comparison_tickers(comparison)
-    market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=comparison_tickers,
-        period=comparison.market_data.period,
-        timeframe=comparison.market_data.timeframe.yfinance_interval,
+    (
+        market_bundles_by_timeframe,
+        metadata_by_timeframe,
+        _comparison_tickers,
+        comparison_timeframes,
+    ) = fetch_market_data_by_timeframe(
+        comparison,
+        period=comparison.run_spec.market_slice.period,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     results, run_store_summary = build_condition_sweep_runs(
         comparison=comparison,
-        closes=market_bundle["closes"],
-        volumes=market_bundle["volumes"],
-        market_data_period=comparison.market_data.period,
-        dataset_metadata=metadata,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
     )
     return {
-        "comparison": serialize_comparison(comparison, metadata),
+        "comparison": serialize_comparison(
+            comparison,
+            metadata_by_timeframe,
+            comparison_timeframes,
+        ),
         "conditionVariants": [
             serialize_condition_variant(condition_variant)
             for condition_variant in comparison.condition_variants
@@ -173,22 +240,29 @@ def build_ranking_evaluation_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
-    comparison_tickers = collect_comparison_tickers(comparison)
-    market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=comparison_tickers,
-        period=comparison.market_data.period,
-        timeframe=comparison.market_data.timeframe.yfinance_interval,
+    (
+        market_bundles_by_timeframe,
+        metadata_by_timeframe,
+        _comparison_tickers,
+        comparison_timeframes,
+    ) = fetch_market_data_by_timeframe(
+        comparison,
+        period=comparison.run_spec.market_slice.period,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     results, run_store_summary = build_ranking_evaluation_runs(
         comparison=comparison,
-        closes=market_bundle["closes"],
-        volumes=market_bundle["volumes"],
-        market_data_period=comparison.market_data.period,
-        dataset_metadata=metadata,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
     )
     return {
-        "comparison": serialize_comparison(comparison, metadata),
+        "comparison": serialize_comparison(
+            comparison,
+            metadata_by_timeframe,
+            comparison_timeframes,
+        ),
         "resultCount": len(results),
         "runStoreSummary": run_store_summary.to_payload(),
         "results": results,
@@ -224,22 +298,29 @@ def generate_parameter_sweep_runs_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
-    comparison_tickers = collect_comparison_tickers(comparison)
-    market_bundle, metadata = fetch_market_universe_bundle(
-        tickers=comparison_tickers,
-        period=comparison.market_data.period,
-        timeframe=comparison.market_data.timeframe.yfinance_interval,
+    (
+        market_bundles_by_timeframe,
+        metadata_by_timeframe,
+        _comparison_tickers,
+        comparison_timeframes,
+    ) = fetch_market_data_by_timeframe(
+        comparison,
+        period=comparison.run_spec.market_slice.period,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     results, run_store_summary = build_parameter_sweep_runs(
         comparison=comparison,
-        closes=market_bundle["closes"],
-        volumes=market_bundle["volumes"],
-        market_data_period=comparison.market_data.period,
-        dataset_metadata=metadata,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
     )
     return {
-        "comparison": serialize_comparison(comparison, metadata),
+        "comparison": serialize_comparison(
+            comparison,
+            metadata_by_timeframe,
+            comparison_timeframes,
+        ),
         "generation": {
             "method": "parameter_sweep",
             "batchKey": "local_tilt_search_9m_v1",
@@ -258,22 +339,28 @@ def build_run_result_store(comparison: ComparisonSpec) -> FileRunResultStore:
     return FileRunResultStore(root_dir)
 
 
-def serialize_market_data_context(
-    comparison: ComparisonSpec,
-    dataset_metadata: dict[str, str],
+def serialize_timeframe(timeframe: TimeframeSpec) -> dict:
+    return {
+        "key": timeframe.key,
+        "label": timeframe.label,
+        "barsPerYear": timeframe.bars_per_year,
+        "barSeconds": timeframe.bar_seconds,
+    }
+
+
+def serialize_market_slice_context(
     *,
+    comparison: ComparisonSpec,
+    timeframe: TimeframeSpec,
+    dataset_metadata: dict[str, str],
+    fields: list[str],
     period_override: str | None = None,
 ) -> dict:
     return {
-        "period": period_override or comparison.market_data.period,
-        "sanityPeriods": comparison.market_data.sanity_periods,
-        "timeframe": {
-            "key": comparison.market_data.timeframe.key,
-            "label": comparison.market_data.timeframe.label,
-            "barsPerYear": comparison.market_data.timeframe.bars_per_year,
-            "barSeconds": comparison.market_data.timeframe.bar_seconds,
-        },
-        "fields": comparison.market_data.fields,
+        "period": period_override or comparison.run_spec.market_slice.period,
+        "sanityPeriods": comparison.run_spec.market_slice.sanity_periods,
+        "timeframe": serialize_timeframe(timeframe),
+        "fields": fields,
         "source": dataset_metadata["source"],
         "alignedStartDate": dataset_metadata["aligned_start_date"],
         "alignedEndDate": dataset_metadata["aligned_end_date"],
@@ -294,14 +381,14 @@ def serialize_cost_model_spec(cost_model) -> dict:
 
 def serialize_execution_assumptions(comparison: ComparisonSpec) -> dict:
     return {
-        "kind": comparison.execution_assumptions.kind,
-        "label": comparison.execution_assumptions.label,
+        "kind": comparison.run_spec.execution_assumptions.kind,
+        "label": comparison.run_spec.execution_assumptions.label,
         "parameters": {
             key: value
-            for key, value in comparison.execution_assumptions.parameters.items()
+            for key, value in comparison.run_spec.execution_assumptions.parameters.items()
         },
         "costModel": serialize_cost_model_spec(
-            comparison.execution_assumptions.cost_model
+            comparison.run_spec.execution_assumptions.cost_model
         ),
     }
 
@@ -314,23 +401,62 @@ def serialize_evaluation_settings(evaluation: EvaluationSpec) -> dict:
 
 def serialize_evaluation(
     comparison: ComparisonSpec,
-    dataset_metadata: dict[str, str],
+    metadata_by_timeframe: dict[str, dict[str, str]],
+    timeframes: list[TimeframeSpec],
     *,
+    fields: list[str],
     period_override: str | None = None,
 ) -> dict:
     return {
         "kind": "evaluation_spec",
         "schemaVersion": "v1",
-        "marketDataContext": serialize_market_data_context(
-            comparison,
-            dataset_metadata,
-            period_override=period_override,
-        ),
-        "evaluationSettings": serialize_evaluation_settings(comparison.evaluation),
+        "marketDataContexts": [
+            serialize_market_slice_context(
+                comparison=comparison,
+                timeframe=timeframe,
+                dataset_metadata=metadata_by_timeframe[timeframe.key],
+                fields=fields,
+                period_override=period_override,
+            )
+            for timeframe in timeframes
+            if timeframe.key in metadata_by_timeframe
+        ],
+        "evaluationSettings": serialize_evaluation_settings(comparison.run_spec.evaluation),
     }
 
 
-def serialize_comparison(comparison: ComparisonSpec, dataset_metadata: dict[str, str]) -> dict:
+def serialize_run_spec(
+    comparison: ComparisonSpec,
+    metadata_by_timeframe: dict[str, dict[str, str]],
+    timeframes: list[TimeframeSpec],
+) -> dict:
+    fields = collect_required_market_fields(comparison)
+    return {
+        "kind": "comparison_run_spec",
+        "schemaVersion": "v1",
+        "marketSlice": {
+            "period": comparison.run_spec.market_slice.period,
+            "sanityPeriods": comparison.run_spec.market_slice.sanity_periods,
+            "timeframes": [serialize_timeframe(timeframe) for timeframe in timeframes],
+            "fields": fields,
+        },
+        "portfolioState": serialize_portfolio_state(comparison.run_spec.portfolio_state),
+        "capitalBase": round(comparison.run_spec.capital_base, 2),
+        "executionAssumptions": serialize_execution_assumptions(comparison),
+        "evaluation": serialize_evaluation(
+            comparison,
+            metadata_by_timeframe,
+            timeframes,
+            fields=fields,
+        ),
+    }
+
+
+def serialize_comparison(
+    comparison: ComparisonSpec,
+    metadata_by_timeframe: dict[str, dict[str, str]],
+    timeframes: list[TimeframeSpec],
+) -> dict:
     comparison_tickers = collect_comparison_tickers(comparison)
     return {
         "kind": "strategy_comparison",
@@ -347,23 +473,7 @@ def serialize_comparison(comparison: ComparisonSpec, dataset_metadata: dict[str,
             "assetCount": len(comparison_tickers),
             "tickers": comparison_tickers,
         },
-        "marketData": {
-            "period": comparison.market_data.period,
-            "sanityPeriods": comparison.market_data.sanity_periods,
-            "timeframe": {
-                "key": comparison.market_data.timeframe.key,
-                "label": comparison.market_data.timeframe.label,
-                "barsPerYear": comparison.market_data.timeframe.bars_per_year,
-                "barSeconds": comparison.market_data.timeframe.bar_seconds,
-            },
-            "fields": comparison.market_data.fields,
-        },
-        "runInput": {
-            "portfolioState": serialize_portfolio_state(comparison.run_input.portfolio_state),
-            "capitalBase": round(comparison.run_input.capital_base, 2),
-        },
-        "executionAssumptions": serialize_execution_assumptions(comparison),
-        "evaluation": serialize_evaluation(comparison, dataset_metadata),
+        "runSpec": serialize_run_spec(comparison, metadata_by_timeframe, timeframes),
         "candidateStrategies": [
             serialize_strategy_spec(strategy_spec)
             for strategy_spec in comparison.candidate_strategies
@@ -396,7 +506,7 @@ def compact_run_record(record: dict) -> dict:
     result = record["result"]
     strategy = run_spec.get("strategy", {})
     execution_assumptions = run_spec.get("executionAssumptions", {})
-    market_data = run_spec.get("marketData", {})
+    market_slice = run_spec.get("marketSlice", {})
     evaluation = run_spec.get("evaluation", {})
     summary = result.get("summary", {})
     portfolio_summary = summary.get("portfolio", summary)
@@ -415,13 +525,14 @@ def compact_run_record(record: dict) -> dict:
         "investmentUniverseAssetCount": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("assetCount"),
         "portfolioModelLabel": strategy.get("components", {}).get("core", {}).get("portfolioModel", {}).get("label"),
         "executionLabel": strategy.get("components", {}).get("core", {}).get("executionPolicy", {}).get("label"),
-        "period": market_data.get("period"),
-        "timeframe": market_data.get("timeframe", {}).get("key"),
+        "period": market_slice.get("period"),
+        "timeframe": strategy.get("components", {}).get("core", {}).get("dataResolution", {}).get("key")
+        or market_slice.get("timeframe", {}).get("key"),
         "maxInvestmentPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxInvestmentPct"),
         "maxWeightPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxWeightPct"),
         "costModelKind": execution_assumptions.get("costModel", {}).get("kind"),
         "commissionPct": execution_assumptions.get("costModel", {}).get("parameters", {}).get("commissionPct"),
-        "capitalBase": run_spec.get("runInput", {}).get("capitalBase"),
+        "capitalBase": run_spec.get("capitalBase"),
         "splitRatioPct": evaluation.get("evaluationSettings", {}).get("splitRatioPct"),
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
         "totalReturnPct": portfolio_summary.get("totalReturnPct"),
@@ -433,42 +544,41 @@ def build_strategy_runs(
     *,
     comparison: ComparisonSpec,
     strategy_specs: list,
-    closes,
-    volumes,
+    market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    dataset_metadata: dict[str, str],
+    metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    market_data = {
-        "period": market_data_period,
-        "timeframe": {
-            "key": comparison.market_data.timeframe.key,
-            "label": comparison.market_data.timeframe.label,
-            "barsPerYear": comparison.market_data.timeframe.bars_per_year,
-            "barSeconds": comparison.market_data.timeframe.bar_seconds,
-        },
-        "fields": comparison.market_data.fields,
-    }
-    serialized_evaluation = serialize_evaluation(
-        comparison,
-        dataset_metadata,
-        period_override=market_data_period,
-    )
     serialized_execution_assumptions = serialize_execution_assumptions(comparison)
+    required_fields = collect_required_market_fields(comparison)
     runs: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
 
     for strategy_spec in strategy_specs:
+        timeframe_key = strategy_spec.timeframe.key
+        market_bundle = market_bundles_by_timeframe[timeframe_key]
+        dataset_metadata = metadata_by_timeframe[timeframe_key]
         serialized_strategy = serialize_strategy_spec(strategy_spec)
+        strategy_market_slice = {
+            "period": market_data_period,
+            "timeframe": serialize_timeframe(strategy_spec.timeframe),
+            "fields": required_fields,
+        }
         run_spec = build_run_spec(
             run_kind="strategy_run",
             strategy=serialized_strategy,
-            market_data=market_data,
-            evaluation=serialized_evaluation,
+            market_slice=strategy_market_slice,
+            evaluation=serialize_evaluation(
+                comparison,
+                {timeframe_key: dataset_metadata},
+                [strategy_spec.timeframe],
+                fields=required_fields,
+                period_override=market_data_period,
+            ),
             execution_assumptions=serialized_execution_assumptions,
-            portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
-            capital_base=comparison.run_input.capital_base,
+            portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
+            capital_base=comparison.run_spec.capital_base,
         )
         cached_run = run_store.load(run_spec)
         if cached_run is not None:
@@ -477,14 +587,14 @@ def build_strategy_runs(
             continue
 
         run = evaluate_strategy_run(
-            closes=closes,
-            volumes=volumes,
+            closes=market_bundle["closes"],
+            volumes=market_bundle["volumes"],
             strategy=strategy_spec,
-            bars_per_year=comparison.market_data.timeframe.bars_per_year,
-            initial_capital=comparison.run_input.capital_base,
-            split_ratio=comparison.evaluation.evaluation_settings.split_ratio,
+            bars_per_year=strategy_spec.timeframe.bars_per_year,
+            initial_capital=comparison.run_spec.capital_base,
+            split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
             execution_assumptions=serialized_execution_assumptions,
-            portfolio_state=comparison.run_input.portfolio_state,
+            portfolio_state=comparison.run_spec.portfolio_state,
         )
         run_store.save(run_spec, run)
         computed_run_count += 1
@@ -499,27 +609,20 @@ def build_strategy_runs(
 def build_condition_sweep_runs(
     *,
     comparison: ComparisonSpec,
-    closes,
-    volumes,
+    market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    dataset_metadata: dict[str, str],
+    metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    market_data = {
-        "period": market_data_period,
-        "timeframe": {
-            "key": comparison.market_data.timeframe.key,
-            "label": comparison.market_data.timeframe.label,
-            "barsPerYear": comparison.market_data.timeframe.bars_per_year,
-            "barSeconds": comparison.market_data.timeframe.bar_seconds,
-        },
-        "fields": comparison.market_data.fields,
-    }
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
+    required_fields = collect_required_market_fields(comparison)
 
     for strategy_spec in comparison.candidate_strategies:
+        timeframe_key = strategy_spec.timeframe.key
+        market_bundle = market_bundles_by_timeframe[timeframe_key]
+        dataset_metadata = metadata_by_timeframe[timeframe_key]
         for condition_variant in comparison.condition_variants:
             effective_strategy = replace(
                 strategy_spec,
@@ -529,14 +632,14 @@ def build_condition_sweep_runs(
                 ),
             )
             effective_evaluation = replace(
-                comparison.evaluation,
+                comparison.run_spec.evaluation,
             )
             effective_execution_assumptions = replace(
-                comparison.execution_assumptions,
+                comparison.run_spec.execution_assumptions,
                 cost_model=replace(
-                    comparison.execution_assumptions.cost_model,
+                    comparison.run_spec.execution_assumptions.cost_model,
                     parameters={
-                        **comparison.execution_assumptions.cost_model.parameters,
+                        **comparison.run_spec.execution_assumptions.cost_model.parameters,
                         "commissionPct": condition_variant.commission_pct,
                     },
                 ),
@@ -544,7 +647,9 @@ def build_condition_sweep_runs(
             serialized_strategy = serialize_strategy_spec(effective_strategy)
             serialized_evaluation = serialize_evaluation(
                 comparison,
-                dataset_metadata,
+                {timeframe_key: dataset_metadata},
+                [strategy_spec.timeframe],
+                fields=required_fields,
                 period_override=market_data_period,
             )
             serialized_execution_assumptions = {
@@ -561,11 +666,15 @@ def build_condition_sweep_runs(
             run_spec = build_run_spec(
                 run_kind="condition_sweep",
                 strategy=serialized_strategy,
-                market_data=market_data,
+                market_slice={
+                    "period": market_data_period,
+                    "timeframe": serialize_timeframe(strategy_spec.timeframe),
+                    "fields": required_fields,
+                },
                 evaluation=serialized_evaluation,
                 execution_assumptions=serialized_execution_assumptions,
-                portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
-                capital_base=comparison.run_input.capital_base,
+                portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
+                capital_base=comparison.run_spec.capital_base,
             )
             cached_run = run_store.load(run_spec)
             if cached_run is not None:
@@ -574,14 +683,14 @@ def build_condition_sweep_runs(
                 continue
 
             run = evaluate_strategy_run(
-                closes=closes,
-                volumes=volumes,
+                closes=market_bundle["closes"],
+                volumes=market_bundle["volumes"],
                 strategy=effective_strategy,
-                bars_per_year=comparison.market_data.timeframe.bars_per_year,
-                initial_capital=comparison.run_input.capital_base,
+                bars_per_year=strategy_spec.timeframe.bars_per_year,
+                initial_capital=comparison.run_spec.capital_base,
                 split_ratio=effective_evaluation.evaluation_settings.split_ratio,
                 execution_assumptions=serialized_execution_assumptions,
-                portfolio_state=comparison.run_input.portfolio_state,
+                portfolio_state=comparison.run_spec.portfolio_state,
             )
             compact_run = compact_condition_sweep_run(
                 run=run,
@@ -609,43 +718,48 @@ def build_condition_sweep_runs(
 def build_ranking_evaluation_runs(
     *,
     comparison: ComparisonSpec,
-    closes,
-    volumes,
+    market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    dataset_metadata: dict[str, str],
+    metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    market_data = {
-        "period": market_data_period,
-        "timeframe": {
-            "key": comparison.market_data.timeframe.key,
-            "label": comparison.market_data.timeframe.label,
-            "barsPerYear": comparison.market_data.timeframe.bars_per_year,
-            "barSeconds": comparison.market_data.timeframe.bar_seconds,
-        },
-        "fields": comparison.market_data.fields,
-    }
-    returns = closes.pct_change().dropna()
-    aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
     ranking_specs = build_asset_ranking_specs(comparison.candidate_strategies)
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
+    required_fields = collect_required_market_fields(comparison)
 
     for ranking_spec in ranking_specs:
+        timeframe_key = ranking_spec.timeframe.key
+        market_bundle = market_bundles_by_timeframe[timeframe_key]
+        dataset_metadata = metadata_by_timeframe[timeframe_key]
+        closes = market_bundle["closes"][list(ranking_spec.investment_universe.tickers)]
+        volumes = (
+            market_bundle["volumes"][list(ranking_spec.investment_universe.tickers)]
+            if market_bundle["volumes"] is not None
+            else None
+        )
+        returns = closes.pct_change().dropna()
+        aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
         serialized_ranking_spec = serialize_asset_ranking_spec(ranking_spec)
         run_spec = build_run_spec(
             run_kind="ranking_evaluation",
             strategy={"ranking": serialized_ranking_spec},
-            market_data=market_data,
+            market_slice={
+                "period": market_data_period,
+                "timeframe": serialize_timeframe(ranking_spec.timeframe),
+                "fields": required_fields,
+            },
             evaluation=serialize_evaluation(
                 comparison,
-                dataset_metadata,
+                {timeframe_key: dataset_metadata},
+                [ranking_spec.timeframe],
+                fields=required_fields,
                 period_override=market_data_period,
             ),
             execution_assumptions=serialize_execution_assumptions(comparison),
-            portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
-            capital_base=comparison.run_input.capital_base,
+            portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
+            capital_base=comparison.run_spec.capital_base,
         )
         cached_run = run_store.load(run_spec)
         if cached_run is not None:
@@ -656,9 +770,9 @@ def build_ranking_evaluation_runs(
         result = evaluate_asset_ranking_spec(
             returns=returns,
             volumes=aligned_volumes,
-            split_ratio=comparison.evaluation.evaluation_settings.split_ratio,
+            split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
             ranking_spec=ranking_spec,
-            bars_per_year=comparison.market_data.timeframe.bars_per_year,
+            bars_per_year=ranking_spec.timeframe.bars_per_year,
         )
         run_store.save(run_spec, result)
         computed_run_count += 1
@@ -682,23 +796,12 @@ def build_ranking_evaluation_runs(
 def build_parameter_sweep_runs(
     *,
     comparison: ComparisonSpec,
-    closes,
-    volumes,
+    market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    dataset_metadata: dict[str, str],
+    metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    market_data = {
-        "period": market_data_period,
-        "timeframe": {
-            "key": comparison.market_data.timeframe.key,
-            "label": comparison.market_data.timeframe.label,
-            "barsPerYear": comparison.market_data.timeframe.bars_per_year,
-            "barSeconds": comparison.market_data.timeframe.bar_seconds,
-        },
-        "fields": comparison.market_data.fields,
-    }
-    base_evaluation = comparison.evaluation
+    base_evaluation = comparison.run_spec.evaluation
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -707,6 +810,7 @@ def build_parameter_sweep_runs(
         "batchKey": "local_tilt_search_9m_v1",
         "spec": build_parameter_sweep_generation_spec(),
     }
+    required_fields = collect_required_market_fields(comparison)
 
     family_specs = [
         {
@@ -714,14 +818,14 @@ def build_parameter_sweep_runs(
             "familyLabel": "全資産モメンタム傾斜 上位優遇 9ヶ月",
             "strategyType": "full_universe_momentum_tilt",
             "macroWeights": [None],
-            "windowMonths": 9,
+            "windowSpec": {"unit": "months", "value": 9},
         },
         {
             "familyKey": "momentum_macro_top_9m",
             "familyLabel": "全資産モメンタムマクロ傾斜 上位優遇 9ヶ月",
             "strategyType": "full_universe_momentum_macro_tilt",
             "macroWeights": [0.05, 0.10, 0.15, 0.20],
-            "windowMonths": 9,
+            "windowSpec": {"unit": "months", "value": 9},
         },
     ]
     tilt_strengths = [0.15, 0.20, 0.25, 0.30, 0.35]
@@ -734,7 +838,7 @@ def build_parameter_sweep_runs(
                     score_parameters = {
                         "tilt_strength": tilt_strength,
                         "tilt_shape": 1.0,
-                        "window_months": family_spec["windowMonths"],
+                        "windowSpec": dict(family_spec["windowSpec"]),
                     }
                     if macro_weight is not None:
                         score_parameters["momentum_weight"] = round(1.0 - macro_weight, 2)
@@ -767,19 +871,28 @@ def build_parameter_sweep_runs(
                         ),
                     )
                     serialized_strategy = serialize_strategy_spec(effective_strategy)
+                    timeframe_key = effective_strategy.timeframe.key
+                    dataset_metadata = metadata_by_timeframe[timeframe_key]
+                    market_bundle = market_bundles_by_timeframe[timeframe_key]
                     serialized_evaluation = serialize_evaluation(
                         comparison,
-                        dataset_metadata,
+                        {timeframe_key: dataset_metadata},
+                        [effective_strategy.timeframe],
+                        fields=required_fields,
                         period_override=market_data_period,
                     )
                     run_spec = build_run_spec(
                         run_kind="portfolio_comparison",
                         strategy=serialized_strategy,
-                        market_data=market_data,
+                        market_slice={
+                            "period": market_data_period,
+                            "timeframe": serialize_timeframe(effective_strategy.timeframe),
+                            "fields": required_fields,
+                        },
                         evaluation=serialized_evaluation,
                         execution_assumptions=serialize_execution_assumptions(comparison),
-                        portfolio_state=serialize_portfolio_state(comparison.run_input.portfolio_state),
-                        capital_base=comparison.run_input.capital_base,
+                        portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
+                        capital_base=comparison.run_spec.capital_base,
                         generation=generation,
                     )
                     cached_run = run_store.load(run_spec)
@@ -789,14 +902,14 @@ def build_parameter_sweep_runs(
                         continue
 
                     run = evaluate_strategy_run(
-                        closes=closes,
-                        volumes=volumes,
+                        closes=market_bundle["closes"],
+                        volumes=market_bundle["volumes"],
                         strategy=effective_strategy,
-                        bars_per_year=comparison.market_data.timeframe.bars_per_year,
-                        initial_capital=comparison.run_input.capital_base,
+                        bars_per_year=effective_strategy.timeframe.bars_per_year,
+                        initial_capital=comparison.run_spec.capital_base,
                         split_ratio=base_evaluation.evaluation_settings.split_ratio,
                         execution_assumptions=serialize_execution_assumptions(comparison),
-                        portfolio_state=comparison.run_input.portfolio_state,
+                        portfolio_state=comparison.run_spec.portfolio_state,
                     )
                     compact_run = compact_parameter_sweep_run(
                         run=run,
@@ -805,7 +918,7 @@ def build_parameter_sweep_runs(
                         tilt_strength=tilt_strength,
                         macro_weight=macro_weight,
                         max_weight=max_weight,
-                        window_months=family_spec["windowMonths"],
+                        window_spec=family_spec["windowSpec"],
                         strategy=serialized_strategy,
                     )
                     run_store.save(run_spec, compact_run)
@@ -851,7 +964,7 @@ def compact_parameter_sweep_run(
     tilt_strength: float,
     macro_weight: float | None,
     max_weight: float,
-    window_months: int,
+    window_spec: dict[str, object],
     strategy: dict,
 ) -> dict:
     return {
@@ -868,7 +981,7 @@ def compact_parameter_sweep_run(
         "parameterSet": {
             "tiltStrength": tilt_strength,
             "macroWeight": macro_weight,
-            "windowMonths": window_months,
+            "windowSpec": dict(window_spec),
             "maxWeightPct": round(max_weight * 100, 1),
         },
         "strategy": strategy,
@@ -886,13 +999,13 @@ def build_parameter_sweep_generation_spec() -> dict:
                 "key": "momentum_top_9m",
                 "strategyType": "full_universe_momentum_tilt",
                 "tiltShape": "top_favored",
-                "windowMonths": 9,
+                "windowSpec": {"unit": "months", "value": 9},
             },
             {
                 "key": "momentum_macro_top_9m",
                 "strategyType": "full_universe_momentum_macro_tilt",
                 "tiltShape": "top_favored",
-                "windowMonths": 9,
+                "windowSpec": {"unit": "months", "value": 9},
             },
         ],
         "parameterGrid": {

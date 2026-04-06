@@ -17,7 +17,7 @@ type StrategyComponent = {
 type StrategyModelWithParameters = {
   kind: string
   label: string
-  parameters: Record<string, number>
+  parameters: Record<string, unknown>
 }
 
 type InvestmentUniverse = {
@@ -38,6 +38,13 @@ type StrategySpec = {
   extensions?: Record<string, unknown>
   components: {
     core: {
+      dataResolution: {
+        key: string
+        label: string
+        yfinanceInterval: string
+        barsPerYear: number
+        barSeconds: number
+      }
       investmentUniverse: InvestmentUniverse
       portfolioModel: {
         key: string
@@ -47,7 +54,7 @@ type StrategySpec = {
         key: string
         label: string
         entry: string
-        rebalanceFrequency: string
+        rebalanceSchedule: string
       }
     }
     optional: {
@@ -75,13 +82,13 @@ type PortfolioRun = {
       splitRatioPct: number
     }
     train: {
-      dayCount: number
+      barCount: number
       endDate: string
       portfolio: SummaryMetrics
       startDate: string
     }
     test: {
-      dayCount: number
+      barCount: number
       endDate: string
       portfolio: SummaryMetrics
       startDate: string
@@ -101,57 +108,59 @@ type DashboardResult = {
       secondaryMetric: string
       tertiaryMetric: string
     }
-    marketData: {
-      period: string
-      sanityPeriods: string[]
-      timeframe: {
-        key: string
-        label: string
-        barsPerYear: number
-        barSeconds: number
-      }
-      fields: string[]
-    }
-    runInput: {
-      portfolioState: {
-        weights: Array<{ asset: string; weightPct: number }>
-      }
-      capitalBase: number
-    }
-    executionAssumptions: {
-      kind?: string
-      label: string
-      parameters: Record<string, string | number | boolean>
-      costModel: {
-        kind: string
-        parameters: {
-          commissionPct?: number
-          slippagePct?: number
-          [key: string]: number | undefined
-        }
-        perAssetOverrides: Record<string, Record<string, number>>
-      }
-    }
-    evaluation: {
+    runSpec: {
       kind?: string
       schemaVersion?: string
-      marketDataContext: {
+      marketSlice: {
         period: string
         sanityPeriods: string[]
-        timeframe: {
+        timeframes: Array<{
           key: string
           label: string
           barsPerYear: number
           barSeconds: number
-        }
+        }>
         fields: string[]
-        source: string
-        alignedStartDate: string
-        alignedEndDate: string
-        rowCount: number
       }
-      evaluationSettings: {
-        splitRatioPct: number
+      portfolioState: {
+        weights: Array<{ asset: string; weightPct: number }>
+      }
+      capitalBase: number
+      executionAssumptions: {
+        kind?: string
+        label: string
+        parameters: Record<string, string | number | boolean>
+        costModel: {
+          kind: string
+          parameters: {
+            commissionPct?: number
+            slippagePct?: number
+            [key: string]: number | undefined
+          }
+          perAssetOverrides: Record<string, Record<string, number>>
+        }
+      }
+      evaluation: {
+        kind?: string
+        schemaVersion?: string
+        marketDataContexts: Array<{
+          period: string
+          sanityPeriods: string[]
+          timeframe: {
+            key: string
+            label: string
+            barsPerYear: number
+            barSeconds: number
+          }
+          fields: string[]
+          source: string
+          alignedStartDate: string
+          alignedEndDate: string
+          rowCount: number
+        }>
+        evaluationSettings: {
+          splitRatioPct: number
+        }
       }
     }
     candidateStrategies: StrategySpec[]
@@ -357,6 +366,10 @@ function App() {
                   <DataListRow label="label" value={bestRun.strategy.label} />
                   <DataListRow label="hypothesis" value={bestRun.strategy.hypothesis ?? 'null'} />
                   <DataListRow
+                    label="dataResolution"
+                    value={`${bestRun.strategy.components.core.dataResolution.label} (${bestRun.strategy.components.core.dataResolution.key})`}
+                  />
+                  <DataListRow
                     label="investmentUniverse.key"
                     value={bestRun.strategy.components.core.investmentUniverse.key}
                   />
@@ -385,8 +398,8 @@ function App() {
                     value={bestRun.strategy.components.core.executionPolicy.entry}
                   />
                   <DataListRow
-                    label="executionPolicy.rebalanceFrequency"
-                    value={bestRun.strategy.components.core.executionPolicy.rebalanceFrequency}
+                    label="executionPolicy.rebalanceSchedule"
+                    value={bestRun.strategy.components.core.executionPolicy.rebalanceSchedule}
                   />
                   <DataListRow
                     label="featureInputs"
@@ -484,6 +497,10 @@ function App() {
                     <DataListRow label="label" value={referenceRun.strategy.label} />
                     <DataListRow label="hypothesis" value={referenceRun.strategy.hypothesis ?? 'null'} />
                     <DataListRow
+                      label="dataResolution"
+                      value={`${referenceRun.strategy.components.core.dataResolution.label} (${referenceRun.strategy.components.core.dataResolution.key})`}
+                    />
+                    <DataListRow
                       label="investmentUniverse.key"
                       value={referenceRun.strategy.components.core.investmentUniverse.key}
                     />
@@ -512,8 +529,8 @@ function App() {
                       value={referenceRun.strategy.components.core.executionPolicy.entry}
                     />
                     <DataListRow
-                      label="executionPolicy.rebalanceFrequency"
-                      value={referenceRun.strategy.components.core.executionPolicy.rebalanceFrequency}
+                      label="executionPolicy.rebalanceSchedule"
+                      value={referenceRun.strategy.components.core.executionPolicy.rebalanceSchedule}
                     />
                     <DataListRow
                       label="featureInputs"
@@ -584,7 +601,7 @@ function App() {
                 portfolioState: current.portfolioState === 'front' ? 'back' : 'front',
               }))
             }
-            back={dashboard.comparison.runInput.portfolioState}
+            back={dashboard.comparison.runSpec.portfolioState}
             front={
               <div className="card-body">
                 <dl className="data-list">
@@ -592,13 +609,13 @@ function App() {
                     label="weights"
                     value={
                       <pre className="inline-json">
-                        {formatJson(dashboard.comparison.runInput.portfolioState.weights)}
+                        {formatJson(dashboard.comparison.runSpec.portfolioState.weights)}
                       </pre>
                     }
                   />
                   <DataListRow
                     label="capitalBase"
-                    value={formatMetricValue(dashboard.comparison.runInput.capitalBase)}
+                    value={formatMetricValue(dashboard.comparison.runSpec.capitalBase)}
                   />
                 </dl>
               </div>
@@ -615,35 +632,35 @@ function App() {
                   current.executionAssumptions === 'front' ? 'back' : 'front',
               }))
             }
-            back={dashboard.comparison.executionAssumptions}
+            back={dashboard.comparison.runSpec.executionAssumptions}
             front={
               <div className="card-body">
                 <dl className="data-list">
                   <DataListRow
                     label="kind"
-                    value={dashboard.comparison.executionAssumptions.kind ?? '-'}
+                    value={dashboard.comparison.runSpec.executionAssumptions.kind ?? '-'}
                   />
                   <DataListRow
                     label="label"
-                    value={dashboard.comparison.executionAssumptions.label}
+                    value={dashboard.comparison.runSpec.executionAssumptions.label}
                   />
                   <DataListRow
                     label="parameters"
                     value={
                       <pre className="inline-json">
-                        {formatJson(dashboard.comparison.executionAssumptions.parameters)}
+                        {formatJson(dashboard.comparison.runSpec.executionAssumptions.parameters)}
                       </pre>
                     }
                   />
                   <DataListRow
                     label="costModel.kind"
-                    value={dashboard.comparison.executionAssumptions.costModel.kind}
+                    value={dashboard.comparison.runSpec.executionAssumptions.costModel.kind}
                   />
                   <DataListRow
                     label="costModel.parameters"
                     value={
                       <pre className="inline-json">
-                        {formatJson(dashboard.comparison.executionAssumptions.costModel.parameters)}
+                        {formatJson(dashboard.comparison.runSpec.executionAssumptions.costModel.parameters)}
                       </pre>
                     }
                   />
@@ -652,7 +669,7 @@ function App() {
                     value={
                       <pre className="inline-json">
                         {formatJson(
-                          dashboard.comparison.executionAssumptions.costModel.perAssetOverrides,
+                          dashboard.comparison.runSpec.executionAssumptions.costModel.perAssetOverrides,
                         )}
                       </pre>
                     }
@@ -671,48 +688,43 @@ function App() {
                 evaluation: current.evaluation === 'front' ? 'back' : 'front',
               }))
             }
-            back={dashboard.comparison.evaluation}
+            back={dashboard.comparison.runSpec.evaluation}
             front={
               <div className="card-body">
                 <dl className="data-list">
                   <DataListRow
-                    label="marketDataContext.period"
-                    value={dashboard.comparison.evaluation.marketDataContext.period}
-                  />
-                  <DataListRow
-                    label="marketDataContext.sanityPeriods"
+                    label="marketSlice.timeframes"
                     value={
-                      <ValueList values={dashboard.comparison.evaluation.marketDataContext.sanityPeriods} />
+                      <ValueList
+                        values={dashboard.comparison.runSpec.marketSlice.timeframes.map(
+                          (timeframe) =>
+                            `${timeframe.label} (${timeframe.key}, ${timeframe.barsPerYear} bars/year)`,
+                        )}
+                      />
                     }
                   />
                   <DataListRow
-                    label="marketDataContext.timeframe"
-                    value={dashboard.comparison.evaluation.marketDataContext.timeframe.label}
+                    label="marketSlice.period"
+                    value={dashboard.comparison.runSpec.marketSlice.period}
                   />
                   <DataListRow
-                    label="marketDataContext.fields"
-                    value={<ValueList values={dashboard.comparison.evaluation.marketDataContext.fields} />}
+                    label="marketSlice.sanityPeriods"
+                    value={
+                      <ValueList values={dashboard.comparison.runSpec.marketSlice.sanityPeriods} />
+                    }
                   />
                   <DataListRow
-                    label="marketDataContext.source"
-                    value={dashboard.comparison.evaluation.marketDataContext.source}
-                  />
-                  <DataListRow
-                    label="marketDataContext.alignedStartDate"
-                    value={dashboard.comparison.evaluation.marketDataContext.alignedStartDate}
-                  />
-                  <DataListRow
-                    label="marketDataContext.alignedEndDate"
-                    value={dashboard.comparison.evaluation.marketDataContext.alignedEndDate}
-                  />
-                  <DataListRow
-                    label="marketDataContext.rowCount"
-                    value={dashboard.comparison.evaluation.marketDataContext.rowCount}
+                    label="marketDataContexts"
+                    value={
+                      <pre className="inline-json">
+                        {formatJson(dashboard.comparison.runSpec.evaluation.marketDataContexts)}
+                      </pre>
+                    }
                   />
                   <DataListRow
                     label="evaluationSettings.splitRatioPct"
                     value={formatMetricValue(
-                      dashboard.comparison.evaluation.evaluationSettings.splitRatioPct,
+                      dashboard.comparison.runSpec.evaluation.evaluationSettings.splitRatioPct,
                     )}
                   />
                 </dl>
@@ -749,14 +761,14 @@ function App() {
                   />
                   <DataListRow label="train.startDate" value={bestRun.splitAnalysis.train.startDate} />
                   <DataListRow label="train.endDate" value={bestRun.splitAnalysis.train.endDate} />
-                  <DataListRow label="train.dayCount" value={bestRun.splitAnalysis.train.dayCount} />
+                  <DataListRow label="train.barCount" value={bestRun.splitAnalysis.train.barCount} />
                   <DataListRow
                     label="train.portfolio"
                     value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.train.portfolio)}</pre>}
                   />
                   <DataListRow label="test.startDate" value={bestRun.splitAnalysis.test.startDate} />
                   <DataListRow label="test.endDate" value={bestRun.splitAnalysis.test.endDate} />
-                  <DataListRow label="test.dayCount" value={bestRun.splitAnalysis.test.dayCount} />
+                  <DataListRow label="test.barCount" value={bestRun.splitAnalysis.test.barCount} />
                   <DataListRow
                     label="test.portfolio"
                     value={<pre className="inline-json">{formatJson(bestRun.splitAnalysis.test.portfolio)}</pre>}

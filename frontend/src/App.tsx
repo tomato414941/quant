@@ -39,10 +39,6 @@ type StrategySpec = {
   components: {
     core: {
       investmentUniverse: InvestmentUniverse
-      dataResolution: {
-        key: string
-        label: string
-      }
       portfolioModel: {
         key: string
         label: string
@@ -105,14 +101,22 @@ type DashboardResult = {
       secondaryMetric: string
       tertiaryMetric: string
     }
-    dataset: {
+    marketData: {
       period: string
       sanityPeriods: string[]
+      timeframe: {
+        key: string
+        label: string
+        barsPerYear: number
+        barSeconds: number
+      }
+      fields: string[]
     }
     runInput: {
       portfolioState: {
         weights: Array<{ asset: string; weightPct: number }>
       }
+      capitalBase: number
     }
     executionAssumptions: {
       kind?: string
@@ -131,9 +135,16 @@ type DashboardResult = {
     evaluation: {
       kind?: string
       schemaVersion?: string
-      datasetContext: {
+      marketDataContext: {
         period: string
         sanityPeriods: string[]
+        timeframe: {
+          key: string
+          label: string
+          barsPerYear: number
+          barSeconds: number
+        }
+        fields: string[]
         source: string
         alignedStartDate: string
         alignedEndDate: string
@@ -141,7 +152,6 @@ type DashboardResult = {
       }
       evaluationSettings: {
         splitRatioPct: number
-        initialCapital: number
       }
     }
     candidateStrategies: StrategySpec[]
@@ -363,10 +373,6 @@ function App() {
                     value={<ValueList values={bestRun.strategy.components.core.investmentUniverse.tickers} />}
                   />
                   <DataListRow
-                    label="dataResolution"
-                    value={bestRun.strategy.components.core.dataResolution.label}
-                  />
-                  <DataListRow
                     label="portfolioModel"
                     value={`${bestRun.strategy.components.core.portfolioModel.label} (${bestRun.strategy.components.core.portfolioModel.key})`}
                   />
@@ -494,10 +500,6 @@ function App() {
                       value={<ValueList values={referenceRun.strategy.components.core.investmentUniverse.tickers} />}
                     />
                     <DataListRow
-                      label="dataResolution"
-                      value={referenceRun.strategy.components.core.dataResolution.label}
-                    />
-                    <DataListRow
                       label="portfolioModel"
                       value={`${referenceRun.strategy.components.core.portfolioModel.label} (${referenceRun.strategy.components.core.portfolioModel.key})`}
                     />
@@ -594,6 +596,10 @@ function App() {
                       </pre>
                     }
                   />
+                  <DataListRow
+                    label="capitalBase"
+                    value={formatMetricValue(dashboard.comparison.runInput.capitalBase)}
+                  />
                 </dl>
               </div>
             }
@@ -670,41 +676,43 @@ function App() {
               <div className="card-body">
                 <dl className="data-list">
                   <DataListRow
-                    label="datasetContext.period"
-                    value={dashboard.comparison.evaluation.datasetContext.period}
+                    label="marketDataContext.period"
+                    value={dashboard.comparison.evaluation.marketDataContext.period}
                   />
                   <DataListRow
-                    label="datasetContext.sanityPeriods"
+                    label="marketDataContext.sanityPeriods"
                     value={
-                      <ValueList values={dashboard.comparison.evaluation.datasetContext.sanityPeriods} />
+                      <ValueList values={dashboard.comparison.evaluation.marketDataContext.sanityPeriods} />
                     }
                   />
                   <DataListRow
-                    label="datasetContext.source"
-                    value={dashboard.comparison.evaluation.datasetContext.source}
+                    label="marketDataContext.timeframe"
+                    value={dashboard.comparison.evaluation.marketDataContext.timeframe.label}
                   />
                   <DataListRow
-                    label="datasetContext.alignedStartDate"
-                    value={dashboard.comparison.evaluation.datasetContext.alignedStartDate}
+                    label="marketDataContext.fields"
+                    value={<ValueList values={dashboard.comparison.evaluation.marketDataContext.fields} />}
                   />
                   <DataListRow
-                    label="datasetContext.alignedEndDate"
-                    value={dashboard.comparison.evaluation.datasetContext.alignedEndDate}
+                    label="marketDataContext.source"
+                    value={dashboard.comparison.evaluation.marketDataContext.source}
                   />
                   <DataListRow
-                    label="datasetContext.rowCount"
-                    value={dashboard.comparison.evaluation.datasetContext.rowCount}
+                    label="marketDataContext.alignedStartDate"
+                    value={dashboard.comparison.evaluation.marketDataContext.alignedStartDate}
+                  />
+                  <DataListRow
+                    label="marketDataContext.alignedEndDate"
+                    value={dashboard.comparison.evaluation.marketDataContext.alignedEndDate}
+                  />
+                  <DataListRow
+                    label="marketDataContext.rowCount"
+                    value={dashboard.comparison.evaluation.marketDataContext.rowCount}
                   />
                   <DataListRow
                     label="evaluationSettings.splitRatioPct"
                     value={formatMetricValue(
                       dashboard.comparison.evaluation.evaluationSettings.splitRatioPct,
-                    )}
-                  />
-                  <DataListRow
-                    label="evaluationSettings.initialCapital"
-                    value={formatMetricValue(
-                      dashboard.comparison.evaluation.evaluationSettings.initialCapital,
                     )}
                   />
                 </dl>

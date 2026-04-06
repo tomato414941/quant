@@ -13,11 +13,12 @@ from app.comparison_models import (
     ComparisonSpec,
     ConditionVariant,
     CostModelSpec,
-    DatasetSpec,
     EvaluationSpec,
     EvaluationSettings,
+    MarketDataSpec,
     RunInputSpec,
     SelectionPolicy,
+    build_timeframe_spec,
     build_asset_specific_adv_cost_model_spec,
     build_execution_assumptions_spec,
 )
@@ -34,84 +35,84 @@ FULL_UNIVERSE_MOMENTUM_TILT = build_selection_spec(
     key="full_universe_momentum_tilt",
     label="全資産モメンタム傾斜",
     description="全ETFを候補に残しつつ、モメンタムで重みだけを傾ける",
-    score_parameters={"tilt_strength": 0.5, "window_days": 252},
+    score_parameters={"tilt_strength": 0.5, "window_months": 12},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak",
     label="全資産モメンタム傾斜 弱 12ヶ月",
     description="全ETFを候補に残しつつ、弱めの12ヶ月モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.25, "tilt_shape": 0.0, "window_days": 252},
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 0.0, "window_months": 12},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top",
     label="全資産モメンタム傾斜 上位優遇 12ヶ月",
     description="全ETFを候補に残しつつ、12ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 252},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 12},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_6m",
     label="全資産モメンタム傾斜 上位優遇 6ヶ月",
     description="全ETFを候補に残しつつ、6ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 126},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 6},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_9m",
     label="全資産モメンタム傾斜 上位優遇 9ヶ月",
     description="全ETFを候補に残しつつ、9ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 189},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 9},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_8M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_8m",
     label="全資産モメンタム傾斜 上位優遇 8ヶ月",
     description="全ETFを候補に残しつつ、8ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 168},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 8},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_10M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_10m",
     label="全資産モメンタム傾斜 上位優遇 10ヶ月",
     description="全ETFを候補に残しつつ、10ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 210},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 10},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_11M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_11m",
     label="全資産モメンタム傾斜 上位優遇 11ヶ月",
     description="全ETFを候補に残しつつ、11ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 231},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 11},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_3m",
     label="全資産モメンタム傾斜 上位優遇 3ヶ月",
     description="全ETFを候補に残しつつ、3ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 63},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 3},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_1M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_1m",
     label="全資産モメンタム傾斜 上位優遇 1ヶ月",
     description="全ETFを候補に残しつつ、1ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 21},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 1},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_2m",
     label="全資産モメンタム傾斜 上位優遇 2ヶ月",
     description="全ETFを候補に残しつつ、2ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 42},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 2},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_weak_top_15m",
     label="全資産モメンタム傾斜 上位優遇 15ヶ月",
     description="全ETFを候補に残しつつ、15ヶ月モメンタムの上位優遇傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 315},
+    score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 15},
 )
 FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP = build_selection_spec(
     strategy_type="full_universe_momentum_low_vol_tilt",
@@ -121,7 +122,7 @@ FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP = build_selection_spec(
     score_parameters={
         "tilt_strength": 0.25,
         "tilt_shape": 1.0,
-        "window_days": 252,
+        "window_months": 12,
         "momentum_weight": 0.7,
         "low_vol_weight": 0.3,
     },
@@ -134,7 +135,7 @@ FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP = build_selection_spec(
     score_parameters={
         "tilt_strength": 0.25,
         "tilt_shape": 1.0,
-        "window_days": 252,
+        "window_months": 12,
         "momentum_weight": 0.85,
         "low_vol_weight": 0.15,
     },
@@ -147,7 +148,7 @@ FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP = build_selection_spec(
     score_parameters={
         "tilt_strength": 0.25,
         "tilt_shape": 1.0,
-        "window_days": 252,
+        "window_months": 12,
         "momentum_weight": 0.85,
         "macro_weight": 0.15,
     },
@@ -157,14 +158,14 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX = build_selection_spec(
     key="full_universe_momentum_tilt_weak_softmax",
     label="全資産モメンタム傾斜 弱 softmax",
     description="全ETFを候補に残しつつ、弱めのsoftmax型モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 0.25, "tilt_shape": 2.0, "window_days": 252},
+    score_parameters={"tilt_strength": 0.25, "tilt_shape": 2.0, "window_months": 12},
 )
 FULL_UNIVERSE_MOMENTUM_TILT_STRONG = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
     key="full_universe_momentum_tilt_strong",
     label="全資産モメンタム傾斜 強",
     description="全ETFを候補に残しつつ、強めの12ヶ月モメンタム傾斜で重みを調整する",
-    score_parameters={"tilt_strength": 1.0, "tilt_shape": 0.0, "window_days": 252},
+    score_parameters={"tilt_strength": 1.0, "tilt_shape": 0.0, "window_months": 12},
 )
 MOMENTUM_TOP3 = build_selection_spec(
     strategy_type="momentum_top3",
@@ -286,6 +287,14 @@ ETF_ONLY_INVESTMENT_UNIVERSE = build_investment_universe_spec(
     ],
 )
 
+DAILY_TIMEFRAME = build_timeframe_spec(
+    key="1d",
+    label="日次",
+    yfinance_interval="1d",
+    bar_seconds=86_400,
+    bars_per_year=252,
+)
+
 
 def build_realistic_multi_asset_cost_model_spec() -> CostModelSpec:
     return build_asset_specific_adv_cost_model_spec(
@@ -404,8 +413,10 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
     comparison_id="etf_portfolio_models_10y",
     title="有望Strategyの探索",
     question="共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",
-    dataset=DatasetSpec(
+    market_data=MarketDataSpec(
         period="10y",
+        timeframe=DAILY_TIMEFRAME,
+        fields=["close", "volume"],
         sanity_periods=["3y"],
     ),
     run_input=RunInputSpec(
@@ -434,12 +445,12 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
             },
             cash_weight=0.15,
         ),
+        capital_base=10_000,
     ),
     execution_assumptions=DEFAULT_EXECUTION_ASSUMPTIONS,
     evaluation=EvaluationSpec(
         evaluation_settings=EvaluationSettings(
             split_ratio=0.7,
-            initial_capital=10_000,
         ),
     ),
     selection_policy=SelectionPolicy(

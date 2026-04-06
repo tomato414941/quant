@@ -73,9 +73,6 @@ FALLBACK_RULE_LABELS = {
     "none": "フォールバックなし",
     "cash_on_empty": "候補ゼロならCASH",
 }
-TRADING_DAYS_PER_YEAR = 252
-
-
 @dataclass(frozen=True)
 class UniversePolicySpec:
     key: str
@@ -151,7 +148,6 @@ class StrategySpec:
     hypothesis: str | None
     description: str
     investment_universe: InvestmentUniverseSpec
-    data_resolution: str
     selection: SelectionSpec
     portfolio_model: PortfolioModelSpec
     execution_policy: ExecutionPolicySpec
@@ -189,12 +185,12 @@ def percent_return(final_value: float, initial_value: float) -> float:
     return ((final_value / initial_value) - 1) * 100
 
 
-def cagr(final_value: float, initial_value: float, periods: int) -> float:
-    years = max((periods - 1) / TRADING_DAYS_PER_YEAR, 1 / TRADING_DAYS_PER_YEAR)
+def cagr(final_value: float, initial_value: float, periods: int, bars_per_year: float) -> float:
+    years = max((periods - 1) / bars_per_year, 1 / bars_per_year)
     return (((final_value / initial_value) ** (1 / years)) - 1) * 100
 
 
-def sharpe_ratio(returns: list[float]) -> float:
+def sharpe_ratio(returns: list[float], bars_per_year: float) -> float:
     if len(returns) < 2:
         return 0.0
 
@@ -202,7 +198,7 @@ def sharpe_ratio(returns: list[float]) -> float:
     volatility = statistics.pstdev(returns)
     if volatility == 0:
         return 0.0
-    return math.sqrt(TRADING_DAYS_PER_YEAR) * (mean_return / volatility)
+    return math.sqrt(bars_per_year) * (mean_return / volatility)
 
 
 def max_drawdown(series: list[dict], equity_key: str) -> float:
@@ -332,27 +328,27 @@ def build_selection_spec(
     }
     default_score_parameters = {
         "full_universe": {},
-        "full_universe_momentum_tilt": {"tilt_strength": 0.5, "window_days": 252},
+        "full_universe_momentum_tilt": {"tilt_strength": 0.5, "window_months": 12},
         "full_universe_momentum_low_vol_tilt": {
             "tilt_strength": 0.25,
             "tilt_shape": 1.0,
-            "window_days": 252,
+            "window_months": 12,
             "momentum_weight": 0.7,
             "low_vol_weight": 0.3,
         },
         "full_universe_momentum_macro_tilt": {
             "tilt_strength": 0.25,
             "tilt_shape": 1.0,
-            "window_days": 252,
+            "window_months": 12,
             "momentum_weight": 0.85,
             "macro_weight": 0.15,
         },
-        "momentum_top3": {"window_days": 252},
-        "dual_momentum_top3": {"window_days": 252},
-        "trailing_momentum_low_vol_universe": {"window_days": 252},
-        "positive_momentum_universe": {"window_days": 252},
-        "positive_momentum_low_vol_universe": {"window_days": 252},
-        "positive_momentum_high_volume_universe": {"window_days": 252},
+        "momentum_top3": {"window_months": 12},
+        "dual_momentum_top3": {"window_months": 12},
+        "trailing_momentum_low_vol_universe": {"window_months": 12},
+        "positive_momentum_universe": {"window_months": 12},
+        "positive_momentum_low_vol_universe": {"window_months": 12},
+        "positive_momentum_high_volume_universe": {"window_months": 12},
     }
     filter_rules = {
         "full_universe": (),
@@ -497,7 +493,6 @@ def build_risk_controls_spec(
 def build_strategy_spec(
     *,
     investment_universe: InvestmentUniverseSpec,
-    data_resolution: str = "daily",
     selection: SelectionSpec,
     portfolio_model: PortfolioModelSpec,
     execution_policy: ExecutionPolicySpec | None = None,
@@ -531,7 +526,6 @@ def build_strategy_spec(
         hypothesis=hypothesis,
         description=description or selection.description,
         investment_universe=investment_universe,
-        data_resolution=data_resolution,
         selection=selection,
         portfolio_model=portfolio_model,
         execution_policy=execution_policy
@@ -590,8 +584,8 @@ def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str
     score_parameters = dict(strategy.selection.score_parameters)
     serialized: dict[str, float] = {}
 
-    if "window_days" in score_parameters:
-        serialized["windowDays"] = float(score_parameters["window_days"])
+    if "window_months" in score_parameters:
+        serialized["windowMonths"] = float(score_parameters["window_months"])
     if "momentum_weight" in score_parameters:
         serialized["momentumWeight"] = float(score_parameters["momentum_weight"])
     if "low_vol_weight" in score_parameters:
@@ -653,10 +647,6 @@ def serialize_strategy_spec(strategy: StrategySpec) -> dict:
                     "label": strategy.investment_universe.label,
                     "assetCount": len(strategy.investment_universe.tickers),
                     "tickers": list(strategy.investment_universe.tickers),
-                },
-                "dataResolution": {
-                    "key": strategy.data_resolution,
-                    "label": strategy.data_resolution,
                 },
                 "portfolioModel": serialize_portfolio_model_spec(strategy.portfolio_model),
                 "executionPolicy": serialize_execution_policy_spec(strategy.execution_policy),
@@ -793,8 +783,8 @@ def extract_ranking_score_parameters(
 ) -> dict[str, float]:
     score_parameters = dict(selection.score_parameters)
     extracted: dict[str, float] = {}
-    if "window_days" in score_parameters:
-        extracted["windowDays"] = float(score_parameters["window_days"])
+    if "window_months" in score_parameters:
+        extracted["windowMonths"] = float(score_parameters["window_months"])
     if selection.score_model.kind == "momentum_low_vol":
         extracted["momentumWeight"] = float(score_parameters.get("momentum_weight", 0.7))
         extracted["lowVolWeight"] = float(score_parameters.get("low_vol_weight", 0.3))
@@ -942,6 +932,7 @@ def compare_portfolio_runs(
     strategies: list[StrategySpec],
     initial_capital: float,
     split_ratio: float,
+    bars_per_year: float = 252.0,
     execution_assumptions: dict | None = None,
     cost_model: dict | None = None,
     transaction_cost: float | None = None,
@@ -1010,6 +1001,7 @@ def compare_portfolio_runs(
             volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
             selection=selection,
             portfolio_model=portfolio_model,
+            bars_per_year=bars_per_year,
             universe_columns=returns.columns,
             max_investment_ratio=risk_controls.max_investment_ratio,
             max_weight=risk_controls.max_weight,
@@ -1024,6 +1016,7 @@ def compare_portfolio_runs(
             split_ratio=split_ratio,
             selection=selection,
             portfolio_model=portfolio_model,
+            bars_per_year=bars_per_year,
             initial_weights=initial_weights,
             initial_selected_assets=initial_selected_assets,
             max_investment_ratio=risk_controls.max_investment_ratio,
@@ -1064,6 +1057,7 @@ def evaluate_strategy_run(
     strategy: StrategySpec,
     initial_capital: float,
     split_ratio: float,
+    bars_per_year: float = 252.0,
     execution_assumptions: dict | None = None,
     cost_model: dict | None = None,
     transaction_cost: float | None = None,
@@ -1073,6 +1067,7 @@ def evaluate_strategy_run(
         closes=closes,
         volumes=volumes,
         strategies=[strategy],
+        bars_per_year=bars_per_year,
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         execution_assumptions=execution_assumptions,
@@ -1089,6 +1084,7 @@ def compare_portfolio_models(
     initial_capital: float,
     split_ratio: float,
     transaction_cost: float,
+    bars_per_year: float = 252.0,
     portfolio_state: PortfolioState | None = None,
 ) -> list[dict]:
     return compare_portfolio_runs(
@@ -1116,6 +1112,7 @@ def compare_portfolio_models(
             )
             for portfolio_model in portfolio_models
         ],
+        bars_per_year=bars_per_year,
         initial_capital=initial_capital,
         split_ratio=split_ratio,
         execution_assumptions={
@@ -1138,8 +1135,14 @@ def select_assets(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
     selection: SelectionSpec,
+    *,
+    bars_per_year: float,
 ) -> list[str]:
-    trailing_total_returns = compute_trailing_total_returns(returns, selection)
+    trailing_total_returns = compute_trailing_total_returns(
+        returns,
+        selection,
+        bars_per_year=bars_per_year,
+    )
 
     if selection.strategy_type == "full_universe":
         return list(returns.columns)
@@ -1213,17 +1216,23 @@ def compute_strategy_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
     selection: SelectionSpec,
+    *,
+    bars_per_year: float,
 ) -> pd.Series | None:
     score_kind = selection.score_model.kind
     if score_kind == "none":
         return None
     if score_kind == "trailing_momentum":
-        return compute_trailing_total_returns(returns, selection)
+        return compute_trailing_total_returns(returns, selection, bars_per_year=bars_per_year)
     if score_kind == "momentum_low_vol":
         score_parameters = dict(selection.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.7))
         low_vol_weight = float(score_parameters.get("low_vol_weight", 0.3))
-        trailing_returns = compute_trailing_total_returns(returns, selection)
+        trailing_returns = compute_trailing_total_returns(
+            returns,
+            selection,
+            bars_per_year=bars_per_year,
+        )
         momentum_rank = trailing_returns.rank(method="average", pct=True)
         low_vol_rank = (-returns.std()).rank(method="average", pct=True)
         return momentum_weight * momentum_rank + low_vol_weight * low_vol_rank
@@ -1231,9 +1240,13 @@ def compute_strategy_score_series(
         score_parameters = dict(selection.score_parameters)
         momentum_weight = float(score_parameters.get("momentum_weight", 0.85))
         macro_weight = float(score_parameters.get("macro_weight", 0.15))
-        trailing_returns = compute_trailing_total_returns(returns, selection)
+        trailing_returns = compute_trailing_total_returns(
+            returns,
+            selection,
+            bars_per_year=bars_per_year,
+        )
         momentum_rank = trailing_returns.rank(method="average", pct=True)
-        macro_rank = compute_macro_proxy_rank(returns, selection)
+        macro_rank = compute_macro_proxy_rank(returns, selection, bars_per_year=bars_per_year)
         return momentum_weight * momentum_rank + macro_weight * macro_rank
     if score_kind == "volume_strength":
         if volume_history is None:
@@ -1244,17 +1257,20 @@ def compute_strategy_score_series(
     raise ValueError("Unsupported score model.")
 
 
-def get_ranking_window_days(selection: SelectionSpec) -> int:
+def get_ranking_window_bars(selection: SelectionSpec, *, bars_per_year: float) -> int:
     score_parameters = dict(selection.score_parameters)
-    configured_window = int(score_parameters.get("window_days", 252))
-    return max(1, configured_window)
+    configured_months = float(score_parameters.get("window_months", 12))
+    configured_bars = int(round(configured_months * bars_per_year / 12))
+    return max(1, configured_bars)
 
 
 def compute_trailing_total_returns(
     returns: pd.DataFrame,
     selection: SelectionSpec,
+    *,
+    bars_per_year: float,
 ) -> pd.Series:
-    lookback = min(len(returns), get_ranking_window_days(selection))
+    lookback = min(len(returns), get_ranking_window_bars(selection, bars_per_year=bars_per_year))
     trailing_returns = returns.iloc[-lookback:]
     return (1 + trailing_returns).prod() - 1
 
@@ -1273,8 +1289,14 @@ def compute_volume_strength(volume_history: pd.DataFrame) -> pd.Series:
 def compute_macro_proxy_rank(
     returns: pd.DataFrame,
     selection: SelectionSpec,
+    *,
+    bars_per_year: float,
 ) -> pd.Series:
-    trailing_returns = compute_trailing_total_returns(returns, selection)
+    trailing_returns = compute_trailing_total_returns(
+        returns,
+        selection,
+        bars_per_year=bars_per_year,
+    )
     risk_assets = [asset for asset in ["SPY", "QQQ", "IWM", "EFA", "EEM", "EWJ", "EWZ", "VNQ", "DBC", "USO", "BTC-USD", "ETH-USD"] if asset in trailing_returns.index]
     defensive_assets = [asset for asset in ["TLT", "IEF", "LQD", "HYG", "TIP", "GLD", "SLV", "UUP"] if asset in trailing_returns.index]
     if not risk_assets or not defensive_assets:
@@ -1300,6 +1322,8 @@ def evaluate_asset_ranking_spec(
     volumes: pd.DataFrame | None,
     split_ratio: float,
     ranking_spec: AssetRankingSpec,
+    *,
+    bars_per_year: float,
 ) -> dict:
     ranking_universe = [
         asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
@@ -1314,11 +1338,21 @@ def evaluate_asset_ranking_spec(
         history_returns = returns.iloc[:index]
         history_volumes = volumes.iloc[:index] if volumes is not None else None
         selection = ranking_spec.selection
-        selected_assets = select_assets(history_returns, history_volumes, selection)
+        selected_assets = select_assets(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
         if len(selected_assets) < 2:
             continue
 
-        score_series = compute_strategy_score_series(history_returns, history_volumes, selection)
+        score_series = compute_strategy_score_series(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
         if score_series is None:
             continue
 
@@ -1412,13 +1446,19 @@ def compute_portfolio_allocation(
     volume_history: pd.DataFrame | None,
     selection: SelectionSpec,
     portfolio_model: PortfolioModelSpec,
+    bars_per_year: float,
     universe_columns: pd.Index,
     max_investment_ratio: float,
     max_weight: float | None,
     previous_weights: np.ndarray | None,
     transaction_cost: float,
 ) -> tuple[list[str], np.ndarray]:
-    selected_assets = select_assets(history_returns, volume_history, selection)
+    selected_assets = select_assets(
+        history_returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+    )
     if not selected_assets:
         return [], np.zeros(len(universe_columns), dtype="float64")
     strategy_returns = filter_positive_variance_assets(history_returns[selected_assets])
@@ -1437,6 +1477,7 @@ def compute_portfolio_allocation(
         returns=strategy_returns,
         volume_history=volume_history[selected_assets] if volume_history is not None else None,
         selection=selection,
+        bars_per_year=bars_per_year,
     )
     weights = fit_portfolio_model(
         strategy_returns,
@@ -1452,6 +1493,7 @@ def compute_portfolio_allocation(
             weights=weights,
             history_returns=strategy_returns,
             selection=selection,
+            bars_per_year=bars_per_year,
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
         )
@@ -1468,6 +1510,7 @@ def apply_strategy_weight_tilt(
     weights: np.ndarray,
     history_returns: pd.DataFrame,
     selection: SelectionSpec,
+    bars_per_year: float,
     max_investment_ratio: float,
     max_weight: float | None,
 ) -> np.ndarray:
@@ -1479,6 +1522,7 @@ def apply_strategy_weight_tilt(
         history_returns,
         None,
         selection,
+        bars_per_year=bars_per_year,
     )
     if score_series is None:
         return weights
@@ -1518,8 +1562,14 @@ def compute_expected_return_proxy(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
     selection: SelectionSpec,
+    bars_per_year: float,
 ) -> np.ndarray | None:
-    score_series = compute_strategy_score_series(returns, volume_history, selection)
+    score_series = compute_strategy_score_series(
+        returns,
+        volume_history,
+        selection,
+        bars_per_year=bars_per_year,
+    )
     if score_series is None:
         return None
 
@@ -1674,6 +1724,7 @@ def run_portfolio_backtest(
     closes: pd.DataFrame,
     returns: pd.DataFrame,
     volumes: pd.DataFrame | None,
+    bars_per_year: float,
     split_index: int,
     split_ratio: float,
     selection: SelectionSpec,
@@ -1729,6 +1780,7 @@ def run_portfolio_backtest(
                 volume_history=volumes.iloc[:index] if volumes is not None else None,
                 selection=selection,
                 portfolio_model=portfolio_model,
+                bars_per_year=bars_per_year,
                 universe_columns=returns.columns,
                 max_investment_ratio=max_investment_ratio,
                 max_weight=max_weight,
@@ -1777,6 +1829,7 @@ def run_portfolio_backtest(
         initial_value=initial_capital,
         periods=len(returns),
         returns=portfolio_returns,
+        bars_per_year=bars_per_year,
         series=series,
         equity_key="portfolioEquity",
         turnover=round((train_turnover + test_turnover) * 100, 2),
@@ -1791,11 +1844,13 @@ def run_portfolio_backtest(
             "train": summarize_segment_from_returns(
                 dates=train_dates,
                 portfolio_returns=train_portfolio_returns,
+                bars_per_year=bars_per_year,
                 turnover=train_turnover,
             ),
             "test": summarize_segment_from_returns(
                 dates=test_dates,
                 portfolio_returns=test_portfolio_returns,
+                bars_per_year=bars_per_year,
                 turnover=test_turnover,
             ),
         },
@@ -1807,14 +1862,15 @@ def summarize_portfolio_metrics(
     initial_value: float,
     periods: int,
     returns: list[float],
+    bars_per_year: float,
     series: list[dict],
     equity_key: str,
     turnover: float,
 ) -> dict:
     return {
         "totalReturnPct": round(percent_return(final_value, initial_value), 2),
-        "cagrPct": round(cagr(final_value, initial_value, periods), 2),
-        "sharpeRatio": round(sharpe_ratio(returns), 2),
+        "cagrPct": round(cagr(final_value, initial_value, periods, bars_per_year), 2),
+        "sharpeRatio": round(sharpe_ratio(returns, bars_per_year), 2),
         "maxDrawdownPct": round(max_drawdown(series, equity_key), 2),
         "turnoverPct": round(turnover, 2),
     }
@@ -1823,6 +1879,7 @@ def summarize_portfolio_metrics(
 def summarize_segment_from_returns(
     dates: list[str],
     portfolio_returns: list[float],
+    bars_per_year: float,
     turnover: float,
 ) -> dict:
     return {
@@ -1832,6 +1889,7 @@ def summarize_segment_from_returns(
         "portfolio": summarize_metrics_from_daily_returns(
             dates=dates,
             daily_returns=portfolio_returns,
+            bars_per_year=bars_per_year,
             equity_key="portfolioEquity",
             turnover=turnover,
         ),
@@ -1861,6 +1919,7 @@ def compute_split_index(length: int, split_ratio: float) -> int:
 def summarize_metrics_from_daily_returns(
     dates: list[str],
     daily_returns: list[float],
+    bars_per_year: float,
     equity_key: str,
     turnover: float,
 ) -> dict:
@@ -1874,6 +1933,7 @@ def summarize_metrics_from_daily_returns(
         initial_value=100.0,
         periods=len(daily_returns),
         returns=daily_returns,
+        bars_per_year=bars_per_year,
         series=series,
         equity_key=equity_key,
         turnover=round(turnover * 100, 2),

@@ -12,7 +12,11 @@ from app.portfolio import build_asset_ranking_specs
 client = TestClient(app)
 
 
-def fake_fetch_market_universe(tickers: list[str], period: str) -> tuple[pd.DataFrame, dict]:
+def fake_fetch_market_universe(
+    tickers: list[str],
+    period: str,
+    timeframe: str = "1d",
+) -> tuple[pd.DataFrame, dict]:
     if period == "3y":
         frame = pd.DataFrame(
             {
@@ -52,6 +56,7 @@ def fake_fetch_market_universe(tickers: list[str], period: str) -> tuple[pd.Data
             "tickers": tickers,
             "period": period,
             "source": "test",
+            "timeframe": timeframe,
             "aligned_start_date": aligned.index[0],
             "aligned_end_date": aligned.index[-1],
             "row_count": len(aligned),
@@ -95,14 +100,19 @@ def fake_fetch_market_universe(tickers: list[str], period: str) -> tuple[pd.Data
         "tickers": tickers,
         "period": period,
         "source": "test",
+        "timeframe": timeframe,
         "aligned_start_date": aligned.index[0],
         "aligned_end_date": aligned.index[-1],
         "row_count": len(aligned),
     }
 
 
-def fake_fetch_market_universe_bundle(tickers: list[str], period: str) -> tuple[dict, dict]:
-    closes, metadata = fake_fetch_market_universe(tickers, period)
+def fake_fetch_market_universe_bundle(
+    tickers: list[str],
+    period: str,
+    timeframe: str = "1d",
+) -> tuple[dict, dict]:
+    closes, metadata = fake_fetch_market_universe(tickers, period, timeframe)
     volumes = pd.DataFrame(
         {
             ticker: [1_000_000 + index * 10_000 + offset * 1_000 for index in range(len(closes))]
@@ -156,33 +166,32 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     )
     assert payload["comparison"]["evaluation"]["kind"] == "evaluation_spec"
     assert payload["comparison"]["evaluation"]["schemaVersion"] == "v1"
-    assert payload["comparison"]["evaluation"]["datasetContext"]["source"] == "test"
-    assert payload["comparison"]["evaluation"]["datasetContext"]["period"] == "10y"
+    assert payload["comparison"]["evaluation"]["marketDataContext"]["source"] == "test"
+    assert payload["comparison"]["evaluation"]["marketDataContext"]["period"] == "10y"
     assert (
-        payload["comparison"]["evaluation"]["datasetContext"]["sanityPeriods"]
+        payload["comparison"]["evaluation"]["marketDataContext"]["sanityPeriods"]
         == ["3y"]
     )
     assert (
-        payload["comparison"]["evaluation"]["datasetContext"]["alignedStartDate"]
+        payload["comparison"]["evaluation"]["marketDataContext"]["alignedStartDate"]
         == "2025-01-01"
     )
     assert (
-        payload["comparison"]["evaluation"]["datasetContext"]["alignedEndDate"]
+        payload["comparison"]["evaluation"]["marketDataContext"]["alignedEndDate"]
         == "2025-01-07"
     )
-    assert payload["comparison"]["evaluation"]["datasetContext"]["rowCount"] == 7
+    assert payload["comparison"]["evaluation"]["marketDataContext"]["rowCount"] == 7
+    assert payload["comparison"]["marketData"]["timeframe"]["key"] == "1d"
+    assert payload["comparison"]["marketData"]["fields"] == ["close", "volume"]
     assert (
         payload["comparison"]["evaluation"]["evaluationSettings"]["splitRatioPct"]
         == 70.0
     )
+    assert payload["comparison"]["runInput"]["capitalBase"] == 10000
     assert payload["comparison"]["runInput"]["portfolioState"]["weights"][0]["asset"] == "CASH"
     assert payload["comparison"]["runInput"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
     assert len(payload["comparison"]["candidateStrategies"]) == expected_strategy_count
     assert len(payload["comparison"]["referenceStrategies"]) == expected_reference_count
-    assert (
-        payload["comparison"]["candidateStrategies"][0]["components"]["core"]["dataResolution"]["label"]
-        == "daily"
-    )
     assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_spec"
     assert payload["comparison"]["candidateStrategies"][0]["schemaVersion"] == "v1"
     assert payload["comparison"]["candidateStrategies"][0]["components"]["core"]["investmentUniverse"]["label"]
@@ -198,8 +207,8 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert (
         payload["comparison"]["candidateStrategies"][5]["components"]["optional"]["assetRankingModel"][
             "parameters"
-        ]["windowDays"]
-        == 252.0
+        ]["windowMonths"]
+        == 12.0
     )
     assert (
         payload["comparison"]["candidateStrategies"][5]["components"]["optional"]["tiltRule"][
@@ -225,7 +234,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert (
-        payload["sanityChecks"][0]["evaluation"]["datasetContext"]["alignedStartDate"]
+        payload["sanityChecks"][0]["evaluation"]["marketDataContext"]["alignedStartDate"]
         == "2025-01-01"
     )
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
@@ -254,7 +263,7 @@ def test_dashboard_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_pat
     base_config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config = copy.deepcopy(base_config)
     config.result_store_dir = str(tmp_path / "run_results")
-    config.dataset.sanity_periods = []
+    config.market_data.sanity_periods = []
     config.candidate_strategies = [config.candidate_strategies[0]]
     config.reference_strategies = []
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
@@ -283,7 +292,7 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    config.dataset.sanity_periods = []
+    config.market_data.sanity_periods = []
     config.candidate_strategies = [config.candidate_strategies[0]]
     config.reference_strategies = []
     config.condition_variants = [
@@ -379,14 +388,14 @@ def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["generation"]["method"] == "parameter_sweep"
     assert payload["generation"]["batchKey"] == "local_tilt_search_9m_v1"
-    assert payload["generation"]["spec"]["families"][0]["windowDays"] == 189
+    assert payload["generation"]["spec"]["families"][0]["windowMonths"] == 9
     assert payload["generation"]["spec"]["parameterGrid"]["tiltStrength"] == [0.15, 0.2, 0.25, 0.3, 0.35]
     assert payload["resultCount"] == 125
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == 125
     assert payload["results"][0]["family"]["label"]
     assert payload["results"][0]["parameterSet"]["tiltStrength"] in [0.15, 0.2, 0.25, 0.3, 0.35]
-    assert payload["results"][0]["parameterSet"]["windowDays"] == 189
+    assert payload["results"][0]["parameterSet"]["windowMonths"] == 9
     assert payload["results"][0]["parameterSet"]["maxWeightPct"] in [40.0, 42.5, 45.0, 47.5, 50.0]
     assert payload["results"][0]["summary"]["sharpeRatio"] is not None
 

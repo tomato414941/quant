@@ -7,14 +7,20 @@ import yfinance as yf
 def fetch_market_universe(
     tickers: list[str],
     period: str,
+    timeframe: str = "1d",
 ) -> tuple[pd.DataFrame, dict[str, str | list[str]]]:
-    bundle, metadata = fetch_market_universe_bundle(tickers=tickers, period=period)
+    bundle, metadata = fetch_market_universe_bundle(
+        tickers=tickers,
+        period=period,
+        timeframe=timeframe,
+    )
     return bundle["closes"], metadata
 
 
 def fetch_market_universe_bundle(
     tickers: list[str],
     period: str,
+    timeframe: str = "1d",
 ) -> tuple[dict[str, pd.DataFrame], dict[str, str | list[str]]]:
     normalized_tickers = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
     unique_tickers = list(dict.fromkeys(normalized_tickers))
@@ -29,7 +35,7 @@ def fetch_market_universe_bundle(
         data = yf.download(
             tickers=ticker,
             period=period,
-            interval="1d",
+            interval=timeframe,
             auto_adjust=True,
             progress=False,
             threads=False,
@@ -71,6 +77,7 @@ def fetch_market_universe_bundle(
     metadata = {
         "tickers": unique_tickers,
         "period": period,
+        "timeframe": timeframe,
         "source": source,
         "aligned_start_date": str(closes.index[0]),
         "aligned_end_date": str(closes.index[-1]),

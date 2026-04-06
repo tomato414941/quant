@@ -6,8 +6,19 @@ from app.portfolio import PortfolioState, StrategySpec
 
 
 @dataclass
-class DatasetSpec:
+class TimeframeSpec:
+    key: str
+    label: str
+    yfinance_interval: str
+    bar_seconds: int
+    bars_per_year: float
+
+
+@dataclass
+class MarketDataSpec:
     period: str
+    timeframe: TimeframeSpec
+    fields: list[str] = field(default_factory=lambda: ["close", "volume"])
     sanity_periods: list[str] = field(default_factory=list)
 
 
@@ -97,7 +108,6 @@ def build_execution_assumptions_spec(
 @dataclass
 class EvaluationSettings:
     split_ratio: float
-    initial_capital: float
 
 
 @dataclass
@@ -108,6 +118,7 @@ class EvaluationSpec:
 @dataclass
 class RunInputSpec:
     portfolio_state: PortfolioState
+    capital_base: float
 
 
 @dataclass
@@ -131,7 +142,7 @@ class ComparisonSpec:
     comparison_id: str
     title: str
     question: str
-    dataset: DatasetSpec
+    market_data: MarketDataSpec
     run_input: RunInputSpec
     execution_assumptions: ExecutionAssumptionsSpec
     evaluation: EvaluationSpec
@@ -140,3 +151,20 @@ class ComparisonSpec:
     reference_strategies: list[StrategySpec] = field(default_factory=list)
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"
+
+
+def build_timeframe_spec(
+    *,
+    key: str,
+    label: str,
+    yfinance_interval: str,
+    bar_seconds: int,
+    bars_per_year: float,
+) -> TimeframeSpec:
+    return TimeframeSpec(
+        key=key,
+        label=label,
+        yfinance_interval=yfinance_interval,
+        bar_seconds=bar_seconds,
+        bars_per_year=float(bars_per_year),
+    )

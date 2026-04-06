@@ -363,7 +363,7 @@ def test_full_universe_momentum_tilt_overweights_stronger_assets() -> None:
     assert tilted_weight_map["TLT"] < baseline_weight_map["TLT"]
 
 
-def test_momentum_window_days_changes_ranking_scores() -> None:
+def test_momentum_window_months_changes_ranking_scores() -> None:
     closes = pd.DataFrame(
         {
             "SPY": [100, 104, 108, 112, 116, 120, 124],
@@ -382,15 +382,25 @@ def test_momentum_window_days_changes_ranking_scores() -> None:
     returns = closes.pct_change().dropna()
     short_window_strategy = build_selection_spec(
         "full_universe_momentum_tilt",
-        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 3},
+        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 0.1},
     )
     long_window_strategy = build_selection_spec(
         "full_universe_momentum_tilt",
-        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_days": 7},
+        score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "window_months": 0.3},
     )
 
-    short_scores = compute_strategy_score_series(returns, None, short_window_strategy)
-    long_scores = compute_strategy_score_series(returns, None, long_window_strategy)
+    short_scores = compute_strategy_score_series(
+        returns,
+        None,
+        short_window_strategy,
+        bars_per_year=252,
+    )
+    long_scores = compute_strategy_score_series(
+        returns,
+        None,
+        long_window_strategy,
+        bars_per_year=252,
+    )
 
     assert short_scores is not None
     assert long_scores is not None

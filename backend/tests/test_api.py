@@ -145,6 +145,11 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     payload = response.json()
     expected_strategy_count = len(config.candidate_strategies)
     expected_reference_count = len(config.reference_strategies)
+    expected_predictor_count = sum(
+        1
+        for strategy in config.candidate_strategies
+        if dict(strategy.selection.score_parameters).get("predictionSupplement")
+    )
 
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["comparison"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
@@ -250,7 +255,10 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     )
     assert payload["referenceRuns"][0]["strategy"]["label"] == "等金額買い持ち + CASH"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == (expected_strategy_count + expected_reference_count) * 2
+    assert payload["runStoreSummary"]["computedRunCount"] == (
+        (expected_strategy_count + expected_reference_count) * 2
+        + expected_predictor_count * 2
+    )
     assert len(payload["sanityChecks"]) == 1
     assert payload["sanityChecks"][0]["period"] == "3y"
     assert all(
@@ -260,7 +268,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["sanityChecks"][0]["runStoreSummary"]["cachedRunCount"] == 0
     assert (
         payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"]
-        == expected_strategy_count + expected_reference_count
+        == expected_strategy_count + expected_reference_count + expected_predictor_count
     )
     assert len(payload["sanityChecks"][0]["candidateRuns"]) == expected_strategy_count
     assert len(payload["sanityChecks"][0]["referenceRuns"]) == expected_reference_count
@@ -271,7 +279,10 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
 
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == (expected_strategy_count + expected_reference_count) * 2
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == (
+        (expected_strategy_count + expected_reference_count) * 2
+        + expected_predictor_count * 2
+    )
 
 
 def test_dashboard_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp_path) -> None:

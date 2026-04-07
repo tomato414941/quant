@@ -6,14 +6,18 @@ from pathlib import Path
 from app.portfolio import (
     build_asset_ranking_specs,
     build_predictor_specs,
+    build_strategy_supplemental_predictor_spec,
     build_risk_controls_spec,
     build_selection_spec,
     build_strategy_spec,
+    compute_predictor_panel,
+    deserialize_predictor_panel,
     evaluate_asset_ranking_spec,
     evaluate_predictor_spec,
     evaluate_strategy_run,
     serialize_asset_ranking_spec,
     serialize_predictor_spec,
+    serialize_predictor_panel,
     serialize_portfolio_state,
     serialize_strategy_spec,
 )
@@ -604,6 +608,57 @@ def build_strategy_runs(
         market_bundle = market_bundles_by_timeframe[timeframe_key]
         dataset_metadata = metadata_by_timeframe[timeframe_key]
         serialized_strategy = serialize_strategy_spec(strategy_spec)
+        predictor_panel = None
+        supplemental_predictor_spec = build_strategy_supplemental_predictor_spec(strategy_spec)
+        if supplemental_predictor_spec is not None:
+            predictor_run_spec = build_run_spec(
+                run_kind="predictor_run",
+                strategy={"predictor": serialize_predictor_spec(supplemental_predictor_spec)},
+                market_slice={
+                    "period": market_data_period,
+                    "timeframe": serialize_timeframe(strategy_spec.timeframe),
+                    "fields": required_fields,
+                },
+                evaluation=serialize_evaluation(
+                    comparison,
+                    {timeframe_key: dataset_metadata},
+                    [strategy_spec.timeframe],
+                    fields=required_fields,
+                    period_override=market_data_period,
+                ),
+                execution_assumptions=serialized_execution_assumptions,
+                portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
+                capital_base=comparison.run_spec.capital_base,
+            )
+            cached_predictor_run = run_store.load(predictor_run_spec)
+            if cached_predictor_run is not None:
+                cached_run_count += 1
+                predictor_panel = deserialize_predictor_panel(cached_predictor_run.get("predictorSeries"))
+            else:
+                closes = market_bundle["closes"][list(supplemental_predictor_spec.investment_universe.tickers)]
+                volumes = (
+                    market_bundle["volumes"][list(supplemental_predictor_spec.investment_universe.tickers)]
+                    if market_bundle["volumes"] is not None
+                    else None
+                )
+                returns = closes.pct_change().dropna()
+                aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
+                predictor_result = evaluate_predictor_spec(
+                    returns=returns,
+                    volumes=aligned_volumes,
+                    split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
+                    predictor_spec=supplemental_predictor_spec,
+                    bars_per_year=supplemental_predictor_spec.timeframe.bars_per_year,
+                    predictor_panel=compute_predictor_panel(
+                        returns=returns,
+                        volumes=aligned_volumes,
+                        predictor_spec=supplemental_predictor_spec,
+                        bars_per_year=supplemental_predictor_spec.timeframe.bars_per_year,
+                    ),
+                )
+                predictor_panel = deserialize_predictor_panel(predictor_result.get("predictorSeries"))
+                run_store.save(predictor_run_spec, predictor_result)
+                computed_run_count += 1
         strategy_market_slice = {
             "period": market_data_period,
             "timeframe": serialize_timeframe(strategy_spec.timeframe),
@@ -639,6 +694,7 @@ def build_strategy_runs(
             split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
             execution_assumptions=serialized_execution_assumptions,
             portfolio_state=comparison.run_spec.portfolio_state,
+            predictor_panel=predictor_panel,
         )
         run_store.save(run_spec, run)
         computed_run_count += 1

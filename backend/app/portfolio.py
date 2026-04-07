@@ -220,6 +220,11 @@ class PredictorSpec:
     source_strategy_labels: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PredictorRunSpec:
+    predictor_spec: PredictorSpec
+
+
 def validate_split_ratio(split_ratio: float) -> None:
     if split_ratio <= 0 or split_ratio >= 1:
         raise ValueError("Split ratio must be between 0 and 1.")
@@ -1084,6 +1089,86 @@ def serialize_predictor_spec(
     }
 
 
+def build_strategy_supplemental_predictor_spec(
+    strategy: StrategySpec,
+) -> PredictorSpec | None:
+    prediction_supplement = extract_prediction_supplement(strategy.selection)
+    if prediction_supplement is None:
+        return None
+
+    horizon_spec = prediction_supplement.get("horizonSpec")
+    if not isinstance(horizon_spec, dict):
+        return None
+
+    ranking_parameters = extract_ranking_score_parameters(strategy.selection)
+    feature_spec = build_feature_spec(
+        key=f"features__{strategy.key}__supplement",
+        label=f"{strategy.selection.score_model.label} supplement features",
+        inputs=tuple(strategy.selection.feature_inputs),
+        parameters={
+            **ranking_parameters,
+            "featureKeys": PREDICTION_FEATURE_NAMES,
+        },
+    )
+    model_spec = build_prediction_model_spec(
+        key=f"model__{strategy.key}__supplement_linear",
+        kind="linear_regression",
+        label=f"{strategy.selection.score_model.label} supplement linear",
+        parameters={
+            "scoreModelKind": strategy.selection.score_model.kind,
+            "fitMode": "expanding",
+            "minTrainSamples": int(prediction_supplement.get("minTrainSamples", 50)),
+            **ranking_parameters,
+        },
+    )
+    target_spec = build_prediction_target_spec(
+        key=f"supplement__{strategy.key}__next_{int(float(horizon_spec.get('value', 1)))}{str(horizon_spec.get('unit', 'bars'))}_excess_return",
+        label=f"補助予測 {horizon_spec.get('value')} {horizon_spec.get('unit')}",
+        kind="forward_excess_return",
+        horizon_spec=horizon_spec,
+    )
+    return PredictorSpec(
+        key=f"predictor__{strategy.key}__supplement",
+        label=f"{strategy.label} / 予測補助",
+        description=strategy.description,
+        timeframe=strategy.timeframe,
+        investment_universe=strategy.investment_universe,
+        feature_spec=feature_spec,
+        model_spec=model_spec,
+        target_spec=target_spec,
+        selection=strategy.selection,
+        source_strategy_keys=(strategy.key,),
+        source_strategy_labels=(strategy.label,),
+    )
+
+
+def serialize_predictor_panel(
+    predictor_panel: pd.DataFrame,
+) -> dict:
+    compact_panel = predictor_panel.dropna(how="all")
+    return {
+        "dates": [str(index) for index in compact_panel.index],
+        "assets": [str(column) for column in compact_panel.columns],
+        "values": [
+            [None if pd.isna(value) else float(value) for value in row]
+            for row in compact_panel.to_numpy(dtype="float64")
+        ],
+    }
+
+
+def deserialize_predictor_panel(
+    payload: dict | None,
+) -> pd.DataFrame | None:
+    if not payload:
+        return None
+    dates = payload.get("dates", [])
+    assets = payload.get("assets", [])
+    values = payload.get("values", [])
+    if not dates or not assets:
+        return None
+    return pd.DataFrame(values, index=dates, columns=assets, dtype="float64")
+
+
 def convert_window_spec_to_bars(
     window_spec: dict[str, object],
     *,
@@ -1259,6 +1344,7 @@ def compare_portfolio_runs(
     cost_model: dict | None = None,
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
+    predictor_panels_by_strategy: dict[str, pd.DataFrame] | None = None,
 ) -> list[dict]:
     if not strategies:
         raise ValueError("At least one strategy is required.")
@@ -1329,6 +1415,8 @@ def compare_portfolio_runs(
             max_weight=risk_controls.max_weight,
             previous_weights=initial_portfolio_weights,
             transaction_cost=default_transaction_cost,
+            current_date=str(returns.index[split_index]) if split_index < len(returns.index) else None,
+            predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
         )
         backtest = run_portfolio_backtest(
             closes=strategy_closes,
@@ -1350,6 +1438,7 @@ def compare_portfolio_runs(
             min_adv_notional=min_adv_notional,
             max_weight=risk_controls.max_weight,
             rebalance_schedule=rebalance_schedule,
+            predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
         )
 
         runs.append(
@@ -1384,6 +1473,7 @@ def evaluate_strategy_run(
     cost_model: dict | None = None,
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
+    predictor_panel: pd.DataFrame | None = None,
 ) -> dict:
     return compare_portfolio_runs(
         closes=closes,
@@ -1396,6 +1486,7 @@ def evaluate_strategy_run(
         cost_model=cost_model,
         transaction_cost=transaction_cost,
         portfolio_state=portfolio_state,
+        predictor_panels_by_strategy=None if predictor_panel is None else {strategy.key: predictor_panel},
     )[0]
 
 
@@ -1768,6 +1859,138 @@ def fit_linear_prediction_beta(
     return np.linalg.pinv(xtx) @ xty
 
 
+def compute_predictor_panel(
+    returns: pd.DataFrame,
+    volumes: pd.DataFrame | None,
+    predictor_spec: PredictorSpec,
+    *,
+    bars_per_year: float,
+) -> pd.DataFrame:
+    ranking_spec = AssetRankingSpec(
+        key=predictor_spec.key,
+        label=predictor_spec.label,
+        description=predictor_spec.description,
+        timeframe=predictor_spec.timeframe,
+        investment_universe=predictor_spec.investment_universe,
+        selection=predictor_spec.selection,
+        source_strategy_keys=predictor_spec.source_strategy_keys,
+        source_strategy_labels=predictor_spec.source_strategy_labels,
+    )
+    ranking_universe = [
+        asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
+    ]
+    scoped_returns = returns[ranking_universe]
+    scoped_volumes = volumes[ranking_universe] if volumes is not None else None
+    prediction_panel = pd.DataFrame(index=scoped_returns.index, columns=scoped_returns.columns, dtype="float64")
+
+    target_horizon_bars = convert_horizon_spec_to_bars(
+        {key: value for key, value in predictor_spec.target_spec.horizon_spec},
+        bars_per_year=bars_per_year,
+    )
+    feature_names = list(PREDICTION_FEATURE_NAMES)
+    feature_count = len(feature_names)
+    xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
+    xty = np.zeros(feature_count + 1, dtype="float64")
+    train_sample_count = 0
+    model_parameters = {key: value for key, value in predictor_spec.model_spec.parameters}
+    min_train_samples = int(model_parameters.get("minTrainSamples", 1))
+    signal_weight = float(model_parameters.get("signalWeight", 0.8))
+    linear_weight = float(model_parameters.get("linearWeight", 0.2))
+
+    for index in range(2, len(scoped_returns)):
+        history_returns = scoped_returns.iloc[:index]
+        history_volumes = scoped_volumes.iloc[:index] if scoped_volumes is not None else None
+        selection = ranking_spec.selection
+        selected_assets = select_assets(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        if len(selected_assets) < 2:
+            continue
+
+        base_scores = compute_strategy_score_series_base(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        if base_scores is None:
+            continue
+        selected_scores = base_scores.loc[selected_assets].dropna()
+        if len(selected_scores) < 2 or selected_scores.nunique() < 2:
+            continue
+
+        feature_frame = compute_prediction_feature_frame(
+            history_returns,
+            history_volumes,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        aligned_features = feature_frame.loc[selected_scores.index, feature_names].astype("float64")
+        if len(aligned_features) < 2:
+            continue
+
+        prediction_values: pd.Series | None = None
+        if predictor_spec.model_spec.kind == "ranking_signal_model":
+            prediction_values = selected_scores
+        elif predictor_spec.model_spec.kind in {"linear_regression", "blended_signal_model"}:
+            if train_sample_count >= min_train_samples:
+                design_matrix = np.column_stack(
+                    [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+                )
+                beta = np.linalg.pinv(xtx) @ xty
+                linear_prediction_values = pd.Series(
+                    design_matrix @ beta,
+                    index=aligned_features.index,
+                    dtype="float64",
+                )
+                if linear_prediction_values.nunique() >= 2:
+                    if predictor_spec.model_spec.kind == "linear_regression":
+                        prediction_values = linear_prediction_values
+                    else:
+                        blended = (
+                            signal_weight * standardize_prediction_series(selected_scores)
+                            + linear_weight * standardize_prediction_series(linear_prediction_values)
+                        )
+                        if blended.nunique() >= 2:
+                            prediction_values = blended
+
+        if prediction_values is not None:
+            prediction_panel.loc[scoped_returns.index[index], prediction_values.index] = prediction_values.to_numpy(
+                dtype="float64"
+            )
+
+        if index > len(scoped_returns) - target_horizon_bars:
+            continue
+        forward_window = scoped_returns.iloc[index : index + target_horizon_bars]
+        if len(forward_window) < target_horizon_bars:
+            continue
+        forward_returns = ((1 + forward_window).prod() - 1).loc[selected_scores.index].dropna()
+        if len(forward_returns) < 2 or forward_returns.nunique() < 2:
+            continue
+
+        aligned_features = aligned_features.loc[forward_returns.index]
+        if len(aligned_features) < 2:
+            continue
+        if predictor_spec.target_spec.baseline == "cross_sectional_mean":
+            target_values = forward_returns - float(forward_returns.mean())
+        else:
+            raise ValueError("Unsupported prediction target baseline.")
+        if target_values.nunique() < 2:
+            continue
+
+        design_matrix = np.column_stack(
+            [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+        )
+        xtx += design_matrix.T @ design_matrix
+        xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
+        train_sample_count += len(aligned_features)
+
+    return prediction_panel
+
+
 def compute_prediction_supplemented_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
@@ -1775,6 +1998,7 @@ def compute_prediction_supplemented_score_series(
     *,
     bars_per_year: float,
     base_score_series: pd.Series,
+    predictor_snapshot: pd.Series | None = None,
 ) -> pd.Series:
     prediction_supplement = extract_prediction_supplement(selection)
     if prediction_supplement is None:
@@ -1784,32 +2008,38 @@ def compute_prediction_supplemented_score_series(
     if not isinstance(horizon_spec, dict):
         return base_score_series
 
-    beta = fit_linear_prediction_beta(
-        returns,
-        volume_history,
-        selection,
-        bars_per_year=bars_per_year,
-        horizon_spec=horizon_spec,
-        min_train_samples=int(prediction_supplement.get("minTrainSamples", 50)),
-    )
-    if beta is None:
-        return base_score_series
+    if predictor_snapshot is not None:
+        linear_prediction_values = predictor_snapshot.reindex(base_score_series.index).dropna()
+        if len(linear_prediction_values) < 2:
+            return base_score_series
+        base_score_series = base_score_series.loc[linear_prediction_values.index]
+    else:
+        beta = fit_linear_prediction_beta(
+            returns,
+            volume_history,
+            selection,
+            bars_per_year=bars_per_year,
+            horizon_spec=horizon_spec,
+            min_train_samples=int(prediction_supplement.get("minTrainSamples", 50)),
+        )
+        if beta is None:
+            return base_score_series
 
-    feature_frame = compute_prediction_feature_frame(
-        returns,
-        volume_history,
-        selection,
-        bars_per_year=bars_per_year,
-    )
-    aligned_features = feature_frame.loc[base_score_series.index, list(PREDICTION_FEATURE_NAMES)].astype("float64")
-    design_matrix = np.column_stack(
-        [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
-    )
-    linear_prediction_values = pd.Series(
-        design_matrix @ beta,
-        index=aligned_features.index,
-        dtype="float64",
-    )
+        feature_frame = compute_prediction_feature_frame(
+            returns,
+            volume_history,
+            selection,
+            bars_per_year=bars_per_year,
+        )
+        aligned_features = feature_frame.loc[base_score_series.index, list(PREDICTION_FEATURE_NAMES)].astype("float64")
+        design_matrix = np.column_stack(
+            [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+        )
+        linear_prediction_values = pd.Series(
+            design_matrix @ beta,
+            index=aligned_features.index,
+            dtype="float64",
+        )
     if linear_prediction_values.nunique() < 2:
         return base_score_series
 
@@ -1830,6 +2060,8 @@ def compute_strategy_score_series(
     selection: SelectionSpec,
     *,
     bars_per_year: float,
+    current_date: str | None = None,
+    predictor_panel: pd.DataFrame | None = None,
 ) -> pd.Series | None:
     base_score_series = compute_strategy_score_series_base(
         returns,
@@ -1839,12 +2071,16 @@ def compute_strategy_score_series(
     )
     if base_score_series is None:
         return None
+    predictor_snapshot = None
+    if predictor_panel is not None and current_date is not None and current_date in predictor_panel.index:
+        predictor_snapshot = predictor_panel.loc[current_date]
     return compute_prediction_supplemented_score_series(
         returns,
         volume_history,
         selection,
         bars_per_year=bars_per_year,
         base_score_series=base_score_series,
+        predictor_snapshot=predictor_snapshot,
     )
 
 
@@ -1942,86 +2178,45 @@ def evaluate_predictor_spec(
     predictor_spec: PredictorSpec,
     *,
     bars_per_year: float,
+    predictor_panel: pd.DataFrame | None = None,
 ) -> dict:
-    ranking_spec = AssetRankingSpec(
-        key=predictor_spec.key,
-        label=predictor_spec.label,
-        description=predictor_spec.description,
-        timeframe=predictor_spec.timeframe,
-        investment_universe=predictor_spec.investment_universe,
-        selection=predictor_spec.selection,
-        source_strategy_keys=predictor_spec.source_strategy_keys,
-        source_strategy_labels=predictor_spec.source_strategy_labels,
-    )
-    target_spec = predictor_spec.target_spec
     ranking_universe = [
-        asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
+        asset for asset in predictor_spec.investment_universe.tickers if asset in returns.columns
     ]
     returns = returns[ranking_universe]
-    volumes = volumes[ranking_universe] if volumes is not None else None
     split_index = compute_split_index(len(returns), split_ratio)
     target_horizon_bars = convert_horizon_spec_to_bars(
-        {key: value for key, value in target_spec.horizon_spec},
+        {key: value for key, value in predictor_spec.target_spec.horizon_spec},
         bars_per_year=bars_per_year,
     )
     observations: list[dict] = []
     latest_top_assets: list[str] = []
     latest_scores: list[dict[str, float | str]] = []
-    feature_names = ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength")
-    feature_count = len(feature_names)
-    train_sample_count = 0
-    xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
-    xty = np.zeros(feature_count + 1, dtype="float64")
-    model_parameters = {key: value for key, value in predictor_spec.model_spec.parameters}
-    min_train_samples = int(model_parameters.get("minTrainSamples", 1))
-    signal_weight = float(model_parameters.get("signalWeight", 0.8))
-    linear_weight = float(model_parameters.get("linearWeight", 0.2))
+    if predictor_panel is None:
+        predictor_panel = compute_predictor_panel(
+            returns=returns,
+            volumes=volumes[ranking_universe] if volumes is not None else None,
+            predictor_spec=predictor_spec,
+            bars_per_year=bars_per_year,
+        )
 
     for index in range(2, len(returns) - target_horizon_bars + 1):
-        history_returns = returns.iloc[:index]
-        history_volumes = volumes.iloc[:index] if volumes is not None else None
-        selection = ranking_spec.selection
-        selected_assets = select_assets(
-            history_returns,
-            history_volumes,
-            selection,
-            bars_per_year=bars_per_year,
-        )
-        if len(selected_assets) < 2:
-            continue
-
-        score_series = compute_strategy_score_series(
-            history_returns,
-            history_volumes,
-            selection,
-            bars_per_year=bars_per_year,
-        )
-        if score_series is None:
-            continue
-        feature_frame = compute_prediction_feature_frame(
-            history_returns,
-            history_volumes,
-            selection,
-            bars_per_year=bars_per_year,
-        )
-
-        selected_scores = score_series.loc[selected_assets].dropna()
-        if len(selected_scores) < 2 or selected_scores.nunique() < 2:
+        prediction_values = predictor_panel.iloc[index].dropna()
+        if len(prediction_values) < 2 or prediction_values.nunique() < 2:
             continue
 
         forward_window = returns.iloc[index : index + target_horizon_bars]
         if len(forward_window) < target_horizon_bars:
             continue
-        forward_returns = ((1 + forward_window).prod() - 1).loc[selected_scores.index].dropna()
+        forward_returns = ((1 + forward_window).prod() - 1).loc[prediction_values.index].dropna()
         if len(forward_returns) < 2:
             continue
 
-        aligned_scores = selected_scores.loc[forward_returns.index]
-        aligned_features = feature_frame.loc[forward_returns.index, list(feature_names)].astype("float64")
-        if len(aligned_scores) < 2 or aligned_scores.nunique() < 2 or forward_returns.nunique() < 2:
+        prediction_values = prediction_values.loc[forward_returns.index]
+        if len(prediction_values) < 2 or prediction_values.nunique() < 2 or forward_returns.nunique() < 2:
             continue
 
-        if target_spec.baseline == "cross_sectional_mean":
+        if predictor_spec.target_spec.baseline == "cross_sectional_mean":
             target_values = forward_returns - float(forward_returns.mean())
         else:
             raise ValueError("Unsupported prediction target baseline.")
@@ -2029,45 +2224,7 @@ def evaluate_predictor_spec(
         if target_values.nunique() < 2:
             continue
 
-        if predictor_spec.model_spec.kind == "ranking_signal_model":
-            prediction_values = aligned_scores
-        elif predictor_spec.model_spec.kind in {"linear_regression", "blended_signal_model"}:
-            design_matrix = np.column_stack(
-                [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
-            )
-            if train_sample_count < min_train_samples:
-                xtx += design_matrix.T @ design_matrix
-                xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
-                train_sample_count += len(aligned_features)
-                continue
-            beta = np.linalg.pinv(xtx) @ xty
-            prediction_array = design_matrix @ beta
-            linear_prediction_values = pd.Series(
-                prediction_array,
-                index=aligned_features.index,
-                dtype="float64",
-            )
-            if linear_prediction_values.nunique() < 2:
-                xtx += design_matrix.T @ design_matrix
-                xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
-                train_sample_count += len(aligned_features)
-                continue
-            if predictor_spec.model_spec.kind == "linear_regression":
-                prediction_values = linear_prediction_values
-            else:
-                prediction_values = (
-                    signal_weight * standardize_prediction_series(aligned_scores)
-                    + linear_weight * standardize_prediction_series(linear_prediction_values)
-                )
-                if prediction_values.nunique() < 2:
-                    xtx += design_matrix.T @ design_matrix
-                    xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
-                    train_sample_count += len(aligned_features)
-                    continue
-        else:
-            raise ValueError("Unsupported prediction model kind.")
-
-        group_size = max(1, len(aligned_scores) // 3)
+        group_size = max(1, len(prediction_values) // 3)
         ordered_scores = prediction_values.sort_values(ascending=False)
         top_assets = list(ordered_scores.head(group_size).index)
         bottom_assets = list(ordered_scores.tail(group_size).index)
@@ -2091,19 +2248,14 @@ def evaluate_predictor_spec(
                 "topReturn": top_return,
                 "bottomReturn": bottom_return,
                 "topMinusBottom": top_return - bottom_return,
-                "assetCount": len(aligned_scores),
+                "assetCount": len(prediction_values),
                 "segment": "train" if index < split_index else "test",
             }
         )
-        design_matrix = np.column_stack(
-            [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
-        )
-        xtx += design_matrix.T @ design_matrix
-        xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
-        train_sample_count += len(aligned_features)
 
     return {
         "predictorSpec": serialize_predictor_spec(predictor_spec),
+        "predictorSeries": serialize_predictor_panel(predictor_panel),
         "latestTopAssets": latest_top_assets,
         "latestScores": latest_scores,
         "overall": summarize_prediction_observations(observations),
@@ -2206,6 +2358,8 @@ def compute_portfolio_allocation(
     max_weight: float | None,
     previous_weights: np.ndarray | None,
     transaction_cost: float,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
 ) -> tuple[list[str], np.ndarray]:
     selected_assets = select_assets(
         history_returns,
@@ -2232,6 +2386,8 @@ def compute_portfolio_allocation(
         volume_history=volume_history[selected_assets] if volume_history is not None else None,
         selection=selection,
         bars_per_year=bars_per_year,
+        current_date=current_date,
+        predictor_panel=predictor_panel,
     )
     weights = fit_portfolio_model(
         strategy_returns,
@@ -2250,6 +2406,8 @@ def compute_portfolio_allocation(
             bars_per_year=bars_per_year,
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
+            current_date=current_date,
+            predictor_panel=predictor_panel,
         )
     expanded_weights = expand_weights(
         universe_columns=universe_columns,
@@ -2267,6 +2425,8 @@ def apply_strategy_weight_tilt(
     bars_per_year: float,
     max_investment_ratio: float,
     max_weight: float | None,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
 ) -> np.ndarray:
     score_parameters = dict(selection.score_parameters)
     if "tilt_strength" not in score_parameters:
@@ -2277,6 +2437,8 @@ def apply_strategy_weight_tilt(
         None,
         selection,
         bars_per_year=bars_per_year,
+        current_date=current_date,
+        predictor_panel=predictor_panel,
     )
     if score_series is None:
         return weights
@@ -2317,12 +2479,16 @@ def compute_expected_return_proxy(
     volume_history: pd.DataFrame | None,
     selection: SelectionSpec,
     bars_per_year: float,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
 ) -> np.ndarray | None:
     score_series = compute_strategy_score_series(
         returns,
         volume_history,
         selection,
         bars_per_year=bars_per_year,
+        current_date=current_date,
+        predictor_panel=predictor_panel,
     )
     if score_series is None:
         return None
@@ -2494,6 +2660,7 @@ def run_portfolio_backtest(
     min_adv_notional: float,
     max_weight: float | None,
     rebalance_schedule: str,
+    predictor_panel: pd.DataFrame | None,
 ) -> dict:
     portfolio_equity = initial_capital
     portfolio_returns: list[float] = []
@@ -2540,6 +2707,8 @@ def run_portfolio_backtest(
                 max_weight=max_weight,
                 previous_weights=current_weights,
                 transaction_cost=transaction_cost,
+                current_date=str(date),
+                predictor_panel=predictor_panel,
             )
             weight_delta = np.abs(rebalanced_weights - current_weights)
             trade_turnover = float(weight_delta.sum())

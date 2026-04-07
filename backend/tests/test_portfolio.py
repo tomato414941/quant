@@ -1,6 +1,7 @@
 import pandas as pd
 
 from app.portfolio import (
+    build_strategy_supplemental_predictor_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
     build_portfolio_state,
@@ -8,9 +9,11 @@ from app.portfolio import (
     build_selection_spec,
     build_strategy_spec,
     compare_portfolio_runs,
+    compute_predictor_panel,
     convert_window_spec_to_bars,
     compute_trade_cost,
     compute_strategy_score_series,
+    evaluate_predictor_spec,
     should_rebalance,
 )
 
@@ -474,6 +477,137 @@ def test_prediction_supplement_changes_momentum_scores() -> None:
     assert baseline_scores is not None
     assert supplemented_scores is not None
     assert not baseline_scores.equals(supplemented_scores)
+
+
+def test_predictor_evaluation_includes_predictor_series() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106, 107, 108, 109],
+            "QQQ": [100, 103, 105, 107, 108, 110, 112, 113, 115],
+            "TLT": [100, 100, 99, 100, 101, 102, 101, 101, 102],
+        },
+        index=[
+            "2025-01-01",
+            "2025-01-02",
+            "2025-01-03",
+            "2025-01-04",
+            "2025-01-05",
+            "2025-01-06",
+            "2025-01-07",
+            "2025-01-08",
+            "2025-01-09",
+        ],
+    )
+    returns = closes.pct_change().dropna()
+    strategy = make_strategy(
+        "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
+        score_parameters={
+            "tilt_strength": 0.35,
+            "tilt_shape": 1.0,
+            "windowSpec": {"unit": "bars", "value": 3},
+            "predictionSupplement": {
+                "horizonSpec": {"unit": "bars", "value": 2},
+                "minTrainSamples": 3,
+                "signalWeight": 0.8,
+                "linearWeight": 0.2,
+            },
+        },
+    )
+    predictor_spec = build_strategy_supplemental_predictor_spec(strategy)
+
+    assert predictor_spec is not None
+
+    result = evaluate_predictor_spec(
+        returns=returns,
+        volumes=None,
+        split_ratio=0.6,
+        predictor_spec=predictor_spec,
+        bars_per_year=252,
+    )
+
+    assert result["predictorSpec"]["kind"] == "predictor_spec"
+    assert "predictorSeries" in result
+    assert result["predictorSeries"]["assets"]
+
+
+def test_strategy_run_can_reuse_predictor_panel() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106, 107, 108, 109],
+            "QQQ": [100, 103, 105, 107, 108, 110, 112, 113, 115],
+            "TLT": [100, 100, 99, 100, 101, 102, 101, 101, 102],
+        },
+        index=[
+            "2025-01-01",
+            "2025-01-02",
+            "2025-01-03",
+            "2025-01-04",
+            "2025-01-05",
+            "2025-01-06",
+            "2025-01-07",
+            "2025-01-08",
+            "2025-01-09",
+        ],
+    )
+    returns = closes.pct_change().dropna()
+    volumes = pd.DataFrame(
+        {
+            "SPY": [1_000_000, 1_020_000, 1_010_000, 1_030_000, 1_040_000, 1_050_000, 1_045_000, 1_060_000, 1_070_000],
+            "QQQ": [900_000, 940_000, 960_000, 970_000, 990_000, 1_000_000, 1_010_000, 1_030_000, 1_050_000],
+            "TLT": [800_000, 805_000, 810_000, 815_000, 820_000, 825_000, 830_000, 835_000, 840_000],
+        },
+        index=closes.index,
+    )
+    strategy = make_strategy(
+        "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
+        score_parameters={
+            "tilt_strength": 0.35,
+            "tilt_shape": 1.0,
+            "windowSpec": {"unit": "bars", "value": 3},
+            "predictionSupplement": {
+                "horizonSpec": {"unit": "bars", "value": 2},
+                "minTrainSamples": 3,
+                "signalWeight": 0.8,
+                "linearWeight": 0.2,
+            },
+        },
+    )
+    predictor_spec = build_strategy_supplemental_predictor_spec(strategy)
+
+    assert predictor_spec is not None
+
+    predictor_panel = compute_predictor_panel(
+        returns=returns,
+        volumes=volumes.loc[returns.index],
+        predictor_spec=predictor_spec,
+        bars_per_year=252,
+    )
+
+    inline_payload = compare_portfolio_runs(
+        closes=closes,
+        volumes=volumes,
+        strategies=[strategy],
+        initial_capital=10_000,
+        split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
+        transaction_cost=0.001,
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+    )
+    reused_payload = compare_portfolio_runs(
+        closes=closes,
+        volumes=volumes,
+        strategies=[strategy],
+        initial_capital=10_000,
+        split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
+        transaction_cost=0.001,
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+        predictor_panels_by_strategy={strategy.key: predictor_panel},
+    )
+
+    assert reused_payload[0]["summary"] == inline_payload[0]["summary"]
 
 
 def test_convert_window_spec_to_bars_supports_duration_units() -> None:

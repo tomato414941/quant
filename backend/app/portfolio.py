@@ -143,6 +143,16 @@ class RiskControlsSpec:
 
 
 @dataclass(frozen=True)
+class PredictorUseSpec:
+    predictor_key: str
+    label: str
+    target_horizon_spec: tuple[tuple[str, object], ...]
+    min_train_samples: int
+    signal_weight: float
+    predictor_weight: float
+
+
+@dataclass(frozen=True)
 class StrategySpec:
     strategy_id: str
     version: str
@@ -155,6 +165,7 @@ class StrategySpec:
     portfolio_model: PortfolioModelSpec
     execution_policy: ExecutionPolicySpec
     risk_controls: RiskControlsSpec
+    predictor_use: PredictorUseSpec | None = None
     extensions: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -549,6 +560,25 @@ def build_risk_controls_spec(
     )
 
 
+def build_predictor_use_spec(
+    *,
+    predictor_key: str,
+    label: str,
+    target_horizon_spec: dict[str, object],
+    min_train_samples: int = 50,
+    signal_weight: float = 0.8,
+    predictor_weight: float = 0.2,
+) -> PredictorUseSpec:
+    return PredictorUseSpec(
+        predictor_key=predictor_key,
+        label=label,
+        target_horizon_spec=tuple(sorted(target_horizon_spec.items())),
+        min_train_samples=int(min_train_samples),
+        signal_weight=float(signal_weight),
+        predictor_weight=float(predictor_weight),
+    )
+
+
 def build_strategy_spec(
     *,
     timeframe: TimeframeSpec | None = None,
@@ -557,6 +587,7 @@ def build_strategy_spec(
     portfolio_model: PortfolioModelSpec,
     execution_policy: ExecutionPolicySpec | None = None,
     risk_controls: RiskControlsSpec,
+    predictor_use: PredictorUseSpec | None = None,
     strategy_id: str | None = None,
     version: str = "v1",
     hypothesis: str | None = None,
@@ -597,6 +628,7 @@ def build_strategy_spec(
             rebalance_schedule="year_end",
         ),
         risk_controls=risk_controls,
+        predictor_use=predictor_use,
         extensions=tuple(sorted((extensions or {}).items())),
     )
 
@@ -653,10 +685,19 @@ def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str
         serialized["lowVolWeight"] = float(score_parameters["low_vol_weight"])
     if "macro_weight" in score_parameters:
         serialized["macroWeight"] = float(score_parameters["macro_weight"])
-    if "predictionSupplement" in score_parameters:
-        serialized["predictionSupplement"] = dict(score_parameters["predictionSupplement"])
 
     return serialized
+
+
+def serialize_predictor_use_spec(predictor_use: PredictorUseSpec) -> dict[str, object]:
+    return {
+        "predictorKey": predictor_use.predictor_key,
+        "label": predictor_use.label,
+        "targetHorizonSpec": dict(predictor_use.target_horizon_spec),
+        "minTrainSamples": predictor_use.min_train_samples,
+        "signalWeight": predictor_use.signal_weight,
+        "predictorWeight": predictor_use.predictor_weight,
+    }
 
 
 def serialize_tilt_rule(strategy: StrategySpec) -> dict | None:
@@ -723,6 +764,9 @@ def serialize_strategy_spec(strategy: StrategySpec) -> dict:
             },
             "optional": {
                 "assetRankingModel": ranking_model,
+                "predictor": None
+                if strategy.predictor_use is None
+                else serialize_predictor_use_spec(strategy.predictor_use),
                 "featureInputs": list(strategy.selection.feature_inputs),
                 "filterRules": [
                     {
@@ -1092,12 +1136,8 @@ def serialize_predictor_spec(
 def build_strategy_supplemental_predictor_spec(
     strategy: StrategySpec,
 ) -> PredictorSpec | None:
-    prediction_supplement = extract_prediction_supplement(strategy.selection)
-    if prediction_supplement is None:
-        return None
-
-    horizon_spec = prediction_supplement.get("horizonSpec")
-    if not isinstance(horizon_spec, dict):
+    predictor_use = strategy.predictor_use
+    if predictor_use is None:
         return None
 
     ranking_parameters = extract_ranking_score_parameters(strategy.selection)
@@ -1117,19 +1157,20 @@ def build_strategy_supplemental_predictor_spec(
         parameters={
             "scoreModelKind": strategy.selection.score_model.kind,
             "fitMode": "expanding",
-            "minTrainSamples": int(prediction_supplement.get("minTrainSamples", 50)),
+            "minTrainSamples": predictor_use.min_train_samples,
             **ranking_parameters,
         },
     )
+    horizon_spec = dict(predictor_use.target_horizon_spec)
     target_spec = build_prediction_target_spec(
-        key=f"supplement__{strategy.key}__next_{int(float(horizon_spec.get('value', 1)))}{str(horizon_spec.get('unit', 'bars'))}_excess_return",
-        label=f"補助予測 {horizon_spec.get('value')} {horizon_spec.get('unit')}",
+        key=predictor_use.predictor_key,
+        label=predictor_use.label,
         kind="forward_excess_return",
         horizon_spec=horizon_spec,
     )
     return PredictorSpec(
-        key=f"predictor__{strategy.key}__supplement",
-        label=f"{strategy.label} / 予測補助",
+        key=predictor_use.predictor_key,
+        label=f"{strategy.label} / {predictor_use.label}",
         description=strategy.description,
         timeframe=strategy.timeframe,
         investment_universe=strategy.investment_universe,
@@ -1401,13 +1442,12 @@ def compare_portfolio_runs(
             portfolio_state=portfolio_state,
         )
 
-        selection = strategy.selection
         portfolio_model = strategy.portfolio_model
         risk_controls = strategy.risk_controls
         initial_selected_assets, initial_weights = compute_portfolio_allocation(
             history_returns=train_returns,
             volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
-            selection=selection,
+            strategy=strategy,
             portfolio_model=portfolio_model,
             bars_per_year=bars_per_year,
             universe_columns=returns.columns,
@@ -1424,7 +1464,7 @@ def compare_portfolio_runs(
             volumes=strategy_volumes,
             split_index=split_index,
             split_ratio=split_ratio,
-            selection=selection,
+            strategy=strategy,
             portfolio_model=portfolio_model,
             bars_per_year=bars_per_year,
             initial_weights=initial_weights,
@@ -1668,13 +1708,6 @@ def compute_strategy_score_series_base(
     if score_kind == "volatility":
         return -returns.std()
     raise ValueError("Unsupported score model.")
-
-
-def extract_prediction_supplement(selection: SelectionSpec) -> dict[str, object] | None:
-    prediction_supplement = dict(selection.score_parameters).get("predictionSupplement")
-    if isinstance(prediction_supplement, dict):
-        return prediction_supplement
-    return None
 
 
 def get_ranking_window_bars(selection: SelectionSpec, *, bars_per_year: float) -> int:
@@ -1994,18 +2027,19 @@ def compute_predictor_panel(
 def compute_prediction_supplemented_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    strategy_or_selection: StrategySpec | SelectionSpec,
     *,
     bars_per_year: float,
     base_score_series: pd.Series,
     predictor_snapshot: pd.Series | None = None,
 ) -> pd.Series:
-    prediction_supplement = extract_prediction_supplement(selection)
-    if prediction_supplement is None:
-        return base_score_series
-
-    horizon_spec = prediction_supplement.get("horizonSpec")
-    if not isinstance(horizon_spec, dict):
+    if isinstance(strategy_or_selection, StrategySpec):
+        selection = strategy_or_selection.selection
+        predictor_use = strategy_or_selection.predictor_use
+    else:
+        selection = strategy_or_selection
+        predictor_use = None
+    if predictor_use is None:
         return base_score_series
 
     if predictor_snapshot is not None:
@@ -2019,8 +2053,8 @@ def compute_prediction_supplemented_score_series(
             volume_history,
             selection,
             bars_per_year=bars_per_year,
-            horizon_spec=horizon_spec,
-            min_train_samples=int(prediction_supplement.get("minTrainSamples", 50)),
+            horizon_spec=dict(predictor_use.target_horizon_spec),
+            min_train_samples=predictor_use.min_train_samples,
         )
         if beta is None:
             return base_score_series
@@ -2043,8 +2077,8 @@ def compute_prediction_supplemented_score_series(
     if linear_prediction_values.nunique() < 2:
         return base_score_series
 
-    signal_weight = float(prediction_supplement.get("signalWeight", 0.8))
-    linear_weight = float(prediction_supplement.get("linearWeight", 0.2))
+    signal_weight = predictor_use.signal_weight
+    linear_weight = predictor_use.predictor_weight
     blended_scores = (
         signal_weight * standardize_prediction_series(base_score_series)
         + linear_weight * standardize_prediction_series(linear_prediction_values)
@@ -2057,12 +2091,17 @@ def compute_prediction_supplemented_score_series(
 def compute_strategy_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    strategy_or_selection: StrategySpec | SelectionSpec,
     *,
     bars_per_year: float,
     current_date: str | None = None,
     predictor_panel: pd.DataFrame | None = None,
 ) -> pd.Series | None:
+    selection = (
+        strategy_or_selection.selection
+        if isinstance(strategy_or_selection, StrategySpec)
+        else strategy_or_selection
+    )
     base_score_series = compute_strategy_score_series_base(
         returns,
         volume_history,
@@ -2077,7 +2116,7 @@ def compute_strategy_score_series(
     return compute_prediction_supplemented_score_series(
         returns,
         volume_history,
-        selection,
+        strategy_or_selection,
         bars_per_year=bars_per_year,
         base_score_series=base_score_series,
         predictor_snapshot=predictor_snapshot,
@@ -2350,7 +2389,7 @@ def expand_weights(
 def compute_portfolio_allocation(
     history_returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    strategy: StrategySpec,
     portfolio_model: PortfolioModelSpec,
     bars_per_year: float,
     universe_columns: pd.Index,
@@ -2364,7 +2403,7 @@ def compute_portfolio_allocation(
     selected_assets = select_assets(
         history_returns,
         volume_history,
-        selection,
+        strategy.selection,
         bars_per_year=bars_per_year,
     )
     if not selected_assets:
@@ -2384,7 +2423,7 @@ def compute_portfolio_allocation(
     expected_return_proxy = compute_expected_return_proxy(
         returns=strategy_returns,
         volume_history=volume_history[selected_assets] if volume_history is not None else None,
-        selection=selection,
+        strategy=strategy,
         bars_per_year=bars_per_year,
         current_date=current_date,
         predictor_panel=predictor_panel,
@@ -2402,7 +2441,7 @@ def compute_portfolio_allocation(
         weights = apply_strategy_weight_tilt(
             weights=weights,
             history_returns=strategy_returns,
-            selection=selection,
+            strategy=strategy,
             bars_per_year=bars_per_year,
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
@@ -2421,21 +2460,21 @@ def apply_strategy_weight_tilt(
     *,
     weights: np.ndarray,
     history_returns: pd.DataFrame,
-    selection: SelectionSpec,
+    strategy: StrategySpec,
     bars_per_year: float,
     max_investment_ratio: float,
     max_weight: float | None,
     current_date: str | None,
     predictor_panel: pd.DataFrame | None,
 ) -> np.ndarray:
-    score_parameters = dict(selection.score_parameters)
+    score_parameters = dict(strategy.selection.score_parameters)
     if "tilt_strength" not in score_parameters:
         return weights
 
     score_series = compute_strategy_score_series(
         history_returns,
         None,
-        selection,
+        strategy,
         bars_per_year=bars_per_year,
         current_date=current_date,
         predictor_panel=predictor_panel,
@@ -2477,7 +2516,7 @@ def compute_expected_return_proxy(
     *,
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    strategy: StrategySpec,
     bars_per_year: float,
     current_date: str | None,
     predictor_panel: pd.DataFrame | None,
@@ -2485,7 +2524,7 @@ def compute_expected_return_proxy(
     score_series = compute_strategy_score_series(
         returns,
         volume_history,
-        selection,
+        strategy,
         bars_per_year=bars_per_year,
         current_date=current_date,
         predictor_panel=predictor_panel,
@@ -2647,7 +2686,7 @@ def run_portfolio_backtest(
     bars_per_year: float,
     split_index: int,
     split_ratio: float,
-    selection: SelectionSpec,
+    strategy: StrategySpec,
     portfolio_model: PortfolioModelSpec,
     initial_weights: np.ndarray,
     initial_selected_assets: list[str],
@@ -2699,7 +2738,7 @@ def run_portfolio_backtest(
             current_selected_assets, rebalanced_weights = compute_portfolio_allocation(
                 history_returns=returns.iloc[:index],
                 volume_history=volumes.iloc[:index] if volumes is not None else None,
-                selection=selection,
+                strategy=strategy,
                 portfolio_model=portfolio_model,
                 bars_per_year=bars_per_year,
                 universe_columns=returns.columns,

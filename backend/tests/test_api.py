@@ -148,7 +148,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     expected_predictor_count = sum(
         1
         for strategy in config.candidate_strategies
-        if dict(strategy.selection.score_parameters).get("predictionSupplement")
+        if strategy.predictor_use is not None
     )
 
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
@@ -233,8 +233,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         == 0.35
     )
     assert any(
-        strategy["components"]["optional"]["assetRankingModel"]
-        and strategy["components"]["optional"]["assetRankingModel"]["parameters"].get("predictionSupplement")
+        strategy["components"]["optional"]["predictor"] is not None
         for strategy in payload["comparison"]["candidateStrategies"]
     )
     assert payload["comparison"]["marketUniverse"]["assetCount"] == 20

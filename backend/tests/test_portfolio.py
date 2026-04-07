@@ -1,6 +1,7 @@
 import pandas as pd
 
 from app.portfolio import (
+    build_predictor_use_spec,
     build_strategy_supplemental_predictor_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
@@ -40,6 +41,7 @@ def make_strategy(
     max_investment_ratio: float = 1.0,
     max_weight: float | None = None,
     score_parameters: dict[str, float | str | bool] | None = None,
+    predictor_use=None,
 ):
     return build_strategy_spec(
         investment_universe=build_investment_universe_spec(
@@ -69,6 +71,7 @@ def make_strategy(
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
         ),
+        predictor_use=predictor_use,
     )
 
 
@@ -442,35 +445,39 @@ def test_prediction_supplement_changes_momentum_scores() -> None:
     returns = closes.pct_change().dropna()
     volume_history = volumes.loc[returns.index]
 
-    baseline_selection = build_selection_spec(
+    baseline_strategy = make_strategy(
         "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
         score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "windowSpec": {"unit": "bars", "value": 3}},
     )
-    supplemented_selection = build_selection_spec(
+    supplemented_strategy = make_strategy(
         "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
         score_parameters={
             "tilt_strength": 0.35,
             "tilt_shape": 1.0,
             "windowSpec": {"unit": "bars", "value": 3},
-            "predictionSupplement": {
-                "horizonSpec": {"unit": "bars", "value": 2},
-                "minTrainSamples": 3,
-                "signalWeight": 0.8,
-                "linearWeight": 0.2,
-            },
         },
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-test-supplement-2bar",
+            label="2bar補助予測",
+            target_horizon_spec={"unit": "bars", "value": 2},
+            min_train_samples=3,
+            signal_weight=0.8,
+            predictor_weight=0.2,
+        ),
     )
 
     baseline_scores = compute_strategy_score_series(
         returns,
         volume_history,
-        baseline_selection,
+        baseline_strategy,
         bars_per_year=252,
     )
     supplemented_scores = compute_strategy_score_series(
         returns,
         volume_history,
-        supplemented_selection,
+        supplemented_strategy,
         bars_per_year=252,
     )
 
@@ -506,13 +513,15 @@ def test_predictor_evaluation_includes_predictor_series() -> None:
             "tilt_strength": 0.35,
             "tilt_shape": 1.0,
             "windowSpec": {"unit": "bars", "value": 3},
-            "predictionSupplement": {
-                "horizonSpec": {"unit": "bars", "value": 2},
-                "minTrainSamples": 3,
-                "signalWeight": 0.8,
-                "linearWeight": 0.2,
-            },
         },
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-test-eval-2bar",
+            label="2bar補助予測",
+            target_horizon_spec={"unit": "bars", "value": 2},
+            min_train_samples=3,
+            signal_weight=0.8,
+            predictor_weight=0.2,
+        ),
     )
     predictor_spec = build_strategy_supplemental_predictor_spec(strategy)
 
@@ -566,13 +575,15 @@ def test_strategy_run_can_reuse_predictor_panel() -> None:
             "tilt_strength": 0.35,
             "tilt_shape": 1.0,
             "windowSpec": {"unit": "bars", "value": 3},
-            "predictionSupplement": {
-                "horizonSpec": {"unit": "bars", "value": 2},
-                "minTrainSamples": 3,
-                "signalWeight": 0.8,
-                "linearWeight": 0.2,
-            },
         },
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-test-reuse-2bar",
+            label="2bar補助予測",
+            target_horizon_spec={"unit": "bars", "value": 2},
+            min_train_samples=3,
+            signal_weight=0.8,
+            predictor_weight=0.2,
+        ),
     )
     predictor_spec = build_strategy_supplemental_predictor_spec(strategy)
 

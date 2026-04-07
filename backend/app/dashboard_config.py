@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.portfolio import (
+    build_predictor_use_spec,
     build_prediction_target_spec,
     build_execution_policy_spec,
     build_investment_universe_spec,
@@ -115,23 +116,6 @@ FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M = build_selection_spec(
     label="全資産モメンタム傾斜 上位優遇 2ヶ月",
     description="全ETFを候補に残しつつ、2ヶ月モメンタムの上位優遇傾斜で重みを調整する",
     score_parameters={"tilt_strength": 0.35, "tilt_shape": 1.0, "windowSpec": window_spec(unit="months", value=2)},
-)
-FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M_PRED5 = build_selection_spec(
-    strategy_type="full_universe_momentum_tilt",
-    key="full_universe_momentum_tilt_weak_top_2m_pred5",
-    label="全資産モメンタム傾斜 上位優遇 2ヶ月 + 5bar予測補助",
-    description="全ETFを候補に残しつつ、2ヶ月モメンタムを主役に5bar予測を弱く混ぜて重みを調整する",
-    score_parameters={
-        "tilt_strength": 0.35,
-        "tilt_shape": 1.0,
-        "windowSpec": window_spec(unit="months", value=2),
-        "predictionSupplement": {
-            "horizonSpec": window_spec(unit="bars", value=5),
-            "minTrainSamples": 50,
-            "signalWeight": 0.8,
-            "linearWeight": 0.2,
-        },
-    },
 )
 FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M = build_selection_spec(
     strategy_type="full_universe_momentum_tilt",
@@ -634,10 +618,18 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
         build_strategy_spec(
             strategy_id="stg-fu-momo2-top035-pred5blend-hrp-month",
             investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M_PRED5,
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=HIERARCHICAL_RISK_PARITY,
             execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
             risk_controls=DEFAULT_RISK_CONTROLS,
+            predictor_use=build_predictor_use_spec(
+                predictor_key="pred-fu-momo2-supplement-5bar-linear",
+                label="5bar予測補助",
+                target_horizon_spec=window_spec(unit="bars", value=5),
+                min_train_samples=50,
+                signal_weight=0.8,
+                predictor_weight=0.2,
+            ),
             label="全資産モメンタム傾斜 上位優遇 2ヶ月 + 5bar予測補助 × HRP × 月次",
             hypothesis="2ヶ月モメンタムを主役に5bar予測を弱く補助すると、月次更新でもアルファを取り込みやすい",
             description="全ETFを候補に残しつつ、2ヶ月モメンタムに5bar予測補助を薄く混ぜて月次でHRPに反映する",

@@ -392,11 +392,11 @@ def serialize_market_slice_context(
     *,
     comparison: ComparisonSpec,
     timeframe: TimeframeSpec,
-    dataset_metadata: dict[str, str],
+    dataset_metadata: dict[str, object],
     fields: list[str],
     period_override: str | None = None,
 ) -> dict:
-    return {
+    payload = {
         "period": period_override or comparison.run_spec.market_slice.period,
         "sanityPeriods": comparison.run_spec.market_slice.sanity_periods,
         "timeframe": serialize_timeframe(timeframe),
@@ -406,6 +406,10 @@ def serialize_market_slice_context(
         "alignedEndDate": dataset_metadata["aligned_end_date"],
         "rowCount": dataset_metadata["row_count"],
     }
+    failed_tickers = dataset_metadata.get("failed_tickers")
+    if failed_tickers:
+        payload["failedTickers"] = failed_tickers
+    return payload
 
 
 def serialize_cost_model_spec(cost_model) -> dict:

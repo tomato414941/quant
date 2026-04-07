@@ -206,7 +206,7 @@ class PredictionModelSpec:
 
 
 @dataclass(frozen=True)
-class PredictionSpec:
+class PredictorSpec:
     key: str
     label: str
     description: str
@@ -964,11 +964,11 @@ def build_asset_ranking_specs(
     return ranking_specs
 
 
-def build_prediction_specs(
+def build_predictor_specs(
     ranking_specs: list[AssetRankingSpec],
     target_specs: list[PredictionTargetSpec],
-) -> list[PredictionSpec]:
-    prediction_specs: list[PredictionSpec] = []
+) -> list[PredictorSpec]:
+    predictor_specs: list[PredictorSpec] = []
     for ranking_spec in ranking_specs:
         ranking_parameters = extract_ranking_score_parameters(ranking_spec.selection)
         feature_spec = build_feature_spec(
@@ -1017,8 +1017,8 @@ def build_prediction_specs(
         ]
         for target_spec in target_specs:
             for model_spec in model_specs:
-                prediction_specs.append(
-                    PredictionSpec(
+                predictor_specs.append(
+                    PredictorSpec(
                         key=f"prediction__{ranking_spec.key}__{model_spec.kind}__{target_spec.key}",
                         label=f"{ranking_spec.label} / {model_spec.label} -> {target_spec.label}",
                         description=ranking_spec.description,
@@ -1032,8 +1032,8 @@ def build_prediction_specs(
                         source_strategy_labels=ranking_spec.source_strategy_labels,
                     )
                 )
-    prediction_specs.sort(key=lambda prediction_spec: prediction_spec.label)
-    return prediction_specs
+    predictor_specs.sort(key=lambda predictor_spec: predictor_spec.label)
+    return predictor_specs
 
 
 def extract_ranking_score_parameters(
@@ -1054,33 +1054,33 @@ def extract_ranking_score_parameters(
     return extracted
 
 
-def serialize_prediction_spec(
-    prediction_spec: PredictionSpec,
+def serialize_predictor_spec(
+    predictor_spec: PredictorSpec,
 ) -> dict:
     return {
-        "kind": "prediction_spec",
+        "kind": "predictor_spec",
         "schemaVersion": "v1",
-        "key": prediction_spec.key,
-        "label": prediction_spec.label,
-        "description": prediction_spec.description,
+        "key": predictor_spec.key,
+        "label": predictor_spec.label,
+        "description": predictor_spec.description,
         "timeframe": {
-            "key": prediction_spec.timeframe.key,
-            "label": prediction_spec.timeframe.label,
-            "yfinanceInterval": prediction_spec.timeframe.yfinance_interval,
-            "barsPerYear": prediction_spec.timeframe.bars_per_year,
-            "barSeconds": prediction_spec.timeframe.bar_seconds,
+            "key": predictor_spec.timeframe.key,
+            "label": predictor_spec.timeframe.label,
+            "yfinanceInterval": predictor_spec.timeframe.yfinance_interval,
+            "barsPerYear": predictor_spec.timeframe.bars_per_year,
+            "barSeconds": predictor_spec.timeframe.bar_seconds,
         },
         "investmentUniverse": {
-            "key": prediction_spec.investment_universe.key,
-            "label": prediction_spec.investment_universe.label,
-            "assetCount": len(prediction_spec.investment_universe.tickers),
-            "tickers": list(prediction_spec.investment_universe.tickers),
+            "key": predictor_spec.investment_universe.key,
+            "label": predictor_spec.investment_universe.label,
+            "assetCount": len(predictor_spec.investment_universe.tickers),
+            "tickers": list(predictor_spec.investment_universe.tickers),
         },
-        "featureSpec": serialize_feature_spec(prediction_spec.feature_spec),
-        "modelSpec": serialize_prediction_model_spec(prediction_spec.model_spec),
-        "targetSpec": serialize_prediction_target_spec(prediction_spec.target_spec),
-        "sourceStrategyKeys": list(prediction_spec.source_strategy_keys),
-        "sourceStrategyLabels": list(prediction_spec.source_strategy_labels),
+        "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
+        "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
+        "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
+        "sourceStrategyKeys": list(predictor_spec.source_strategy_keys),
+        "sourceStrategyLabels": list(predictor_spec.source_strategy_labels),
     }
 
 
@@ -1935,25 +1935,25 @@ def evaluate_asset_ranking_spec(
     }
 
 
-def evaluate_prediction_spec(
+def evaluate_predictor_spec(
     returns: pd.DataFrame,
     volumes: pd.DataFrame | None,
     split_ratio: float,
-    prediction_spec: PredictionSpec,
+    predictor_spec: PredictorSpec,
     *,
     bars_per_year: float,
 ) -> dict:
     ranking_spec = AssetRankingSpec(
-        key=prediction_spec.key,
-        label=prediction_spec.label,
-        description=prediction_spec.description,
-        timeframe=prediction_spec.timeframe,
-        investment_universe=prediction_spec.investment_universe,
-        selection=prediction_spec.selection,
-        source_strategy_keys=prediction_spec.source_strategy_keys,
-        source_strategy_labels=prediction_spec.source_strategy_labels,
+        key=predictor_spec.key,
+        label=predictor_spec.label,
+        description=predictor_spec.description,
+        timeframe=predictor_spec.timeframe,
+        investment_universe=predictor_spec.investment_universe,
+        selection=predictor_spec.selection,
+        source_strategy_keys=predictor_spec.source_strategy_keys,
+        source_strategy_labels=predictor_spec.source_strategy_labels,
     )
-    target_spec = prediction_spec.target_spec
+    target_spec = predictor_spec.target_spec
     ranking_universe = [
         asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
     ]
@@ -1972,7 +1972,7 @@ def evaluate_prediction_spec(
     train_sample_count = 0
     xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
     xty = np.zeros(feature_count + 1, dtype="float64")
-    model_parameters = {key: value for key, value in prediction_spec.model_spec.parameters}
+    model_parameters = {key: value for key, value in predictor_spec.model_spec.parameters}
     min_train_samples = int(model_parameters.get("minTrainSamples", 1))
     signal_weight = float(model_parameters.get("signalWeight", 0.8))
     linear_weight = float(model_parameters.get("linearWeight", 0.2))
@@ -2029,9 +2029,9 @@ def evaluate_prediction_spec(
         if target_values.nunique() < 2:
             continue
 
-        if prediction_spec.model_spec.kind == "ranking_signal_model":
+        if predictor_spec.model_spec.kind == "ranking_signal_model":
             prediction_values = aligned_scores
-        elif prediction_spec.model_spec.kind in {"linear_regression", "blended_signal_model"}:
+        elif predictor_spec.model_spec.kind in {"linear_regression", "blended_signal_model"}:
             design_matrix = np.column_stack(
                 [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
             )
@@ -2052,7 +2052,7 @@ def evaluate_prediction_spec(
                 xty += design_matrix.T @ target_values.to_numpy(dtype="float64")
                 train_sample_count += len(aligned_features)
                 continue
-            if prediction_spec.model_spec.kind == "linear_regression":
+            if predictor_spec.model_spec.kind == "linear_regression":
                 prediction_values = linear_prediction_values
             else:
                 prediction_values = (
@@ -2103,7 +2103,7 @@ def evaluate_prediction_spec(
         train_sample_count += len(aligned_features)
 
     return {
-        "predictionSpec": serialize_prediction_spec(prediction_spec),
+        "predictorSpec": serialize_predictor_spec(predictor_spec),
         "latestTopAssets": latest_top_assets,
         "latestScores": latest_scores,
         "overall": summarize_prediction_observations(observations),

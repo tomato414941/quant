@@ -8,7 +8,7 @@ from app import main as main_module
 from app.comparison_models import ConditionVariant
 from app.dashboard_config import DEFAULT_PREDICTION_TARGET_SPECS
 from app.main import app
-from app.portfolio import build_asset_ranking_specs, build_prediction_specs
+from app.portfolio import build_asset_ranking_specs, build_predictor_specs
 from app.timeframe_models import build_timeframe_spec
 
 
@@ -541,7 +541,7 @@ def test_prediction_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     payload = response.json()
     expected_ranking_count = len(build_asset_ranking_specs(config.candidate_strategies))
     expected_result_count = len(
-        build_prediction_specs(
+        build_predictor_specs(
             build_asset_ranking_specs(config.candidate_strategies),
             DEFAULT_PREDICTION_TARGET_SPECS,
         )
@@ -550,14 +550,14 @@ def test_prediction_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["resultCount"] == expected_result_count
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == expected_result_count
-    assert payload["results"][0]["predictionSpec"]["modelSpec"]["modelKind"] in {
+    assert payload["results"][0]["predictorSpec"]["modelSpec"]["modelKind"] in {
         "ranking_signal_model",
         "linear_regression",
         "blended_signal_model",
     }
-    assert payload["results"][0]["predictionSpec"]["featureSpec"]["inputs"]
-    assert payload["results"][0]["predictionSpec"]["targetSpec"]["targetKind"] == "forward_excess_return"
-    assert payload["results"][0]["predictionSpec"]["targetSpec"]["horizonSpec"]["unit"] == "bars"
+    assert payload["results"][0]["predictorSpec"]["featureSpec"]["inputs"]
+    assert payload["results"][0]["predictorSpec"]["targetSpec"]["targetKind"] == "forward_excess_return"
+    assert payload["results"][0]["predictorSpec"]["targetSpec"]["horizonSpec"]["unit"] == "bars"
     observed_results = [
         result for result in payload["results"] if result["overall"]["observationCount"] >= 1
     ]

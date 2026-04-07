@@ -5,15 +5,15 @@ from pathlib import Path
 
 from app.portfolio import (
     build_asset_ranking_specs,
-    build_prediction_specs,
+    build_predictor_specs,
     build_risk_controls_spec,
     build_selection_spec,
     build_strategy_spec,
     evaluate_asset_ranking_spec,
-    evaluate_prediction_spec,
+    evaluate_predictor_spec,
     evaluate_strategy_run,
     serialize_asset_ranking_spec,
-    serialize_prediction_spec,
+    serialize_predictor_spec,
     serialize_portfolio_state,
     serialize_strategy_spec,
 )
@@ -843,19 +843,19 @@ def build_prediction_evaluation_runs(
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     ranking_specs = build_asset_ranking_specs(comparison.candidate_strategies)
-    prediction_specs = build_prediction_specs(ranking_specs, target_specs)
+    predictor_specs = build_predictor_specs(ranking_specs, target_specs)
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
     required_fields = collect_required_market_fields(comparison)
 
-    for prediction_spec in prediction_specs:
-        timeframe_key = prediction_spec.timeframe.key
+    for predictor_spec in predictor_specs:
+        timeframe_key = predictor_spec.timeframe.key
         market_bundle = market_bundles_by_timeframe[timeframe_key]
         dataset_metadata = metadata_by_timeframe[timeframe_key]
-        closes = market_bundle["closes"][list(prediction_spec.investment_universe.tickers)]
+        closes = market_bundle["closes"][list(predictor_spec.investment_universe.tickers)]
         volumes = (
-            market_bundle["volumes"][list(prediction_spec.investment_universe.tickers)]
+            market_bundle["volumes"][list(predictor_spec.investment_universe.tickers)]
             if market_bundle["volumes"] is not None
             else None
         )
@@ -864,17 +864,17 @@ def build_prediction_evaluation_runs(
         serialized_evaluation = serialize_evaluation(
             comparison,
             {timeframe_key: dataset_metadata},
-            [prediction_spec.timeframe],
+            [predictor_spec.timeframe],
             fields=required_fields,
             period_override=market_data_period,
         )
         serialized_execution_assumptions = serialize_execution_assumptions(comparison)
         run_spec = build_run_spec(
             run_kind="prediction_evaluation",
-            strategy={"prediction": serialize_prediction_spec(prediction_spec)},
+            strategy={"predictor": serialize_predictor_spec(predictor_spec)},
             market_slice={
                 "period": market_data_period,
-                "timeframe": serialize_timeframe(prediction_spec.timeframe),
+                "timeframe": serialize_timeframe(predictor_spec.timeframe),
                 "fields": required_fields,
             },
             evaluation=serialized_evaluation,
@@ -888,12 +888,12 @@ def build_prediction_evaluation_runs(
             results.append(cached_run)
             continue
 
-        result = evaluate_prediction_spec(
+        result = evaluate_predictor_spec(
             returns=returns,
             volumes=aligned_volumes,
             split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
-            prediction_spec=prediction_spec,
-            bars_per_year=prediction_spec.timeframe.bars_per_year,
+            predictor_spec=predictor_spec,
+            bars_per_year=predictor_spec.timeframe.bars_per_year,
         )
         run_store.save(run_spec, result)
         computed_run_count += 1

@@ -1,8 +1,12 @@
 import pandas as pd
 
 from app.portfolio import (
+    PREDICTION_FEATURE_NAMES,
+    build_feature_spec,
+    build_prediction_model_spec,
+    build_prediction_target_spec,
+    build_predictor_spec,
     build_predictor_use_spec,
-    build_strategy_supplemental_predictor_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
     build_portfolio_state,
@@ -72,6 +76,52 @@ def make_strategy(
             max_weight=max_weight,
         ),
         predictor_use=predictor_use,
+    )
+
+
+def make_predictor_spec(
+    strategy,
+    *,
+    predictor_key: str,
+    label: str,
+    horizon_bars: int,
+    min_train_samples: int = 3,
+):
+    return build_predictor_spec(
+        key=predictor_key,
+        label=label,
+        description=strategy.description,
+        timeframe=strategy.timeframe,
+        investment_universe=strategy.investment_universe,
+        feature_spec=build_feature_spec(
+            key=f"features__{predictor_key}",
+            label=f"{label} features",
+            inputs=tuple(strategy.selection.feature_inputs),
+            parameters={
+                "windowSpec": {"unit": "bars", "value": 3},
+                "featureKeys": PREDICTION_FEATURE_NAMES,
+            },
+        ),
+        model_spec=build_prediction_model_spec(
+            key=f"model__{predictor_key}",
+            kind="linear_regression",
+            label=f"{label} linear",
+            parameters={
+                "scoreModelKind": strategy.selection.score_model.kind,
+                "fitMode": "expanding",
+                "minTrainSamples": min_train_samples,
+                "windowSpec": {"unit": "bars", "value": 3},
+            },
+        ),
+        target_spec=build_prediction_target_spec(
+            key=f"{predictor_key}__target",
+            label=label,
+            kind="forward_excess_return",
+            horizon_spec={"unit": "bars", "value": horizon_bars},
+        ),
+        selection=strategy.selection,
+        source_strategy_keys=(strategy.key,),
+        source_strategy_labels=(strategy.label,),
     )
 
 
@@ -460,12 +510,17 @@ def test_prediction_supplement_changes_momentum_scores() -> None:
         },
         predictor_use=build_predictor_use_spec(
             predictor_key="pred-test-supplement-2bar",
-            label="2bar補助予測",
-            target_horizon_spec={"unit": "bars", "value": 2},
-            min_train_samples=3,
             signal_weight=0.8,
             predictor_weight=0.2,
         ),
+    )
+    predictor_panel = pd.DataFrame(
+        {
+            "SPY": [0.8],
+            "QQQ": [0.1],
+            "TLT": [-0.7],
+        },
+        index=[returns.index[-1]],
     )
 
     baseline_scores = compute_strategy_score_series(
@@ -479,6 +534,8 @@ def test_prediction_supplement_changes_momentum_scores() -> None:
         volume_history,
         supplemented_strategy,
         bars_per_year=252,
+        current_date=str(returns.index[-1]),
+        predictor_panel=predictor_panel,
     )
 
     assert baseline_scores is not None
@@ -516,16 +573,16 @@ def test_predictor_evaluation_includes_predictor_series() -> None:
         },
         predictor_use=build_predictor_use_spec(
             predictor_key="pred-test-eval-2bar",
-            label="2bar補助予測",
-            target_horizon_spec={"unit": "bars", "value": 2},
-            min_train_samples=3,
             signal_weight=0.8,
             predictor_weight=0.2,
         ),
     )
-    predictor_spec = build_strategy_supplemental_predictor_spec(strategy)
-
-    assert predictor_spec is not None
+    predictor_spec = make_predictor_spec(
+        strategy,
+        predictor_key="pred-test-eval-2bar",
+        label="2bar補助予測",
+        horizon_bars=2,
+    )
 
     result = evaluate_predictor_spec(
         returns=returns,
@@ -578,16 +635,16 @@ def test_strategy_run_can_reuse_predictor_panel() -> None:
         },
         predictor_use=build_predictor_use_spec(
             predictor_key="pred-test-reuse-2bar",
-            label="2bar補助予測",
-            target_horizon_spec={"unit": "bars", "value": 2},
-            min_train_samples=3,
             signal_weight=0.8,
             predictor_weight=0.2,
         ),
     )
-    predictor_spec = build_strategy_supplemental_predictor_spec(strategy)
-
-    assert predictor_spec is not None
+    predictor_spec = make_predictor_spec(
+        strategy,
+        predictor_key="pred-test-reuse-2bar",
+        label="2bar補助予測",
+        horizon_bars=2,
+    )
 
     predictor_panel = compute_predictor_panel(
         returns=returns,

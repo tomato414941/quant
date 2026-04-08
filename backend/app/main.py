@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.dashboard_config import DEFAULT_COMPARISON_SPEC, DEFAULT_PREDICTION_TARGET_SPECS
+from app.default_comparison import DEFAULT_COMPARISON_SPEC, DEFAULT_PREDICTION_TARGET_SPECS
 from app.dashboard_service import (
     build_condition_sweep_payload,
     build_dashboard_payload,

@@ -6,20 +6,13 @@ from app.portfolio import (
     build_execution_policy_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
-    build_portfolio_state,
     build_risk_controls_spec,
     build_selection_spec,
     build_strategy_spec,
 )
 from app.comparison_models import (
-    ComparisonSpec,
     ConditionVariant,
     CostModelSpec,
-    EvaluationSpec,
-    EvaluationSettings,
-    MarketSliceSpec,
-    RunSpec,
-    SelectionPolicy,
     build_asset_specific_adv_cost_model_spec,
     build_execution_assumptions_spec,
 )
@@ -431,55 +424,7 @@ REFERENCE_EQUAL_WEIGHT_WITH_CASH = build_strategy_spec(
     description="全資産を等金額で買い持ちし、15% を CASH に残す参照用 Strategy",
 )
 
-
-DEFAULT_COMPARISON_SPEC = ComparisonSpec(
-    comparison_id="etf_portfolio_models_10y",
-    title="有望Strategyの探索",
-    question="共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",
-    run_spec=RunSpec(
-        market_slice=MarketSliceSpec(
-            period="10y",
-            sanity_periods=["3y"],
-        ),
-        portfolio_state=build_portfolio_state(
-            current_weights={
-                "SPY": 0.0425,
-                "QQQ": 0.0425,
-                "IWM": 0.0425,
-                "EFA": 0.0425,
-                "EEM": 0.0425,
-                "EWJ": 0.0425,
-                "EWZ": 0.0425,
-                "VNQ": 0.0425,
-                "TLT": 0.0425,
-                "IEF": 0.0425,
-                "LQD": 0.0425,
-                "HYG": 0.0425,
-                "TIP": 0.0425,
-                "GLD": 0.0425,
-                "SLV": 0.0425,
-                "DBC": 0.0425,
-                "USO": 0.0425,
-                "UUP": 0.0425,
-                "BTC-USD": 0.0425,
-                "ETH-USD": 0.0425,
-            },
-            cash_weight=0.15,
-        ),
-        capital_base=10_000,
-        execution_assumptions=DEFAULT_EXECUTION_ASSUMPTIONS,
-        evaluation=EvaluationSpec(
-            evaluation_settings=EvaluationSettings(
-                split_ratio=0.7,
-            ),
-        ),
-    ),
-    selection_policy=SelectionPolicy(
-        primary_metric="sharpe_ratio",
-        secondary_metric="total_return",
-        tertiary_metric="max_drawdown",
-    ),
-    candidate_strategies=[
+DEFAULT_COMPARISON_CANDIDATE_STRATEGIES = [
         build_strategy_spec(
             strategy_id="stg-fu-eq",
             investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
@@ -624,9 +569,6 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
             risk_controls=DEFAULT_RISK_CONTROLS,
             predictor_use=build_predictor_use_spec(
                 predictor_key="pred-fu-momo2-supplement-5bar-linear",
-                label="5bar予測補助",
-                target_horizon_spec=window_spec(unit="bars", value=5),
-                min_train_samples=50,
                 signal_weight=0.8,
                 predictor_weight=0.2,
             ),
@@ -756,7 +698,6 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
             hypothesis="暗号資産を外したETFユニバースでも、上位優遇型のモメンタム傾斜が有効に働く可能性がある",
             description="18資産ETFに限定して、12ヶ月モメンタムの上位優遇傾斜をHRPに載せる",
         ),
-    ],
-    reference_strategies=[REFERENCE_EQUAL_WEIGHT_WITH_CASH],
-    condition_variants=build_condition_variants(),
-)
+]
+
+DEFAULT_COMPARISON_CONDITION_VARIANTS = build_condition_variants()

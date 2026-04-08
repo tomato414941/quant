@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
-from app.dashboard_config import DEFAULT_PREDICTION_TARGET_SPECS
+from app.spec_registry import DEFAULT_PREDICTION_TARGET_SPECS
 from app.main import app
 from app.portfolio import build_asset_ranking_specs, build_predictor_specs
 from app.timeframe_models import build_timeframe_spec

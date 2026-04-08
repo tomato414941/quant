@@ -6,7 +6,6 @@ from pathlib import Path
 from app.portfolio import (
     build_asset_ranking_specs,
     build_predictor_specs,
-    build_strategy_supplemental_predictor_spec,
     build_risk_controls_spec,
     build_selection_spec,
     build_strategy_spec,
@@ -21,6 +20,7 @@ from app.portfolio import (
     serialize_portfolio_state,
     serialize_strategy_spec,
 )
+from app.predictor_registry import REGISTERED_PREDICTOR_SPECS_BY_KEY
 from app.comparison_models import ComparisonSpec, ConditionVariant, EvaluationSpec
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_spec
 from app.timeframe_models import TimeframeSpec
@@ -609,7 +609,17 @@ def build_strategy_runs(
         dataset_metadata = metadata_by_timeframe[timeframe_key]
         serialized_strategy = serialize_strategy_spec(strategy_spec)
         predictor_panel = None
-        supplemental_predictor_spec = build_strategy_supplemental_predictor_spec(strategy_spec)
+        supplemental_predictor_spec = None
+        if strategy_spec.predictor_use is not None:
+            supplemental_predictor_spec = REGISTERED_PREDICTOR_SPECS_BY_KEY.get(
+                strategy_spec.predictor_use.predictor_key
+            )
+            if supplemental_predictor_spec is None:
+                raise ValueError(f"Unknown predictor key: {strategy_spec.predictor_use.predictor_key}")
+            if supplemental_predictor_spec.timeframe.key != strategy_spec.timeframe.key:
+                raise ValueError("Supplemental predictor timeframe must match strategy timeframe.")
+            if supplemental_predictor_spec.investment_universe.tickers != strategy_spec.investment_universe.tickers:
+                raise ValueError("Supplemental predictor universe must match strategy universe.")
         if supplemental_predictor_spec is not None:
             predictor_run_spec = build_run_spec(
                 run_kind="predictor_run",

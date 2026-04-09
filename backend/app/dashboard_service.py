@@ -605,18 +605,40 @@ def build_predictor_run_index_payload(
     comparison: ComparisonSpec,
     *,
     limit: int = 50,
+    model_kind: str | None = None,
+    horizon_value: int | None = None,
+    sort_by: str = "test_rank_ic",
 ) -> dict:
     run_store = build_run_result_store(comparison)
-    total_count = len(run_store.list_records(run_kind="predictor_run"))
-    records = run_store.list_records(run_kind="predictor_run", limit=limit)
+    all_records = [
+        compact_predictor_run_record(record)
+        for record in run_store.list_records(run_kind="predictor_run")
+    ]
+    if model_kind is not None:
+        all_records = [
+            record for record in all_records
+            if record["modelKind"] == model_kind
+        ]
+    if horizon_value is not None:
+        all_records = [
+            record for record in all_records
+            if record["horizonValue"] == horizon_value
+        ]
+    sorted_records = sort_predictor_run_records(all_records, sort_by=sort_by)
+    records = sorted_records[:limit]
     return {
         "kind": "predictor_run_index",
         "schemaVersion": "v1",
         "comparisonId": comparison.comparison_id,
         "limit": limit,
-        "totalCount": total_count,
+        "sortBy": sort_by,
+        "filters": {
+            "modelKind": model_kind,
+            "horizonValue": horizon_value,
+        },
+        "totalCount": len(all_records),
         "recordCount": len(records),
-        "records": [compact_predictor_run_record(record) for record in records],
+        "records": records,
     }
 
 
@@ -929,12 +951,47 @@ def compact_strategy_run_record(record: dict) -> dict:
     return compact_run_record(record)
 
 
+def sort_predictor_run_records(records: list[dict], *, sort_by: str) -> list[dict]:
+    metric_key_by_sort = {
+        "test_rank_ic": "testRankIc",
+        "overall_rank_ic": "overallRankIc",
+        "test_top_minus_bottom": "testTopMinusBottomPct",
+        "overall_top_minus_bottom": "overallTopMinusBottomPct",
+        "saved_at": "savedAtUtc",
+    }
+    if sort_by not in metric_key_by_sort:
+        raise ValueError(f"Unsupported predictor run sort: {sort_by}")
+
+    metric_key = metric_key_by_sort[sort_by]
+    if sort_by == "saved_at":
+        return sorted(
+            records,
+            key=lambda record: (record.get(metric_key) or "", record["runKey"]),
+            reverse=True,
+        )
+
+    return sorted(
+        records,
+        key=lambda record: (
+            record.get(metric_key) if record.get(metric_key) is not None else float("-inf"),
+            record.get("testTopMinusBottomPct")
+            if record.get("testTopMinusBottomPct") is not None
+            else float("-inf"),
+            record.get("overallRankIc") if record.get("overallRankIc") is not None else float("-inf"),
+            record["runKey"],
+        ),
+        reverse=True,
+    )
+
+
 def compact_predictor_run_record(record: dict) -> dict:
     run_spec = record["runSpec"]
     result = record["result"]
     predictor = run_spec.get("strategy", {}).get("predictor", {})
     target = predictor.get("targetSpec", {})
     horizon = target.get("horizonSpec", {})
+    feature = predictor.get("featureSpec", {})
+    training = predictor.get("trainingSpec", {})
     overall = result.get("overall", {})
     test = result.get("test", {})
 
@@ -944,8 +1001,12 @@ def compact_predictor_run_record(record: dict) -> dict:
         "runKind": run_spec.get("runKind"),
         "predictorKey": predictor.get("key"),
         "predictorLabel": predictor.get("label"),
+        "featureKey": feature.get("key"),
         "modelKind": predictor.get("modelSpec", {}).get("modelKind"),
+        "trainingFitMode": training.get("fitMode"),
+        "trainingMinSamples": training.get("minTrainSamples"),
         "timeframe": predictor.get("timeframe", {}).get("key"),
+        "targetKey": target.get("key"),
         "targetKind": target.get("targetKind"),
         "horizonUnit": horizon.get("unit"),
         "horizonValue": horizon.get("value"),
@@ -956,6 +1017,7 @@ def compact_predictor_run_record(record: dict) -> dict:
         "testRankIc": test.get("meanRankIc"),
         "overallTopMinusBottomPct": overall.get("meanTopMinusBottomPct"),
         "testTopMinusBottomPct": test.get("meanTopMinusBottomPct"),
+        "testHitRatePct": test.get("hitRatePct"),
     }
 
 

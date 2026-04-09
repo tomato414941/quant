@@ -50,11 +50,19 @@ def dashboard() -> dict:
 
 
 @app.get("/api/predictor-runs")
-def predictor_run_index(limit: int = Query(50, ge=1, le=500)) -> dict:
+def predictor_run_index(
+    limit: int = Query(50, ge=1, le=500),
+    model_kind: str | None = Query(None),
+    horizon_value: int | None = Query(None, ge=1),
+    sort_by: str = Query("test_rank_ic"),
+) -> dict:
     try:
         return build_predictor_run_index_payload(
             DEFAULT_COMPARISON_SPEC,
             limit=limit,
+            model_kind=model_kind,
+            horizon_value=horizon_value,
+            sort_by=sort_by,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

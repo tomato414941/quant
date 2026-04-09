@@ -312,7 +312,9 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["kind"] == "predictor_run_index"
     assert index_payload["totalCount"] == expected_predictor_count * 2
     assert index_payload["recordCount"] == min(10, expected_predictor_count * 2)
+    assert index_payload["sortBy"] == "test_rank_ic"
     assert index_payload["records"][0]["runKind"] == "predictor_run"
+    assert "trainingFitMode" in index_payload["records"][0]
     run_key = index_payload["records"][0]["runKey"]
 
     detail_response = client.get(f"/api/predictor-runs/{run_key}")
@@ -321,6 +323,22 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "predictor_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "predictor_run"
+
+    filtered_response = client.get(
+        "/api/predictor-runs",
+        params={
+            "model_kind": "linear_regression",
+            "horizon_value": 5,
+            "sort_by": "test_top_minus_bottom",
+        },
+    )
+    assert filtered_response.status_code == 200
+    filtered_payload = filtered_response.json()
+    assert filtered_payload["filters"]["modelKind"] == "linear_regression"
+    assert filtered_payload["filters"]["horizonValue"] == 5
+    assert filtered_payload["sortBy"] == "test_top_minus_bottom"
+    assert all(record["modelKind"] == "linear_regression" for record in filtered_payload["records"])
+    assert all(record["horizonValue"] == 5 for record in filtered_payload["records"])
 
     second_response = client.post("/api/predictor-runs")
     assert second_response.status_code == 200
@@ -639,4 +657,3 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     second_payload = second_response.json()
     assert second_payload["runStoreSummary"]["cachedRunCount"] == expected_ranking_count
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
-

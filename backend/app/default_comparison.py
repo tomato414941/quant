@@ -9,11 +9,13 @@ from app.comparison_models import (
     SelectionPolicy,
 )
 from app.portfolio import build_portfolio_state
-from app.spec_registry import (
-    DEFAULT_COMPARISON_CANDIDATE_STRATEGIES,
+from app.execution_defaults import (
     DEFAULT_COMPARISON_CONDITION_VARIANTS,
     DEFAULT_EXECUTION_ASSUMPTIONS,
-    DEFAULT_PREDICTION_TARGET_SPECS,
+)
+from app.predictor_registry import DEFAULT_PREDICTION_TARGET_SPECS
+from app.strategy_registry import (
+    CANONICAL_CANDIDATE_STRATEGIES,
     REFERENCE_EQUAL_WEIGHT_WITH_CASH,
 )
 
@@ -64,7 +66,7 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
         secondary_metric="total_return",
         tertiary_metric="max_drawdown",
     ),
-    candidate_strategies=DEFAULT_COMPARISON_CANDIDATE_STRATEGIES,
+    candidate_strategies=CANONICAL_CANDIDATE_STRATEGIES,
     reference_strategies=[REFERENCE_EQUAL_WEIGHT_WITH_CASH],
     condition_variants=DEFAULT_COMPARISON_CONDITION_VARIANTS,
 )

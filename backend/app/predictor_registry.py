@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.spec_registry import (
+from app.portfolio import build_prediction_target_spec
+from app.strategy_registry import (
     DEFAULT_INVESTMENT_UNIVERSE,
     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
 )
@@ -14,6 +15,22 @@ from app.portfolio import (
     extract_ranking_score_parameters,
 )
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME
+
+
+DEFAULT_PREDICTION_TARGET_SPECS = [
+    build_prediction_target_spec(
+        key="next_5bar_excess_return",
+        label="次の5bar超過収益",
+        kind="forward_excess_return",
+        horizon_spec={"unit": "bars", "value": 5},
+    ),
+    build_prediction_target_spec(
+        key="next_10bar_excess_return",
+        label="次の10bar超過収益",
+        kind="forward_excess_return",
+        horizon_spec={"unit": "bars", "value": 10},
+    ),
+]
 
 
 def _build_registered_predictors() -> list[PredictorSpec]:

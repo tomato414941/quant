@@ -1905,19 +1905,25 @@ def compute_predictor_panel(
         prediction_values: pd.Series | None = None
         if predictor_spec.model_spec.kind == "ranking_signal_model":
             prediction_values = selected_scores
-        elif predictor_spec.model_spec.kind in {"linear_regression", "blended_signal_model"}:
+        elif predictor_spec.model_spec.kind in {"linear_regression", "ridge_regression", "blended_signal_model"}:
             if train_sample_count >= min_train_samples:
                 design_matrix = np.column_stack(
                     [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
                 )
-                beta = np.linalg.pinv(xtx) @ xty
+                if predictor_spec.model_spec.kind == "ridge_regression":
+                    ridge_alpha = float(model_parameters.get("ridgeAlpha", 1.0))
+                    penalty = np.eye(xtx.shape[0], dtype="float64") * ridge_alpha
+                    penalty[0, 0] = 0.0
+                    beta = np.linalg.pinv(xtx + penalty) @ xty
+                else:
+                    beta = np.linalg.pinv(xtx) @ xty
                 linear_prediction_values = pd.Series(
                     design_matrix @ beta,
                     index=aligned_features.index,
                     dtype="float64",
                 )
                 if linear_prediction_values.nunique() >= 2:
-                    if predictor_spec.model_spec.kind == "linear_regression":
+                    if predictor_spec.model_spec.kind in {"linear_regression", "ridge_regression"}:
                         prediction_values = linear_prediction_values
                     else:
                         blended = (

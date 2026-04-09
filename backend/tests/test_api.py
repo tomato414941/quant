@@ -241,6 +241,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
 
     assert len(payload["candidateRuns"]) == expected_strategy_count
     assert len(payload["referenceRuns"]) == expected_reference_count
+    assert len(payload["predictorRuns"]) == expected_predictor_count
     assert {
         run["strategy"]["components"]["core"]["dataResolution"]["key"]
         for run in payload["candidateRuns"]
@@ -269,6 +270,7 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         payload["sanityChecks"][0]["runStoreSummary"]["computedRunCount"]
         == expected_strategy_count + expected_reference_count + expected_predictor_count
     )
+    assert len(payload["sanityChecks"][0]["predictorRuns"]) == expected_predictor_count
     assert len(payload["sanityChecks"][0]["candidateRuns"]) == expected_strategy_count
     assert len(payload["sanityChecks"][0]["referenceRuns"]) == expected_reference_count
     assert payload["candidateRuns"][0]["splitAnalysis"]["train"]["barCount"] > 0
@@ -282,6 +284,75 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
         (expected_strategy_count + expected_reference_count) * 2
         + expected_predictor_count * 2
     )
+
+
+def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
+    config.result_store_dir = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
+
+    response = client.get("/api/predictor-runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    expected_predictor_count = len(main_module.REGISTERED_PREDICTOR_SPECS)
+    assert payload["kind"] == "predictor_run_collection"
+    assert payload["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["runSpec"]["kind"] == "comparison_run_spec"
+    assert len(payload["predictorSpecs"]) == expected_predictor_count
+    assert len(payload["predictorRuns"]) == expected_predictor_count
+    assert payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert payload["runStoreSummary"]["computedRunCount"] == expected_predictor_count * 2
+    assert len(payload["sanityChecks"]) == 1
+    assert len(payload["sanityChecks"][0]["predictorRuns"]) == expected_predictor_count
+
+    second_response = client.get("/api/predictor-runs")
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == expected_predictor_count * 2
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 0
+
+
+def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
+    config.result_store_dir = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
+
+    response = client.get("/api/strategy-runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    expected_strategy_count = len(config.candidate_strategies)
+    expected_reference_count = len(config.reference_strategies)
+    expected_predictor_count = sum(
+        1 for strategy in config.candidate_strategies if strategy.predictor_use is not None
+    )
+    assert payload["kind"] == "strategy_run_collection"
+    assert payload["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["runSpec"]["kind"] == "comparison_run_spec"
+    assert len(payload["candidateStrategies"]) == expected_strategy_count
+    assert len(payload["referenceStrategies"]) == expected_reference_count
+    assert len(payload["predictorRuns"]) == expected_predictor_count
+    assert len(payload["candidateRuns"]) == expected_strategy_count
+    assert len(payload["referenceRuns"]) == expected_reference_count
+    assert payload["runStoreSummary"]["cachedRunCount"] == 0
+    assert payload["runStoreSummary"]["computedRunCount"] == (
+        (expected_strategy_count + expected_reference_count) * 2
+        + expected_predictor_count * 2
+    )
+    assert len(payload["sanityChecks"]) == 1
+    assert len(payload["sanityChecks"][0]["predictorRuns"]) == expected_predictor_count
+
+    second_response = client.get("/api/strategy-runs")
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["runStoreSummary"]["cachedRunCount"] == (
+        (expected_strategy_count + expected_reference_count) * 2
+        + expected_predictor_count * 2
+    )
+    assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 
 def test_dashboard_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp_path) -> None:

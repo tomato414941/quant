@@ -7,11 +7,14 @@ from app.default_comparison import DEFAULT_COMPARISON_SPEC, DEFAULT_PREDICTION_T
 from app.dashboard_service import (
     build_condition_sweep_payload,
     build_dashboard_payload,
+    build_predictor_runs_payload,
     build_prediction_evaluation_payload,
     build_ranking_evaluation_payload,
     build_run_catalog_payload,
+    build_strategy_runs_payload,
     generate_parameter_sweep_runs_payload,
 )
+from app.predictor_registry import REGISTERED_PREDICTOR_SPECS
 from app.market_data import fetch_market_universe_bundle
 
 
@@ -36,6 +39,29 @@ def healthcheck() -> dict[str, str]:
 def dashboard() -> dict:
     try:
         return build_dashboard_payload(
+            DEFAULT_COMPARISON_SPEC,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/predictor-runs")
+def predictor_runs() -> dict:
+    try:
+        return build_predictor_runs_payload(
+            DEFAULT_COMPARISON_SPEC,
+            predictor_specs=REGISTERED_PREDICTOR_SPECS,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/strategy-runs")
+def strategy_runs() -> dict:
+    try:
+        return build_strategy_runs_payload(
             DEFAULT_COMPARISON_SPEC,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )

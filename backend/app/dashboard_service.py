@@ -63,6 +63,29 @@ def collect_required_market_fields(comparison: ComparisonSpec) -> list[str]:
     return list(fields.keys())
 
 
+def collect_strategy_predictor_specs(strategy_specs: list) -> list:
+    predictor_specs = []
+    seen_keys: set[str] = set()
+
+    for strategy_spec in strategy_specs:
+        if strategy_spec.predictor_use is None:
+            continue
+        predictor_key = strategy_spec.predictor_use.predictor_key
+        predictor_spec = REGISTERED_PREDICTOR_SPECS_BY_KEY.get(predictor_key)
+        if predictor_spec is None:
+            raise ValueError(f"Unknown predictor key: {predictor_key}")
+        if predictor_spec.timeframe.key != strategy_spec.timeframe.key:
+            raise ValueError("Supplemental predictor timeframe must match strategy timeframe.")
+        if predictor_spec.investment_universe.tickers != strategy_spec.investment_universe.tickers:
+            raise ValueError("Supplemental predictor universe must match strategy universe.")
+        if predictor_key in seen_keys:
+            continue
+        seen_keys.add(predictor_key)
+        predictor_specs.append(predictor_spec)
+
+    return predictor_specs
+
+
 def fetch_market_data_by_timeframe(
     comparison: ComparisonSpec,
     *,
@@ -102,6 +125,17 @@ def build_dashboard_payload(
         period=comparison.run_spec.market_slice.period,
         fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
+    predictor_runs, predictor_panels_by_key, predictor_run_store_summary = build_predictor_runs(
+        comparison=comparison,
+        predictor_specs=predictor_specs,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
+        run_store=run_store,
+    )
     candidate_runs, candidate_run_store_summary = build_strategy_runs(
         comparison=comparison,
         strategy_specs=comparison.candidate_strategies,
@@ -109,6 +143,7 @@ def build_dashboard_payload(
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
+        predictor_panels_by_key=predictor_panels_by_key,
     )
     reference_runs, reference_run_store_summary = build_strategy_runs(
         comparison=comparison,
@@ -117,14 +152,19 @@ def build_dashboard_payload(
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
+        predictor_panels_by_key=predictor_panels_by_key,
     )
     sanity_checks = []
     required_fields = collect_required_market_fields(comparison)
     total_cached_runs = (
-        candidate_run_store_summary.cached_run_count + reference_run_store_summary.cached_run_count
+        predictor_run_store_summary.cached_run_count
+        + candidate_run_store_summary.cached_run_count
+        + reference_run_store_summary.cached_run_count
     )
     total_computed_runs = (
-        candidate_run_store_summary.computed_run_count + reference_run_store_summary.computed_run_count
+        predictor_run_store_summary.computed_run_count
+        + candidate_run_store_summary.computed_run_count
+        + reference_run_store_summary.computed_run_count
     )
     for period in comparison.run_spec.market_slice.sanity_periods:
         (
@@ -137,6 +177,18 @@ def build_dashboard_payload(
             period=period,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
+        (
+            sanity_predictor_runs,
+            sanity_predictor_panels_by_key,
+            sanity_predictor_run_store_summary,
+        ) = build_predictor_runs(
+            comparison=comparison,
+            predictor_specs=predictor_specs,
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
+            market_data_period=period,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
+            run_store=run_store,
+        )
         sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
             comparison=comparison,
             strategy_specs=comparison.candidate_strategies,
@@ -144,6 +196,7 @@ def build_dashboard_payload(
             market_data_period=period,
             metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
+            predictor_panels_by_key=sanity_predictor_panels_by_key,
         )
         sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
             comparison=comparison,
@@ -152,13 +205,16 @@ def build_dashboard_payload(
             market_data_period=period,
             metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
+            predictor_panels_by_key=sanity_predictor_panels_by_key,
         )
         total_cached_runs += (
-            sanity_candidate_run_store_summary.cached_run_count
+            sanity_predictor_run_store_summary.cached_run_count
+            + sanity_candidate_run_store_summary.cached_run_count
             + sanity_reference_run_store_summary.cached_run_count
         )
         total_computed_runs += (
-            sanity_candidate_run_store_summary.computed_run_count
+            sanity_predictor_run_store_summary.computed_run_count
+            + sanity_candidate_run_store_summary.computed_run_count
             + sanity_reference_run_store_summary.computed_run_count
         )
         sanity_checks.append(
@@ -173,14 +229,17 @@ def build_dashboard_payload(
                 ),
                 "runStoreSummary": {
                     "cachedRunCount": (
-                        sanity_candidate_run_store_summary.cached_run_count
+                        sanity_predictor_run_store_summary.cached_run_count
+                        + sanity_candidate_run_store_summary.cached_run_count
                         + sanity_reference_run_store_summary.cached_run_count
                     ),
                     "computedRunCount": (
-                        sanity_candidate_run_store_summary.computed_run_count
+                        sanity_predictor_run_store_summary.computed_run_count
+                        + sanity_candidate_run_store_summary.computed_run_count
                         + sanity_reference_run_store_summary.computed_run_count
                     ),
                 },
+                "predictorRuns": sanity_predictor_runs,
                 "candidateRuns": sanity_candidate_runs,
                 "referenceRuns": sanity_reference_runs,
             }
@@ -192,6 +251,250 @@ def build_dashboard_payload(
             metadata_by_timeframe,
             comparison_timeframes,
         ),
+        "predictorRuns": predictor_runs,
+        "candidateRuns": candidate_runs,
+        "referenceRuns": reference_runs,
+        "runStoreSummary": {
+            "cachedRunCount": total_cached_runs,
+            "computedRunCount": total_computed_runs,
+        },
+        "sanityChecks": sanity_checks,
+    }
+
+
+def build_predictor_runs_payload(
+    comparison: ComparisonSpec,
+    *,
+    predictor_specs: list,
+    fetch_market_universe_bundle,
+) -> dict:
+    run_store = build_run_result_store(comparison)
+    (
+        market_bundles_by_timeframe,
+        metadata_by_timeframe,
+        _comparison_tickers,
+        comparison_timeframes,
+    ) = fetch_market_data_by_timeframe(
+        comparison,
+        period=comparison.run_spec.market_slice.period,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
+    )
+    predictor_runs, _predictor_panels_by_key, predictor_run_store_summary = build_predictor_runs(
+        comparison=comparison,
+        predictor_specs=predictor_specs,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
+        run_store=run_store,
+    )
+    required_fields = collect_required_market_fields(comparison)
+    sanity_checks = []
+    total_cached_runs = predictor_run_store_summary.cached_run_count
+    total_computed_runs = predictor_run_store_summary.computed_run_count
+
+    for period in comparison.run_spec.market_slice.sanity_periods:
+        (
+            sanity_bundles_by_timeframe,
+            sanity_metadata_by_timeframe,
+            _sanity_tickers,
+            sanity_timeframes,
+        ) = fetch_market_data_by_timeframe(
+            comparison,
+            period=period,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+        sanity_predictor_runs, _sanity_panels_by_key, sanity_run_store_summary = build_predictor_runs(
+            comparison=comparison,
+            predictor_specs=predictor_specs,
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
+            market_data_period=period,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
+            run_store=run_store,
+        )
+        total_cached_runs += sanity_run_store_summary.cached_run_count
+        total_computed_runs += sanity_run_store_summary.computed_run_count
+        sanity_checks.append(
+            {
+                "period": period,
+                "evaluation": serialize_evaluation(
+                    comparison,
+                    sanity_metadata_by_timeframe,
+                    sanity_timeframes,
+                    fields=required_fields,
+                    period_override=period,
+                ),
+                "runStoreSummary": sanity_run_store_summary.to_payload(),
+                "predictorRuns": sanity_predictor_runs,
+            }
+        )
+
+    return {
+        "kind": "predictor_run_collection",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "runSpec": serialize_run_spec(comparison, metadata_by_timeframe, comparison_timeframes),
+        "predictorSpecs": [serialize_predictor_spec(predictor_spec) for predictor_spec in predictor_specs],
+        "resultCount": len(predictor_runs),
+        "runStoreSummary": {
+            "cachedRunCount": total_cached_runs,
+            "computedRunCount": total_computed_runs,
+        },
+        "predictorRuns": predictor_runs,
+        "sanityChecks": sanity_checks,
+    }
+
+
+def build_strategy_runs_payload(
+    comparison: ComparisonSpec,
+    *,
+    fetch_market_universe_bundle,
+) -> dict:
+    run_store = build_run_result_store(comparison)
+    (
+        market_bundles_by_timeframe,
+        metadata_by_timeframe,
+        _comparison_tickers,
+        comparison_timeframes,
+    ) = fetch_market_data_by_timeframe(
+        comparison,
+        period=comparison.run_spec.market_slice.period,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
+    )
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
+    predictor_runs, predictor_panels_by_key, predictor_run_store_summary = build_predictor_runs(
+        comparison=comparison,
+        predictor_specs=predictor_specs,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
+        run_store=run_store,
+    )
+    candidate_runs, candidate_run_store_summary = build_strategy_runs(
+        comparison=comparison,
+        strategy_specs=comparison.candidate_strategies,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
+        run_store=run_store,
+        predictor_panels_by_key=predictor_panels_by_key,
+    )
+    reference_runs, reference_run_store_summary = build_strategy_runs(
+        comparison=comparison,
+        strategy_specs=comparison.reference_strategies,
+        market_bundles_by_timeframe=market_bundles_by_timeframe,
+        market_data_period=comparison.run_spec.market_slice.period,
+        metadata_by_timeframe=metadata_by_timeframe,
+        run_store=run_store,
+        predictor_panels_by_key=predictor_panels_by_key,
+    )
+    required_fields = collect_required_market_fields(comparison)
+    sanity_checks = []
+    total_cached_runs = (
+        predictor_run_store_summary.cached_run_count
+        + candidate_run_store_summary.cached_run_count
+        + reference_run_store_summary.cached_run_count
+    )
+    total_computed_runs = (
+        predictor_run_store_summary.computed_run_count
+        + candidate_run_store_summary.computed_run_count
+        + reference_run_store_summary.computed_run_count
+    )
+
+    for period in comparison.run_spec.market_slice.sanity_periods:
+        (
+            sanity_bundles_by_timeframe,
+            sanity_metadata_by_timeframe,
+            _sanity_tickers,
+            sanity_timeframes,
+        ) = fetch_market_data_by_timeframe(
+            comparison,
+            period=period,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+        (
+            sanity_predictor_runs,
+            sanity_predictor_panels_by_key,
+            sanity_predictor_run_store_summary,
+        ) = build_predictor_runs(
+            comparison=comparison,
+            predictor_specs=predictor_specs,
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
+            market_data_period=period,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
+            run_store=run_store,
+        )
+        sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
+            comparison=comparison,
+            strategy_specs=comparison.candidate_strategies,
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
+            market_data_period=period,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
+            run_store=run_store,
+            predictor_panels_by_key=sanity_predictor_panels_by_key,
+        )
+        sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
+            comparison=comparison,
+            strategy_specs=comparison.reference_strategies,
+            market_bundles_by_timeframe=sanity_bundles_by_timeframe,
+            market_data_period=period,
+            metadata_by_timeframe=sanity_metadata_by_timeframe,
+            run_store=run_store,
+            predictor_panels_by_key=sanity_predictor_panels_by_key,
+        )
+        total_cached_runs += (
+            sanity_predictor_run_store_summary.cached_run_count
+            + sanity_candidate_run_store_summary.cached_run_count
+            + sanity_reference_run_store_summary.cached_run_count
+        )
+        total_computed_runs += (
+            sanity_predictor_run_store_summary.computed_run_count
+            + sanity_candidate_run_store_summary.computed_run_count
+            + sanity_reference_run_store_summary.computed_run_count
+        )
+        sanity_checks.append(
+            {
+                "period": period,
+                "evaluation": serialize_evaluation(
+                    comparison,
+                    sanity_metadata_by_timeframe,
+                    sanity_timeframes,
+                    fields=required_fields,
+                    period_override=period,
+                ),
+                "runStoreSummary": {
+                    "cachedRunCount": (
+                        sanity_predictor_run_store_summary.cached_run_count
+                        + sanity_candidate_run_store_summary.cached_run_count
+                        + sanity_reference_run_store_summary.cached_run_count
+                    ),
+                    "computedRunCount": (
+                        sanity_predictor_run_store_summary.computed_run_count
+                        + sanity_candidate_run_store_summary.computed_run_count
+                        + sanity_reference_run_store_summary.computed_run_count
+                    ),
+                },
+                "predictorRuns": sanity_predictor_runs,
+                "candidateRuns": sanity_candidate_runs,
+                "referenceRuns": sanity_reference_runs,
+            }
+        )
+
+    return {
+        "kind": "strategy_run_collection",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "runSpec": serialize_run_spec(comparison, metadata_by_timeframe, comparison_timeframes),
+        "candidateStrategies": [
+            serialize_strategy_spec(strategy_spec)
+            for strategy_spec in comparison.candidate_strategies
+        ],
+        "referenceStrategies": [
+            serialize_strategy_spec(strategy_spec)
+            for strategy_spec in comparison.reference_strategies
+        ],
+        "predictorRuns": predictor_runs,
         "candidateRuns": candidate_runs,
         "referenceRuns": reference_runs,
         "runStoreSummary": {
@@ -596,6 +899,7 @@ def build_strategy_runs(
     market_data_period: str,
     metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
+    predictor_panels_by_key: dict[str, object] | None = None,
 ) -> tuple[list[dict], RunStoreSummary]:
     serialized_execution_assumptions = serialize_execution_assumptions(comparison)
     required_fields = collect_required_market_fields(comparison)
@@ -605,70 +909,13 @@ def build_strategy_runs(
 
     for strategy_spec in strategy_specs:
         timeframe_key = strategy_spec.timeframe.key
-        market_bundle = market_bundles_by_timeframe[timeframe_key]
         dataset_metadata = metadata_by_timeframe[timeframe_key]
         serialized_strategy = serialize_strategy_spec(strategy_spec)
         predictor_panel = None
-        supplemental_predictor_spec = None
         if strategy_spec.predictor_use is not None:
-            supplemental_predictor_spec = REGISTERED_PREDICTOR_SPECS_BY_KEY.get(
-                strategy_spec.predictor_use.predictor_key
-            )
-            if supplemental_predictor_spec is None:
-                raise ValueError(f"Unknown predictor key: {strategy_spec.predictor_use.predictor_key}")
-            if supplemental_predictor_spec.timeframe.key != strategy_spec.timeframe.key:
-                raise ValueError("Supplemental predictor timeframe must match strategy timeframe.")
-            if supplemental_predictor_spec.investment_universe.tickers != strategy_spec.investment_universe.tickers:
-                raise ValueError("Supplemental predictor universe must match strategy universe.")
-        if supplemental_predictor_spec is not None:
-            predictor_run_spec = build_run_spec(
-                run_kind="predictor_run",
-                strategy={"predictor": serialize_predictor_spec(supplemental_predictor_spec)},
-                market_slice={
-                    "period": market_data_period,
-                    "timeframe": serialize_timeframe(strategy_spec.timeframe),
-                    "fields": required_fields,
-                },
-                evaluation=serialize_evaluation(
-                    comparison,
-                    {timeframe_key: dataset_metadata},
-                    [strategy_spec.timeframe],
-                    fields=required_fields,
-                    period_override=market_data_period,
-                ),
-                execution_assumptions=serialized_execution_assumptions,
-                portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
-                capital_base=comparison.run_spec.capital_base,
-            )
-            cached_predictor_run = run_store.load(predictor_run_spec)
-            if cached_predictor_run is not None:
-                cached_run_count += 1
-                predictor_panel = deserialize_predictor_panel(cached_predictor_run.get("predictorSeries"))
-            else:
-                closes = market_bundle["closes"][list(supplemental_predictor_spec.investment_universe.tickers)]
-                volumes = (
-                    market_bundle["volumes"][list(supplemental_predictor_spec.investment_universe.tickers)]
-                    if market_bundle["volumes"] is not None
-                    else None
-                )
-                returns = closes.pct_change().dropna()
-                aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
-                predictor_result = evaluate_predictor_spec(
-                    returns=returns,
-                    volumes=aligned_volumes,
-                    split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
-                    predictor_spec=supplemental_predictor_spec,
-                    bars_per_year=supplemental_predictor_spec.timeframe.bars_per_year,
-                    predictor_panel=compute_predictor_panel(
-                        returns=returns,
-                        volumes=aligned_volumes,
-                        predictor_spec=supplemental_predictor_spec,
-                        bars_per_year=supplemental_predictor_spec.timeframe.bars_per_year,
-                    ),
-                )
-                predictor_panel = deserialize_predictor_panel(predictor_result.get("predictorSeries"))
-                run_store.save(predictor_run_spec, predictor_result)
-                computed_run_count += 1
+            predictor_key = strategy_spec.predictor_use.predictor_key
+            predictor_panel = None if predictor_panels_by_key is None else predictor_panels_by_key.get(predictor_key)
+        market_bundle = market_bundles_by_timeframe[timeframe_key]
         strategy_market_slice = {
             "period": market_data_period,
             "timeframe": serialize_timeframe(strategy_spec.timeframe),
@@ -711,6 +958,89 @@ def build_strategy_runs(
         runs.append(run)
 
     return runs, RunStoreSummary(
+        cached_run_count=cached_run_count,
+        computed_run_count=computed_run_count,
+    )
+
+
+def build_predictor_runs(
+    *,
+    comparison: ComparisonSpec,
+    predictor_specs: list,
+    market_bundles_by_timeframe: dict[str, dict],
+    market_data_period: str,
+    metadata_by_timeframe: dict[str, dict[str, str]],
+    run_store: FileRunResultStore,
+) -> tuple[list[dict], dict[str, object], RunStoreSummary]:
+    results: list[dict] = []
+    predictor_panels_by_key: dict[str, object] = {}
+    cached_run_count = 0
+    computed_run_count = 0
+    required_fields = collect_required_market_fields(comparison)
+    serialized_execution_assumptions = serialize_execution_assumptions(comparison)
+
+    for predictor_spec in predictor_specs:
+        timeframe_key = predictor_spec.timeframe.key
+        market_bundle = market_bundles_by_timeframe[timeframe_key]
+        dataset_metadata = metadata_by_timeframe[timeframe_key]
+        closes = market_bundle["closes"][list(predictor_spec.investment_universe.tickers)]
+        volumes = (
+            market_bundle["volumes"][list(predictor_spec.investment_universe.tickers)]
+            if market_bundle["volumes"] is not None
+            else None
+        )
+        returns = closes.pct_change().dropna()
+        aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
+        run_spec = build_run_spec(
+            run_kind="predictor_run",
+            strategy={"predictor": serialize_predictor_spec(predictor_spec)},
+            market_slice={
+                "period": market_data_period,
+                "timeframe": serialize_timeframe(predictor_spec.timeframe),
+                "fields": required_fields,
+            },
+            evaluation=serialize_evaluation(
+                comparison,
+                {timeframe_key: dataset_metadata},
+                [predictor_spec.timeframe],
+                fields=required_fields,
+                period_override=market_data_period,
+            ),
+            execution_assumptions=serialized_execution_assumptions,
+            portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
+            capital_base=comparison.run_spec.capital_base,
+        )
+        cached_run = run_store.load(run_spec)
+        if cached_run is not None:
+            cached_run_count += 1
+            results.append(cached_run)
+            predictor_panels_by_key[predictor_spec.key] = deserialize_predictor_panel(
+                cached_run.get("predictorSeries")
+            )
+            continue
+
+        predictor_panel = compute_predictor_panel(
+            returns=returns,
+            volumes=aligned_volumes,
+            predictor_spec=predictor_spec,
+            bars_per_year=predictor_spec.timeframe.bars_per_year,
+        )
+        result = evaluate_predictor_spec(
+            returns=returns,
+            volumes=aligned_volumes,
+            split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
+            predictor_spec=predictor_spec,
+            bars_per_year=predictor_spec.timeframe.bars_per_year,
+            predictor_panel=predictor_panel,
+        )
+        run_store.save(run_spec, result)
+        computed_run_count += 1
+        results.append(result)
+        predictor_panels_by_key[predictor_spec.key] = deserialize_predictor_panel(
+            result.get("predictorSeries")
+        )
+
+    return results, predictor_panels_by_key, RunStoreSummary(
         cached_run_count=cached_run_count,
         computed_run_count=computed_run_count,
     )

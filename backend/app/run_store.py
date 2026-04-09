@@ -77,6 +77,24 @@ class FileRunResultStore:
             return records[:limit]
         return records
 
+    def get_record(self, run_key: str) -> dict | None:
+        path = self.root_dir / f"{run_key}.json"
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        run_spec = payload.get("runSpec", {})
+        if run_spec.get("logicVersion") != RUN_STORE_LOGIC_VERSION:
+            return None
+        return {
+            "runKey": run_key,
+            "savedAtUtc": payload.get("savedAtUtc"),
+            "runSpec": run_spec,
+            "result": payload.get("result", {}),
+        }
+
     def save(self, run_spec: dict, result: dict) -> None:
         path = self._path_for(run_spec)
         payload = {

@@ -7,10 +7,14 @@ from app.default_comparison import DEFAULT_COMPARISON_SPEC, DEFAULT_PREDICTION_T
 from app.dashboard_service import (
     build_condition_sweep_payload,
     build_dashboard_payload,
+    build_predictor_run_detail_payload,
+    build_predictor_run_index_payload,
     build_predictor_runs_payload,
     build_prediction_evaluation_payload,
     build_ranking_evaluation_payload,
     build_run_catalog_payload,
+    build_strategy_run_detail_payload,
+    build_strategy_run_index_payload,
     build_strategy_runs_payload,
     generate_parameter_sweep_runs_payload,
 )
@@ -47,6 +51,17 @@ def dashboard() -> dict:
 
 
 @app.get("/api/predictor-runs")
+def predictor_run_index(limit: int = Query(50, ge=1, le=500)) -> dict:
+    try:
+        return build_predictor_run_index_payload(
+            DEFAULT_COMPARISON_SPEC,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/predictor-runs")
 def predictor_runs() -> dict:
     try:
         return build_predictor_runs_payload(
@@ -58,7 +73,29 @@ def predictor_runs() -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/predictor-runs/{run_key}")
+def predictor_run_detail(run_key: str) -> dict:
+    try:
+        return build_predictor_run_detail_payload(
+            DEFAULT_COMPARISON_SPEC,
+            run_key=run_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/api/strategy-runs")
+def strategy_run_index(limit: int = Query(50, ge=1, le=500)) -> dict:
+    try:
+        return build_strategy_run_index_payload(
+            DEFAULT_COMPARISON_SPEC,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/strategy-runs")
 def strategy_runs() -> dict:
     try:
         return build_strategy_runs_payload(
@@ -67,6 +104,17 @@ def strategy_runs() -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/strategy-runs/{run_key}")
+def strategy_run_detail(run_key: str) -> dict:
+    try:
+        return build_strategy_run_detail_payload(
+            DEFAULT_COMPARISON_SPEC,
+            run_key=run_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/condition-sweep")

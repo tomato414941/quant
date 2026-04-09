@@ -292,7 +292,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     config.result_store_dir = str(tmp_path / "run_results")
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
-    response = client.get("/api/predictor-runs")
+    response = client.post("/api/predictor-runs")
 
     assert response.status_code == 200
     payload = response.json()
@@ -307,7 +307,23 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert len(payload["sanityChecks"]) == 1
     assert len(payload["sanityChecks"][0]["predictorRuns"]) == expected_predictor_count
 
-    second_response = client.get("/api/predictor-runs")
+    index_response = client.get("/api/predictor-runs", params={"limit": 10})
+    assert index_response.status_code == 200
+    index_payload = index_response.json()
+    assert index_payload["kind"] == "predictor_run_index"
+    assert index_payload["totalCount"] == expected_predictor_count * 2
+    assert index_payload["recordCount"] == min(10, expected_predictor_count * 2)
+    assert index_payload["records"][0]["runKind"] == "predictor_run"
+    run_key = index_payload["records"][0]["runKey"]
+
+    detail_response = client.get(f"/api/predictor-runs/{run_key}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["kind"] == "predictor_run_detail"
+    assert detail_payload["record"]["runKey"] == run_key
+    assert detail_payload["record"]["runSpec"]["runKind"] == "predictor_run"
+
+    second_response = client.post("/api/predictor-runs")
     assert second_response.status_code == 200
     second_payload = second_response.json()
     assert second_payload["runStoreSummary"]["cachedRunCount"] == expected_predictor_count * 2
@@ -320,7 +336,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     config.result_store_dir = str(tmp_path / "run_results")
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
-    response = client.get("/api/strategy-runs")
+    response = client.post("/api/strategy-runs")
 
     assert response.status_code == 200
     payload = response.json()
@@ -345,7 +361,23 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert len(payload["sanityChecks"]) == 1
     assert len(payload["sanityChecks"][0]["predictorRuns"]) == expected_predictor_count
 
-    second_response = client.get("/api/strategy-runs")
+    index_response = client.get("/api/strategy-runs", params={"limit": 10})
+    assert index_response.status_code == 200
+    index_payload = index_response.json()
+    assert index_payload["kind"] == "strategy_run_index"
+    assert index_payload["totalCount"] == (expected_strategy_count + expected_reference_count) * 2
+    assert index_payload["recordCount"] == 10
+    assert index_payload["records"][0]["runKind"] == "strategy_run"
+    run_key = index_payload["records"][0]["runKey"]
+
+    detail_response = client.get(f"/api/strategy-runs/{run_key}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["kind"] == "strategy_run_detail"
+    assert detail_payload["record"]["runKey"] == run_key
+    assert detail_payload["record"]["runSpec"]["runKind"] == "strategy_run"
+
+    second_response = client.post("/api/strategy-runs")
     assert second_response.status_code == 200
     second_payload = second_response.json()
     assert second_payload["runStoreSummary"]["cachedRunCount"] == (

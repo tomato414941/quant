@@ -639,6 +639,78 @@ def build_run_catalog_payload(
     }
 
 
+def build_predictor_run_index_payload(
+    comparison: ComparisonSpec,
+    *,
+    limit: int = 50,
+) -> dict:
+    run_store = build_run_result_store(comparison)
+    total_count = len(run_store.list_records(run_kind="predictor_run"))
+    records = run_store.list_records(run_kind="predictor_run", limit=limit)
+    return {
+        "kind": "predictor_run_index",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "limit": limit,
+        "totalCount": total_count,
+        "recordCount": len(records),
+        "records": [compact_predictor_run_record(record) for record in records],
+    }
+
+
+def build_predictor_run_detail_payload(
+    comparison: ComparisonSpec,
+    *,
+    run_key: str,
+) -> dict:
+    run_store = build_run_result_store(comparison)
+    record = run_store.get_record(run_key)
+    if record is None or record["runSpec"].get("runKind") != "predictor_run":
+        raise ValueError(f"Predictor run not found: {run_key}")
+    return {
+        "kind": "predictor_run_detail",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "record": record,
+    }
+
+
+def build_strategy_run_index_payload(
+    comparison: ComparisonSpec,
+    *,
+    limit: int = 50,
+) -> dict:
+    run_store = build_run_result_store(comparison)
+    total_count = len(run_store.list_records(run_kind="strategy_run"))
+    records = run_store.list_records(run_kind="strategy_run", limit=limit)
+    return {
+        "kind": "strategy_run_index",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "limit": limit,
+        "totalCount": total_count,
+        "recordCount": len(records),
+        "records": [compact_strategy_run_record(record) for record in records],
+    }
+
+
+def build_strategy_run_detail_payload(
+    comparison: ComparisonSpec,
+    *,
+    run_key: str,
+) -> dict:
+    run_store = build_run_result_store(comparison)
+    record = run_store.get_record(run_key)
+    if record is None or record["runSpec"].get("runKind") != "strategy_run":
+        raise ValueError(f"Strategy run not found: {run_key}")
+    return {
+        "kind": "strategy_run_detail",
+        "schemaVersion": "v1",
+        "comparisonId": comparison.comparison_id,
+        "record": record,
+    }
+
+
 def generate_parameter_sweep_runs_payload(
     comparison: ComparisonSpec,
     *,
@@ -888,6 +960,40 @@ def compact_run_record(record: dict) -> dict:
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
         "totalReturnPct": portfolio_summary.get("totalReturnPct"),
         "maxDrawdownPct": portfolio_summary.get("maxDrawdownPct"),
+    }
+
+
+def compact_strategy_run_record(record: dict) -> dict:
+    return compact_run_record(record)
+
+
+def compact_predictor_run_record(record: dict) -> dict:
+    run_spec = record["runSpec"]
+    result = record["result"]
+    predictor = run_spec.get("strategy", {}).get("predictor", {})
+    target = predictor.get("targetSpec", {})
+    horizon = target.get("horizonSpec", {})
+    overall = result.get("overall", {})
+    test = result.get("test", {})
+
+    return {
+        "runKey": record["runKey"],
+        "savedAtUtc": record.get("savedAtUtc"),
+        "runKind": run_spec.get("runKind"),
+        "predictorKey": predictor.get("key"),
+        "predictorLabel": predictor.get("label"),
+        "modelKind": predictor.get("modelSpec", {}).get("modelKind"),
+        "timeframe": predictor.get("timeframe", {}).get("key"),
+        "targetKind": target.get("targetKind"),
+        "horizonUnit": horizon.get("unit"),
+        "horizonValue": horizon.get("value"),
+        "period": run_spec.get("marketSlice", {}).get("period"),
+        "observationCount": overall.get("observationCount"),
+        "testObservationCount": test.get("observationCount"),
+        "overallRankIc": overall.get("meanRankIc"),
+        "testRankIc": test.get("meanRankIc"),
+        "overallTopMinusBottomPct": overall.get("meanTopMinusBottomPct"),
+        "testTopMinusBottomPct": test.get("meanTopMinusBottomPct"),
     }
 
 

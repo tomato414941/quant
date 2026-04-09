@@ -5,7 +5,6 @@ from pathlib import Path
 
 from app.portfolio import (
     build_asset_ranking_specs,
-    build_predictor_specs,
     build_risk_controls_spec,
     build_selection_spec,
     build_strategy_spec,
@@ -562,43 +561,6 @@ def build_ranking_evaluation_payload(
     )
     results, run_store_summary = build_ranking_evaluation_runs(
         comparison=comparison,
-        market_bundles_by_timeframe=market_bundles_by_timeframe,
-        market_data_period=comparison.run_spec.market_slice.period,
-        metadata_by_timeframe=metadata_by_timeframe,
-        run_store=run_store,
-    )
-    return {
-        "comparison": serialize_comparison(
-            comparison,
-            metadata_by_timeframe,
-            comparison_timeframes,
-        ),
-        "resultCount": len(results),
-        "runStoreSummary": run_store_summary.to_payload(),
-        "results": results,
-    }
-
-
-def build_prediction_evaluation_payload(
-    comparison: ComparisonSpec,
-    *,
-    target_specs: list,
-    fetch_market_universe_bundle,
-) -> dict:
-    run_store = build_run_result_store(comparison)
-    (
-        market_bundles_by_timeframe,
-        metadata_by_timeframe,
-        _comparison_tickers,
-        comparison_timeframes,
-    ) = fetch_market_data_by_timeframe(
-        comparison,
-        period=comparison.run_spec.market_slice.period,
-        fetch_market_universe_bundle=fetch_market_universe_bundle,
-    )
-    results, run_store_summary = build_prediction_evaluation_runs(
-        comparison=comparison,
-        target_specs=target_specs,
         market_bundles_by_timeframe=market_bundles_by_timeframe,
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
@@ -1329,88 +1291,6 @@ def build_ranking_evaluation_runs(
             row["overall"]["meanRankIc"] if row["overall"]["meanRankIc"] is not None else float("-inf"),
             row["overall"]["meanTopMinusBottomPct"]
             if row["overall"]["meanTopMinusBottomPct"] is not None
-            else float("-inf"),
-        ),
-        reverse=True,
-    )
-    return results, RunStoreSummary(
-        cached_run_count=cached_run_count,
-        computed_run_count=computed_run_count,
-    )
-
-
-def build_prediction_evaluation_runs(
-    *,
-    comparison: ComparisonSpec,
-    target_specs: list,
-    market_bundles_by_timeframe: dict[str, dict],
-    market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
-    run_store: FileRunResultStore,
-) -> tuple[list[dict], RunStoreSummary]:
-    ranking_specs = build_asset_ranking_specs(comparison.candidate_strategies)
-    predictor_specs = build_predictor_specs(ranking_specs, target_specs)
-    results: list[dict] = []
-    cached_run_count = 0
-    computed_run_count = 0
-    required_fields = collect_required_market_fields(comparison)
-
-    for predictor_spec in predictor_specs:
-        timeframe_key = predictor_spec.timeframe.key
-        market_bundle = market_bundles_by_timeframe[timeframe_key]
-        dataset_metadata = metadata_by_timeframe[timeframe_key]
-        closes = market_bundle["closes"][list(predictor_spec.investment_universe.tickers)]
-        volumes = (
-            market_bundle["volumes"][list(predictor_spec.investment_universe.tickers)]
-            if market_bundle["volumes"] is not None
-            else None
-        )
-        returns = closes.pct_change().dropna()
-        aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
-        serialized_evaluation = serialize_evaluation(
-            comparison,
-            {timeframe_key: dataset_metadata},
-            [predictor_spec.timeframe],
-            fields=required_fields,
-            period_override=market_data_period,
-        )
-        serialized_execution_assumptions = serialize_execution_assumptions(comparison)
-        run_spec = build_run_spec(
-            run_kind="prediction_evaluation",
-            strategy={"predictor": serialize_predictor_spec(predictor_spec)},
-            market_slice={
-                "period": market_data_period,
-                "timeframe": serialize_timeframe(predictor_spec.timeframe),
-                "fields": required_fields,
-            },
-            evaluation=serialized_evaluation,
-            execution_assumptions=serialized_execution_assumptions,
-            portfolio_state=serialize_portfolio_state(comparison.run_spec.portfolio_state),
-            capital_base=comparison.run_spec.capital_base,
-        )
-        cached_run = run_store.load(run_spec)
-        if cached_run is not None:
-            cached_run_count += 1
-            results.append(cached_run)
-            continue
-
-        result = evaluate_predictor_spec(
-            returns=returns,
-            volumes=aligned_volumes,
-            split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
-            predictor_spec=predictor_spec,
-            bars_per_year=predictor_spec.timeframe.bars_per_year,
-        )
-        run_store.save(run_spec, result)
-        computed_run_count += 1
-        results.append(result)
-
-    results.sort(
-        key=lambda row: (
-            row["test"]["meanRankIc"] if row["test"]["meanRankIc"] is not None else float("-inf"),
-            row["overall"]["meanRankIc"] if row["overall"]["meanRankIc"] is not None else float("-inf"),
-            row["test"]["meanTopMinusBottomPct"]
-            if row["test"]["meanTopMinusBottomPct"] is not None
             else float("-inf"),
         ),
         reverse=True,

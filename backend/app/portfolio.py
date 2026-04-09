@@ -214,6 +214,15 @@ class PredictionModelSpec:
 
 
 @dataclass(frozen=True)
+class TrainingSpec:
+    key: str
+    label: str
+    fit_mode: str
+    min_train_samples: int
+    parameters: tuple[tuple[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
 class PredictorSpec:
     key: str
     label: str
@@ -222,6 +231,7 @@ class PredictorSpec:
     investment_universe: InvestmentUniverseSpec
     feature_spec: FeatureSpec
     model_spec: PredictionModelSpec
+    training_spec: TrainingSpec
     target_spec: PredictionTargetSpec
     selection: SelectionSpec
     source_strategy_keys: tuple[str, ...]
@@ -903,6 +913,23 @@ def build_prediction_model_spec(
     )
 
 
+def build_training_spec(
+    *,
+    key: str,
+    label: str,
+    fit_mode: str,
+    min_train_samples: int,
+    parameters: dict[str, object] | None = None,
+) -> TrainingSpec:
+    return TrainingSpec(
+        key=key,
+        label=label,
+        fit_mode=fit_mode,
+        min_train_samples=min_train_samples,
+        parameters=tuple(sorted((parameters or {}).items())),
+    )
+
+
 def build_predictor_spec(
     *,
     key: str,
@@ -912,6 +939,7 @@ def build_predictor_spec(
     investment_universe: InvestmentUniverseSpec,
     feature_spec: FeatureSpec,
     model_spec: PredictionModelSpec,
+    training_spec: TrainingSpec,
     target_spec: PredictionTargetSpec,
     selection: SelectionSpec,
     source_strategy_keys: tuple[str, ...] = (),
@@ -925,6 +953,7 @@ def build_predictor_spec(
         investment_universe=investment_universe,
         feature_spec=feature_spec,
         model_spec=model_spec,
+        training_spec=training_spec,
         target_spec=target_spec,
         selection=selection,
         source_strategy_keys=source_strategy_keys,
@@ -943,6 +972,22 @@ def serialize_prediction_model_spec(
         "label": model_spec.label,
         "parameters": {
             key: value for key, value in model_spec.parameters
+        },
+    }
+
+
+def serialize_training_spec(
+    training_spec: TrainingSpec,
+) -> dict:
+    return {
+        "kind": "training_spec",
+        "schemaVersion": "v1",
+        "key": training_spec.key,
+        "label": training_spec.label,
+        "fitMode": training_spec.fit_mode,
+        "minTrainSamples": training_spec.min_train_samples,
+        "parameters": {
+            key: value for key, value in training_spec.parameters
         },
     }
 
@@ -1062,8 +1107,6 @@ def build_predictor_specs(
                 label=f"{ranking_spec.selection.score_model.label} linear",
                 parameters={
                     "scoreModelKind": ranking_spec.selection.score_model.kind,
-                    "fitMode": "expanding",
-                    "minTrainSamples": 50,
                     **ranking_parameters,
                 },
             ),
@@ -1073,8 +1116,6 @@ def build_predictor_specs(
                 label=f"{ranking_spec.selection.score_model.label} blend",
                 parameters={
                     "scoreModelKind": ranking_spec.selection.score_model.kind,
-                    "fitMode": "expanding",
-                    "minTrainSamples": 50,
                     "signalWeight": 0.8,
                     "linearWeight": 0.2,
                     **ranking_parameters,
@@ -1092,6 +1133,12 @@ def build_predictor_specs(
                         investment_universe=ranking_spec.investment_universe,
                         feature_spec=feature_spec,
                         model_spec=model_spec,
+                        training_spec=build_training_spec(
+                            key=f"training__{ranking_spec.key}__{model_spec.kind}",
+                            label=f"{ranking_spec.selection.score_model.label} training",
+                            fit_mode="expanding",
+                            min_train_samples=50,
+                        ),
                         target_spec=target_spec,
                         selection=ranking_spec.selection,
                         source_strategy_keys=ranking_spec.source_strategy_keys,
@@ -1144,6 +1191,7 @@ def serialize_predictor_spec(
         },
         "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
         "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
+        "trainingSpec": serialize_training_spec(predictor_spec.training_spec),
         "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
         "sourceStrategyKeys": list(predictor_spec.source_strategy_keys),
         "sourceStrategyLabels": list(predictor_spec.source_strategy_labels),
@@ -1815,7 +1863,7 @@ def compute_predictor_panel(
     xty = np.zeros(feature_count + 1, dtype="float64")
     train_sample_count = 0
     model_parameters = {key: value for key, value in predictor_spec.model_spec.parameters}
-    min_train_samples = int(model_parameters.get("minTrainSamples", 1))
+    min_train_samples = predictor_spec.training_spec.min_train_samples
     signal_weight = float(model_parameters.get("signalWeight", 0.8))
     linear_weight = float(model_parameters.get("linearWeight", 0.2))
 

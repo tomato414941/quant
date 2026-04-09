@@ -6,9 +6,8 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
-from app.predictor_registry import DEFAULT_PREDICTION_TARGET_SPECS
 from app.main import app
-from app.portfolio import build_asset_ranking_specs, build_predictor_specs
+from app.portfolio import build_asset_ranking_specs
 from app.timeframe_models import build_timeframe_spec
 
 
@@ -641,46 +640,3 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert second_payload["runStoreSummary"]["cachedRunCount"] == expected_ranking_count
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
-
-def test_prediction_evaluation_endpoint(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
-    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
-    config.result_store_dir = str(tmp_path / "run_results")
-    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
-
-    response = client.get("/api/prediction-evaluation")
-
-    assert response.status_code == 200
-    payload = response.json()
-    expected_ranking_count = len(build_asset_ranking_specs(config.candidate_strategies))
-    expected_result_count = len(
-        build_predictor_specs(
-            build_asset_ranking_specs(config.candidate_strategies),
-            DEFAULT_PREDICTION_TARGET_SPECS,
-        )
-    )
-    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
-    assert payload["resultCount"] == expected_result_count
-    assert payload["runStoreSummary"]["cachedRunCount"] == 0
-    assert payload["runStoreSummary"]["computedRunCount"] == expected_result_count
-    assert payload["results"][0]["predictorSpec"]["modelSpec"]["modelKind"] in {
-        "ranking_signal_model",
-        "linear_regression",
-        "blended_signal_model",
-    }
-    assert payload["results"][0]["predictorSpec"]["featureSpec"]["inputs"]
-    assert payload["results"][0]["predictorSpec"]["targetSpec"]["targetKind"] == "forward_excess_return"
-    assert payload["results"][0]["predictorSpec"]["targetSpec"]["horizonSpec"]["unit"] == "bars"
-    observed_results = [
-        result for result in payload["results"] if result["overall"]["observationCount"] >= 1
-    ]
-    if observed_results:
-        assert observed_results[0]["overall"]["meanRankIc"] is not None
-        assert observed_results[0]["overall"]["meanPearsonCorr"] is not None
-
-    second_response = client.get("/api/prediction-evaluation")
-
-    assert second_response.status_code == 200
-    second_payload = second_response.json()
-    assert second_payload["runStoreSummary"]["cachedRunCount"] == expected_result_count
-    assert second_payload["runStoreSummary"]["computedRunCount"] == 0

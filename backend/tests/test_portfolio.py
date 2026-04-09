@@ -7,6 +7,7 @@ from app.portfolio import (
     build_prediction_target_spec,
     build_predictor_spec,
     build_predictor_use_spec,
+    build_training_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
     build_portfolio_state,
@@ -108,10 +109,14 @@ def make_predictor_spec(
             label=f"{label} linear",
             parameters={
                 "scoreModelKind": strategy.selection.score_model.kind,
-                "fitMode": "expanding",
-                "minTrainSamples": min_train_samples,
                 "windowSpec": {"unit": "bars", "value": 3},
             },
+        ),
+        training_spec=build_training_spec(
+            key=f"training__{predictor_key}",
+            label=f"{label} training",
+            fit_mode="expanding",
+            min_train_samples=min_train_samples,
         ),
         target_spec=build_prediction_target_spec(
             key=f"{predictor_key}__target",

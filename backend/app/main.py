@@ -3,14 +3,13 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.default_comparison import DEFAULT_COMPARISON_SPEC, DEFAULT_PREDICTION_TARGET_SPECS
+from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.dashboard_service import (
     build_condition_sweep_payload,
     build_dashboard_payload,
     build_predictor_run_detail_payload,
     build_predictor_run_index_payload,
     build_predictor_runs_payload,
-    build_prediction_evaluation_payload,
     build_ranking_evaluation_payload,
     build_run_catalog_payload,
     build_strategy_run_detail_payload,
@@ -161,18 +160,6 @@ def ranking_evaluation() -> dict:
     try:
         return build_ranking_evaluation_payload(
             DEFAULT_COMPARISON_SPEC,
-            fetch_market_universe_bundle=fetch_market_universe_bundle,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/api/prediction-evaluation")
-def prediction_evaluation() -> dict:
-    try:
-        return build_prediction_evaluation_payload(
-            DEFAULT_COMPARISON_SPEC,
-            target_specs=DEFAULT_PREDICTION_TARGET_SPECS,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:

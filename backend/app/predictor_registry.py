@@ -12,6 +12,7 @@ from app.portfolio import (
     build_prediction_model_spec,
     build_prediction_target_spec,
     build_predictor_spec,
+    build_training_spec,
     extract_ranking_score_parameters,
 )
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME
@@ -57,10 +58,14 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 label="2ヶ月モメンタム supplement linear",
                 parameters={
                     "scoreModelKind": FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.score_model.kind,
-                    "fitMode": "expanding",
-                    "minTrainSamples": 50,
                     **ranking_parameters,
                 },
+            ),
+            training_spec=build_training_spec(
+                key="training__pred-fu-momo2-supplement-5bar-linear",
+                label="2ヶ月モメンタム supplement training",
+                fit_mode="expanding",
+                min_train_samples=50,
             ),
             target_spec=build_prediction_target_spec(
                 key="next_5bar_excess_return",

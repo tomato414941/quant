@@ -9,6 +9,7 @@ from app.portfolio import (
     build_prediction_target_spec,
     build_predictor_spec,
     build_predictor_use_spec,
+    build_ranking_feature_recipe_spec,
     build_training_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
@@ -113,7 +114,9 @@ def make_predictor_spec(
             label=f"{label} features",
             inputs=tuple(strategy.selection.feature_inputs),
             parameters={
-                "rankingFeatureRecipe": serialize_ranking_feature_recipe(strategy.selection),
+                "rankingFeatureRecipe": serialize_ranking_feature_recipe(
+                    build_ranking_feature_recipe_spec(strategy.selection)
+                ),
                 "windowSpec": {"unit": "bars", "value": 3},
                 "featureKeys": PREDICTION_FEATURE_NAMES,
             },

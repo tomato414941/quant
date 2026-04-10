@@ -13,6 +13,7 @@ from app.portfolio import (
     build_prediction_objective_spec,
     build_prediction_target_spec,
     build_predictor_spec,
+    build_ranking_feature_recipe_spec,
     build_training_spec,
     extract_ranking_score_parameters,
     serialize_ranking_feature_recipe,
@@ -48,7 +49,9 @@ def _build_registered_predictors() -> list[PredictorSpec]:
         label="2ヶ月モメンタム supplement features",
         inputs=tuple(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.feature_inputs),
         parameters={
-            "rankingFeatureRecipe": serialize_ranking_feature_recipe(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M),
+            "rankingFeatureRecipe": serialize_ranking_feature_recipe(
+                build_ranking_feature_recipe_spec(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M)
+            ),
             **ranking_parameters,
             "featureKeys": PREDICTION_FEATURE_NAMES,
         },

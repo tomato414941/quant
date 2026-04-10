@@ -121,6 +121,23 @@ class SelectionSpec:
 
 
 @dataclass(frozen=True)
+class RankingFeatureRecipeSpec:
+    key: str
+    strategy_type: str
+    label: str
+    description: str
+    feature_inputs: tuple[str, ...]
+    universe_policy: UniversePolicySpec
+    score_model: RankingModelSpec
+    score_parameters: tuple[tuple[str, object], ...]
+    filter_rules: tuple[FilterRuleSpec, ...]
+    fallback_rule: FallbackRuleSpec
+
+
+RankingSourceSpec = SelectionSpec | RankingFeatureRecipeSpec
+
+
+@dataclass(frozen=True)
 class PortfolioModelSpec:
     key: str
     model_type: str
@@ -651,50 +668,54 @@ def build_strategy_spec(
     )
 
 
-def serialize_selection_spec(selection: SelectionSpec) -> dict:
+def serialize_ranking_source_spec(ranking_source: RankingSourceSpec) -> dict:
     return {
-        "key": selection.key,
-        "strategyType": selection.strategy_type,
-        "label": selection.label,
-        "description": selection.description,
-        "featureInputs": list(selection.feature_inputs),
+        "key": ranking_source.key,
+        "strategyType": ranking_source.strategy_type,
+        "label": ranking_source.label,
+        "description": ranking_source.description,
+        "featureInputs": list(ranking_source.feature_inputs),
         "universePolicy": {
-            "key": selection.universe_policy.key,
-            "label": selection.universe_policy.label,
+            "key": ranking_source.universe_policy.key,
+            "label": ranking_source.universe_policy.label,
         },
         "scoreModel": {
-            "kind": selection.score_model.kind,
-            "label": selection.score_model.label,
+            "kind": ranking_source.score_model.kind,
+            "label": ranking_source.score_model.label,
         },
         "scoreParameters": {
-            key: value for key, value in selection.score_parameters
+            key: value for key, value in ranking_source.score_parameters
         },
         "filterRules": [
             {
                 "key": filter_rule.key,
                 "label": filter_rule.label,
             }
-            for filter_rule in selection.filter_rules
+            for filter_rule in ranking_source.filter_rules
         ],
         "fallbackRule": {
-            "key": selection.fallback_rule.key,
-            "label": selection.fallback_rule.label,
+            "key": ranking_source.fallback_rule.key,
+            "label": ranking_source.fallback_rule.label,
         },
     }
 
 
-def deserialize_selection_spec(payload: dict[str, object]) -> SelectionSpec:
+def serialize_selection_spec(selection: SelectionSpec) -> dict:
+    return serialize_ranking_source_spec(selection)
+
+
+def deserialize_ranking_feature_recipe(payload: dict[str, object]) -> RankingFeatureRecipeSpec:
     universe_policy = payload.get("universePolicy")
     score_model = payload.get("scoreModel")
     fallback_rule = payload.get("fallbackRule")
     if not isinstance(universe_policy, dict):
-        raise ValueError("Selection spec must include a universePolicy object.")
+        raise ValueError("Ranking feature recipe must include a universePolicy object.")
     if not isinstance(score_model, dict):
-        raise ValueError("Selection spec must include a scoreModel object.")
+        raise ValueError("Ranking feature recipe must include a scoreModel object.")
     if not isinstance(fallback_rule, dict):
-        raise ValueError("Selection spec must include a fallbackRule object.")
+        raise ValueError("Ranking feature recipe must include a fallbackRule object.")
 
-    return SelectionSpec(
+    return RankingFeatureRecipeSpec(
         key=str(payload["key"]),
         strategy_type=str(payload["strategyType"]),
         label=str(payload["label"]),
@@ -721,8 +742,23 @@ def deserialize_selection_spec(payload: dict[str, object]) -> SelectionSpec:
     )
 
 
-def serialize_ranking_feature_recipe(selection: SelectionSpec) -> dict:
-    recipe = serialize_selection_spec(selection)
+def build_ranking_feature_recipe_spec(selection: SelectionSpec) -> RankingFeatureRecipeSpec:
+    return RankingFeatureRecipeSpec(
+        key=selection.key,
+        strategy_type=selection.strategy_type,
+        label=selection.label,
+        description=selection.description,
+        feature_inputs=selection.feature_inputs,
+        universe_policy=selection.universe_policy,
+        score_model=selection.score_model,
+        score_parameters=selection.score_parameters,
+        filter_rules=selection.filter_rules,
+        fallback_rule=selection.fallback_rule,
+    )
+
+
+def serialize_ranking_feature_recipe(recipe_spec: RankingFeatureRecipeSpec) -> dict:
+    recipe = serialize_ranking_source_spec(recipe_spec)
     return {
         "kind": "ranking_feature_recipe",
         "schemaVersion": "v1",
@@ -730,12 +766,12 @@ def serialize_ranking_feature_recipe(selection: SelectionSpec) -> dict:
     }
 
 
-def extract_ranking_feature_recipe(feature_spec: FeatureSpec) -> SelectionSpec:
+def extract_ranking_feature_recipe(feature_spec: FeatureSpec) -> RankingFeatureRecipeSpec:
     parameters = dict(feature_spec.parameters)
     recipe_payload = parameters.get("rankingFeatureRecipe")
     if not isinstance(recipe_payload, dict):
         raise ValueError("Feature spec must include a rankingFeatureRecipe parameter.")
-    return deserialize_selection_spec(recipe_payload)
+    return deserialize_ranking_feature_recipe(recipe_payload)
 
 
 def serialize_risk_controls_spec(risk_controls: RiskControlsSpec) -> dict:
@@ -1226,7 +1262,9 @@ def build_predictor_specs(
             label=f"{ranking_spec.selection.score_model.label} features",
             inputs=tuple(ranking_spec.selection.feature_inputs),
             parameters={
-                "rankingFeatureRecipe": serialize_ranking_feature_recipe(ranking_spec.selection),
+                "rankingFeatureRecipe": serialize_ranking_feature_recipe(
+                    build_ranking_feature_recipe_spec(ranking_spec.selection)
+                ),
                 **ranking_parameters,
                 "featureKeys": ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength"),
             },
@@ -1754,7 +1792,7 @@ def compare_portfolio_models(
 def select_assets(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    selection: RankingSourceSpec,
     *,
     bars_per_year: float,
 ) -> list[str]:
@@ -1835,7 +1873,7 @@ def select_assets(
 def compute_strategy_score_series_base(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    selection: RankingSourceSpec,
     *,
     bars_per_year: float,
 ) -> pd.Series | None:
@@ -1877,7 +1915,7 @@ def compute_strategy_score_series_base(
     raise ValueError("Unsupported score model.")
 
 
-def get_ranking_window_bars(selection: SelectionSpec, *, bars_per_year: float) -> int:
+def get_ranking_window_bars(selection: RankingSourceSpec, *, bars_per_year: float) -> int:
     score_parameters = dict(selection.score_parameters)
     window_spec = score_parameters.get("windowSpec")
     if isinstance(window_spec, dict):
@@ -1887,7 +1925,7 @@ def get_ranking_window_bars(selection: SelectionSpec, *, bars_per_year: float) -
 
 def compute_trailing_total_returns(
     returns: pd.DataFrame,
-    selection: SelectionSpec,
+    selection: RankingSourceSpec,
     *,
     bars_per_year: float,
 ) -> pd.Series:
@@ -1909,7 +1947,7 @@ def compute_volume_strength(volume_history: pd.DataFrame) -> pd.Series:
 
 def compute_macro_proxy_rank(
     returns: pd.DataFrame,
-    selection: SelectionSpec,
+    selection: RankingSourceSpec,
     *,
     bars_per_year: float,
 ) -> pd.Series:
@@ -1941,7 +1979,7 @@ def compute_macro_proxy_rank(
 def compute_prediction_feature_frame(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: SelectionSpec,
+    selection: RankingSourceSpec,
     *,
     bars_per_year: float,
 ) -> pd.DataFrame:
@@ -2112,7 +2150,7 @@ def compute_predictor_panel(
 def compute_prediction_supplemented_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_or_selection: StrategySpec | SelectionSpec,
+    strategy_or_selection: StrategySpec | RankingSourceSpec,
     *,
     bars_per_year: float,
     base_score_series: pd.Series,
@@ -2150,7 +2188,7 @@ def compute_prediction_supplemented_score_series(
 def compute_strategy_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_or_selection: StrategySpec | SelectionSpec,
+    strategy_or_selection: StrategySpec | RankingSourceSpec,
     *,
     bars_per_year: float,
     current_date: str | None = None,

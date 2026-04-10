@@ -15,6 +15,7 @@ from app.portfolio import (
     build_predictor_spec,
     build_training_spec,
     extract_ranking_score_parameters,
+    serialize_ranking_feature_recipe,
 )
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME
 
@@ -47,6 +48,7 @@ def _build_registered_predictors() -> list[PredictorSpec]:
         label="2ヶ月モメンタム supplement features",
         inputs=tuple(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.feature_inputs),
         parameters={
+            "rankingFeatureRecipe": serialize_ranking_feature_recipe(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M),
             **ranking_parameters,
             "featureKeys": PREDICTION_FEATURE_NAMES,
         },
@@ -104,7 +106,6 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     kind="standardized_score",
                     parameters={"scope": "cross_sectional"},
                 ),
-                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
                 source_strategy_keys=("stg-fu-momo2-top035-pred5blend-hrp-month",),
                 source_strategy_labels=("全資産モメンタム傾斜 上位優遇 2ヶ月 + 5bar予測補助 × HRP × 月次",),
             ))

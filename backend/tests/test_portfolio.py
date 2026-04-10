@@ -22,6 +22,7 @@ from app.portfolio import (
     compute_trade_cost,
     compute_strategy_score_series,
     evaluate_predictor_spec,
+    serialize_ranking_feature_recipe,
     should_rebalance,
 )
 
@@ -112,6 +113,7 @@ def make_predictor_spec(
             label=f"{label} features",
             inputs=tuple(strategy.selection.feature_inputs),
             parameters={
+                "rankingFeatureRecipe": serialize_ranking_feature_recipe(strategy.selection),
                 "windowSpec": {"unit": "bars", "value": 3},
                 "featureKeys": PREDICTION_FEATURE_NAMES,
             },
@@ -137,7 +139,6 @@ def make_predictor_spec(
             kind="standardized_score",
             parameters={"scope": "cross_sectional"},
         ),
-        selection=strategy.selection,
         source_strategy_keys=(strategy.key,),
         source_strategy_labels=(strategy.label,),
     )

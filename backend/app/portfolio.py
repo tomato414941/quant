@@ -251,7 +251,6 @@ class PredictorSpec:
     model_spec: PredictionModelSpec
     training_spec: TrainingSpec
     calibration_spec: PredictionCalibrationSpec
-    selection: SelectionSpec
     source_strategy_keys: tuple[str, ...]
     source_strategy_labels: tuple[str, ...]
 
@@ -683,6 +682,62 @@ def serialize_selection_spec(selection: SelectionSpec) -> dict:
         },
     }
 
+
+def deserialize_selection_spec(payload: dict[str, object]) -> SelectionSpec:
+    universe_policy = payload.get("universePolicy")
+    score_model = payload.get("scoreModel")
+    fallback_rule = payload.get("fallbackRule")
+    if not isinstance(universe_policy, dict):
+        raise ValueError("Selection spec must include a universePolicy object.")
+    if not isinstance(score_model, dict):
+        raise ValueError("Selection spec must include a scoreModel object.")
+    if not isinstance(fallback_rule, dict):
+        raise ValueError("Selection spec must include a fallbackRule object.")
+
+    return SelectionSpec(
+        key=str(payload["key"]),
+        strategy_type=str(payload["strategyType"]),
+        label=str(payload["label"]),
+        description=str(payload["description"]),
+        feature_inputs=tuple(str(feature_input) for feature_input in payload.get("featureInputs", ())),
+        universe_policy=UniversePolicySpec(
+            key=str(universe_policy["key"]),
+            label=str(universe_policy["label"]),
+        ),
+        score_model=RankingModelSpec(
+            kind=str(score_model["kind"]),
+            label=str(score_model["label"]),
+        ),
+        score_parameters=tuple(sorted(dict(payload.get("scoreParameters", {})).items())),
+        filter_rules=tuple(
+            FilterRuleSpec(key=str(filter_rule["key"]), label=str(filter_rule["label"]))
+            for filter_rule in payload.get("filterRules", ())
+            if isinstance(filter_rule, dict)
+        ),
+        fallback_rule=FallbackRuleSpec(
+            key=str(fallback_rule["key"]),
+            label=str(fallback_rule["label"]),
+        ),
+    )
+
+
+def serialize_ranking_feature_recipe(selection: SelectionSpec) -> dict:
+    recipe = serialize_selection_spec(selection)
+    return {
+        "kind": "ranking_feature_recipe",
+        "schemaVersion": "v1",
+        **recipe,
+    }
+
+
+def extract_ranking_feature_recipe(feature_spec: FeatureSpec) -> SelectionSpec:
+    parameters = dict(feature_spec.parameters)
+    recipe_payload = parameters.get("rankingFeatureRecipe")
+    if not isinstance(recipe_payload, dict):
+        raise ValueError("Feature spec must include a rankingFeatureRecipe parameter.")
+    return deserialize_selection_spec(recipe_payload)
+
+
 def serialize_risk_controls_spec(risk_controls: RiskControlsSpec) -> dict:
     return {
         "maxInvestmentPct": round(risk_controls.max_investment_ratio * 100, 1),
@@ -1025,7 +1080,6 @@ def build_predictor_spec(
     model_spec: PredictionModelSpec,
     training_spec: TrainingSpec,
     calibration_spec: PredictionCalibrationSpec,
-    selection: SelectionSpec,
     source_strategy_keys: tuple[str, ...] = (),
     source_strategy_labels: tuple[str, ...] = (),
 ) -> PredictorSpec:
@@ -1041,7 +1095,6 @@ def build_predictor_spec(
         model_spec=model_spec,
         training_spec=training_spec,
         calibration_spec=calibration_spec,
-        selection=selection,
         source_strategy_keys=source_strategy_keys,
         source_strategy_labels=source_strategy_labels,
     )
@@ -1173,6 +1226,7 @@ def build_predictor_specs(
             label=f"{ranking_spec.selection.score_model.label} features",
             inputs=tuple(ranking_spec.selection.feature_inputs),
             parameters={
+                "rankingFeatureRecipe": serialize_ranking_feature_recipe(ranking_spec.selection),
                 **ranking_parameters,
                 "featureKeys": ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength"),
             },
@@ -1237,7 +1291,6 @@ def build_predictor_specs(
                             kind="standardized_score",
                             parameters={"scope": "cross_sectional"},
                         ),
-                        selection=ranking_spec.selection,
                         source_strategy_keys=ranking_spec.source_strategy_keys,
                         source_strategy_labels=ranking_spec.source_strategy_labels,
                     )
@@ -1935,18 +1988,9 @@ def compute_predictor_panel(
     *,
     bars_per_year: float,
 ) -> pd.DataFrame:
-    ranking_spec = AssetRankingSpec(
-        key=predictor_spec.key,
-        label=predictor_spec.label,
-        description=predictor_spec.description,
-        timeframe=predictor_spec.timeframe,
-        investment_universe=predictor_spec.investment_universe,
-        selection=predictor_spec.selection,
-        source_strategy_keys=predictor_spec.source_strategy_keys,
-        source_strategy_labels=predictor_spec.source_strategy_labels,
-    )
+    selection = extract_ranking_feature_recipe(predictor_spec.feature_spec)
     ranking_universe = [
-        asset for asset in ranking_spec.investment_universe.tickers if asset in returns.columns
+        asset for asset in predictor_spec.investment_universe.tickers if asset in returns.columns
     ]
     scoped_returns = returns[ranking_universe]
     scoped_volumes = volumes[ranking_universe] if volumes is not None else None
@@ -1969,7 +2013,6 @@ def compute_predictor_panel(
     for index in range(2, len(scoped_returns)):
         history_returns = scoped_returns.iloc[:index]
         history_volumes = scoped_volumes.iloc[:index] if scoped_volumes is not None else None
-        selection = ranking_spec.selection
         selected_assets = select_assets(
             history_returns,
             history_volumes,

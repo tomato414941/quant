@@ -198,6 +198,14 @@ class PredictionTargetSpec:
 
 
 @dataclass(frozen=True)
+class PredictionObjectiveSpec:
+    key: str
+    label: str
+    kind: str
+    parameters: tuple[tuple[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
 class FeatureSpec:
     key: str
     label: str
@@ -223,16 +231,26 @@ class TrainingSpec:
 
 
 @dataclass(frozen=True)
+class PredictionCalibrationSpec:
+    key: str
+    label: str
+    kind: str
+    parameters: tuple[tuple[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
 class PredictorSpec:
     key: str
     label: str
     description: str
     timeframe: TimeframeSpec
     investment_universe: InvestmentUniverseSpec
+    objective_spec: PredictionObjectiveSpec
+    target_spec: PredictionTargetSpec
     feature_spec: FeatureSpec
     model_spec: PredictionModelSpec
     training_spec: TrainingSpec
-    target_spec: PredictionTargetSpec
+    calibration_spec: PredictionCalibrationSpec
     selection: SelectionSpec
     source_strategy_keys: tuple[str, ...]
     source_strategy_labels: tuple[str, ...]
@@ -868,6 +886,38 @@ def serialize_prediction_target_spec(
     }
 
 
+def build_prediction_objective_spec(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    parameters: dict[str, object] | None = None,
+) -> PredictionObjectiveSpec:
+    if kind not in {"cross_sectional_alpha_forecast"}:
+        raise ValueError("Unsupported prediction objective kind.")
+    return PredictionObjectiveSpec(
+        key=key,
+        label=label,
+        kind=kind,
+        parameters=tuple(sorted((parameters or {}).items())),
+    )
+
+
+def serialize_prediction_objective_spec(
+    objective_spec: PredictionObjectiveSpec,
+) -> dict:
+    return {
+        "kind": "prediction_objective_spec",
+        "schemaVersion": "v1",
+        "key": objective_spec.key,
+        "label": objective_spec.label,
+        "objectiveKind": objective_spec.kind,
+        "parameters": {
+            key: value for key, value in objective_spec.parameters
+        },
+    }
+
+
 def build_feature_spec(
     *,
     key: str,
@@ -930,6 +980,38 @@ def build_training_spec(
     )
 
 
+def build_prediction_calibration_spec(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    parameters: dict[str, object] | None = None,
+) -> PredictionCalibrationSpec:
+    if kind not in {"standardized_score"}:
+        raise ValueError("Unsupported prediction calibration kind.")
+    return PredictionCalibrationSpec(
+        key=key,
+        label=label,
+        kind=kind,
+        parameters=tuple(sorted((parameters or {}).items())),
+    )
+
+
+def serialize_prediction_calibration_spec(
+    calibration_spec: PredictionCalibrationSpec,
+) -> dict:
+    return {
+        "kind": "prediction_calibration_spec",
+        "schemaVersion": "v1",
+        "key": calibration_spec.key,
+        "label": calibration_spec.label,
+        "calibrationKind": calibration_spec.kind,
+        "parameters": {
+            key: value for key, value in calibration_spec.parameters
+        },
+    }
+
+
 def build_predictor_spec(
     *,
     key: str,
@@ -937,10 +1019,12 @@ def build_predictor_spec(
     description: str,
     timeframe: TimeframeSpec,
     investment_universe: InvestmentUniverseSpec,
+    objective_spec: PredictionObjectiveSpec,
+    target_spec: PredictionTargetSpec,
     feature_spec: FeatureSpec,
     model_spec: PredictionModelSpec,
     training_spec: TrainingSpec,
-    target_spec: PredictionTargetSpec,
+    calibration_spec: PredictionCalibrationSpec,
     selection: SelectionSpec,
     source_strategy_keys: tuple[str, ...] = (),
     source_strategy_labels: tuple[str, ...] = (),
@@ -951,10 +1035,12 @@ def build_predictor_spec(
         description=description,
         timeframe=timeframe,
         investment_universe=investment_universe,
+        objective_spec=objective_spec,
+        target_spec=target_spec,
         feature_spec=feature_spec,
         model_spec=model_spec,
         training_spec=training_spec,
-        target_spec=target_spec,
+        calibration_spec=calibration_spec,
         selection=selection,
         source_strategy_keys=source_strategy_keys,
         source_strategy_labels=source_strategy_labels,
@@ -1131,6 +1217,12 @@ def build_predictor_specs(
                         description=ranking_spec.description,
                         timeframe=ranking_spec.timeframe,
                         investment_universe=ranking_spec.investment_universe,
+                        objective_spec=build_prediction_objective_spec(
+                            key="objective__cross_sectional_alpha",
+                            label="Cross-sectional alpha",
+                            kind="cross_sectional_alpha_forecast",
+                        ),
+                        target_spec=target_spec,
                         feature_spec=feature_spec,
                         model_spec=model_spec,
                         training_spec=build_training_spec(
@@ -1139,7 +1231,12 @@ def build_predictor_specs(
                             fit_mode="expanding",
                             min_train_samples=50,
                         ),
-                        target_spec=target_spec,
+                        calibration_spec=build_prediction_calibration_spec(
+                            key="calibration__cross_sectional_standard_score",
+                            label="Cross-sectional standardized score",
+                            kind="standardized_score",
+                            parameters={"scope": "cross_sectional"},
+                        ),
                         selection=ranking_spec.selection,
                         source_strategy_keys=ranking_spec.source_strategy_keys,
                         source_strategy_labels=ranking_spec.source_strategy_labels,
@@ -1189,10 +1286,12 @@ def serialize_predictor_spec(
             "assetCount": len(predictor_spec.investment_universe.tickers),
             "tickers": list(predictor_spec.investment_universe.tickers),
         },
+        "objectiveSpec": serialize_prediction_objective_spec(predictor_spec.objective_spec),
+        "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
         "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
         "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
         "trainingSpec": serialize_training_spec(predictor_spec.training_spec),
-        "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
+        "calibrationSpec": serialize_prediction_calibration_spec(predictor_spec.calibration_spec),
         "sourceStrategyKeys": list(predictor_spec.source_strategy_keys),
         "sourceStrategyLabels": list(predictor_spec.source_strategy_labels),
     }

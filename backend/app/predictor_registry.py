@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.portfolio import build_prediction_target_spec
 from app.strategy_registry import (
     DEFAULT_INVESTMENT_UNIVERSE,
     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
@@ -9,7 +8,9 @@ from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
     PredictorSpec,
     build_feature_spec,
+    build_prediction_calibration_spec,
     build_prediction_model_spec,
+    build_prediction_objective_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_training_spec,
@@ -83,6 +84,12 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
                 investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+                objective_spec=build_prediction_objective_spec(
+                    key="objective__cross_sectional_alpha",
+                    label="Cross-sectional alpha",
+                    kind="cross_sectional_alpha_forecast",
+                ),
+                target_spec=target_spec,
                 feature_spec=feature_spec,
                 model_spec=model_spec,
                 training_spec=build_training_spec(
@@ -91,7 +98,12 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     fit_mode="expanding",
                     min_train_samples=50,
                 ),
-                target_spec=target_spec,
+                calibration_spec=build_prediction_calibration_spec(
+                    key="calibration__cross_sectional_standard_score",
+                    label="Cross-sectional standardized score",
+                    kind="standardized_score",
+                    parameters={"scope": "cross_sectional"},
+                ),
                 selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
                 source_strategy_keys=("stg-fu-momo2-top035-pred5blend-hrp-month",),
                 source_strategy_labels=("全資産モメンタム傾斜 上位優遇 2ヶ月 + 5bar予測補助 × HRP × 月次",),

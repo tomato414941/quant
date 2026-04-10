@@ -3,7 +3,9 @@ import pandas as pd
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
     build_feature_spec,
+    build_prediction_calibration_spec,
     build_prediction_model_spec,
+    build_prediction_objective_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_predictor_use_spec,
@@ -94,6 +96,17 @@ def make_predictor_spec(
         description=strategy.description,
         timeframe=strategy.timeframe,
         investment_universe=strategy.investment_universe,
+        objective_spec=build_prediction_objective_spec(
+            key=f"objective__{predictor_key}",
+            label=f"{label} objective",
+            kind="cross_sectional_alpha_forecast",
+        ),
+        target_spec=build_prediction_target_spec(
+            key=f"{predictor_key}__target",
+            label=label,
+            kind="forward_excess_return",
+            horizon_spec={"unit": "bars", "value": horizon_bars},
+        ),
         feature_spec=build_feature_spec(
             key=f"features__{predictor_key}",
             label=f"{label} features",
@@ -118,11 +131,11 @@ def make_predictor_spec(
             fit_mode="expanding",
             min_train_samples=min_train_samples,
         ),
-        target_spec=build_prediction_target_spec(
-            key=f"{predictor_key}__target",
-            label=label,
-            kind="forward_excess_return",
-            horizon_spec={"unit": "bars", "value": horizon_bars},
+        calibration_spec=build_prediction_calibration_spec(
+            key=f"calibration__{predictor_key}",
+            label=f"{label} calibration",
+            kind="standardized_score",
+            parameters={"scope": "cross_sectional"},
         ),
         selection=strategy.selection,
         source_strategy_keys=(strategy.key,),

@@ -223,11 +223,24 @@ class PredictionObjectiveSpec:
 
 
 @dataclass(frozen=True)
+class FeatureInputSpec:
+    key: str
+    label: str
+
+
+@dataclass(frozen=True)
+class DerivedFeatureSpec:
+    key: str
+    label: str
+
+
+@dataclass(frozen=True)
 class FeatureSpec:
     key: str
     label: str
-    inputs: tuple[str, ...]
-    parameters: tuple[tuple[str, object], ...] = ()
+    feature_inputs: tuple[FeatureInputSpec, ...]
+    derived_features: tuple[DerivedFeatureSpec, ...]
+    ranking_feature_recipe: RankingFeatureRecipeSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -767,11 +780,13 @@ def serialize_ranking_feature_recipe(recipe_spec: RankingFeatureRecipeSpec) -> d
 
 
 def extract_ranking_feature_recipe(feature_spec: FeatureSpec) -> RankingFeatureRecipeSpec:
-    parameters = dict(feature_spec.parameters)
-    recipe_payload = parameters.get("rankingFeatureRecipe")
-    if not isinstance(recipe_payload, dict):
-        raise ValueError("Feature spec must include a rankingFeatureRecipe parameter.")
-    return deserialize_ranking_feature_recipe(recipe_payload)
+    if feature_spec.ranking_feature_recipe is None:
+        raise ValueError("Feature spec must include a ranking feature recipe.")
+    return feature_spec.ranking_feature_recipe
+
+
+def extract_feature_keys(feature_spec: FeatureSpec) -> tuple[str, ...]:
+    return tuple(derived_feature.key for derived_feature in feature_spec.derived_features)
 
 
 def serialize_risk_controls_spec(risk_controls: RiskControlsSpec) -> dict:
@@ -1009,18 +1024,56 @@ def serialize_prediction_objective_spec(
     }
 
 
+FEATURE_INPUT_LABELS = {
+    "close": "Price",
+    "volume": "Volume",
+}
+
+DERIVED_FEATURE_LABELS = {
+    "score": "Score",
+    "momentum": "Momentum",
+    "lowVolRank": "Low Vol Rank",
+    "macroRank": "Macro Rank",
+    "volumeStrength": "Volume Strength",
+}
+
+
+def build_feature_input_spec(
+    *,
+    key: str,
+    label: str | None = None,
+) -> FeatureInputSpec:
+    return FeatureInputSpec(
+        key=key,
+        label=label or FEATURE_INPUT_LABELS.get(key, key),
+    )
+
+
+def build_derived_feature_spec(
+    *,
+    key: str,
+    label: str | None = None,
+) -> DerivedFeatureSpec:
+    return DerivedFeatureSpec(
+        key=key,
+        label=label or DERIVED_FEATURE_LABELS.get(key, key),
+    )
+
+
 def build_feature_spec(
     *,
     key: str,
     label: str,
-    inputs: tuple[str, ...],
-    parameters: dict[str, object] | None = None,
+    feature_inputs: tuple[FeatureInputSpec, ...],
+    derived_features: tuple[DerivedFeatureSpec, ...],
+    ranking_feature_recipe: RankingFeatureRecipeSpec | None = None,
 ) -> FeatureSpec:
     return FeatureSpec(
         key=key,
         label=label,
-        inputs=inputs,
-        parameters=tuple(sorted((parameters or {}).items())),
+        feature_inputs=feature_inputs,
+        derived_features=derived_features,
+        ranking_feature_recipe=ranking_feature_recipe,
     )
 
 
@@ -1032,10 +1085,23 @@ def serialize_feature_spec(
         "schemaVersion": "v1",
         "key": feature_spec.key,
         "label": feature_spec.label,
-        "inputs": list(feature_spec.inputs),
-        "parameters": {
-            key: value for key, value in feature_spec.parameters
-        },
+        "featureInputs": [
+            {
+                "key": feature_input.key,
+                "label": feature_input.label,
+            }
+            for feature_input in feature_spec.feature_inputs
+        ],
+        "derivedFeatures": [
+            {
+                "key": derived_feature.key,
+                "label": derived_feature.label,
+            }
+            for derived_feature in feature_spec.derived_features
+        ],
+        "rankingFeatureRecipe": serialize_ranking_feature_recipe(feature_spec.ranking_feature_recipe)
+        if feature_spec.ranking_feature_recipe is not None
+        else None,
     }
 
 
@@ -1260,14 +1326,15 @@ def build_predictor_specs(
         feature_spec = build_feature_spec(
             key=f"features__{ranking_spec.key}",
             label=f"{ranking_spec.selection.score_model.label} features",
-            inputs=tuple(ranking_spec.selection.feature_inputs),
-            parameters={
-                "rankingFeatureRecipe": serialize_ranking_feature_recipe(
-                    build_ranking_feature_recipe_spec(ranking_spec.selection)
-                ),
-                **ranking_parameters,
-                "featureKeys": ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength"),
-            },
+            feature_inputs=tuple(
+                build_feature_input_spec(key=feature_input)
+                for feature_input in ranking_spec.selection.feature_inputs
+            ),
+            derived_features=tuple(
+                build_derived_feature_spec(key=feature_key)
+                for feature_key in ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength")
+            ),
+            ranking_feature_recipe=build_ranking_feature_recipe_spec(ranking_spec.selection),
         )
         model_specs = [
             build_prediction_model_spec(
@@ -2038,7 +2105,7 @@ def compute_predictor_panel(
         {key: value for key, value in predictor_spec.target_spec.horizon_spec},
         bars_per_year=bars_per_year,
     )
-    feature_names = list(PREDICTION_FEATURE_NAMES)
+    feature_names = list(extract_feature_keys(predictor_spec.feature_spec))
     feature_count = len(feature_names)
     xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
     xty = np.zeros(feature_count + 1, dtype="float64")

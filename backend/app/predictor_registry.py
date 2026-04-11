@@ -7,7 +7,9 @@ from app.strategy_registry import (
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
     PredictorSpec,
+    build_derived_feature_spec,
     build_feature_spec,
+    build_feature_input_spec,
     build_prediction_calibration_spec,
     build_prediction_model_spec,
     build_prediction_objective_spec,
@@ -16,7 +18,6 @@ from app.portfolio import (
     build_ranking_feature_recipe_spec,
     build_training_spec,
     extract_ranking_score_parameters,
-    serialize_ranking_feature_recipe,
 )
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME
 
@@ -47,14 +48,15 @@ def _build_registered_predictors() -> list[PredictorSpec]:
     feature_spec = build_feature_spec(
         key="features__pred-fu-momo2-supplement",
         label="2ヶ月モメンタム supplement features",
-        inputs=tuple(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.feature_inputs),
-        parameters={
-            "rankingFeatureRecipe": serialize_ranking_feature_recipe(
-                build_ranking_feature_recipe_spec(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M)
-            ),
-            **ranking_parameters,
-            "featureKeys": PREDICTION_FEATURE_NAMES,
-        },
+        feature_inputs=tuple(
+            build_feature_input_spec(key=feature_input)
+            for feature_input in FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.feature_inputs
+        ),
+        derived_features=tuple(
+            build_derived_feature_spec(key=feature_key)
+            for feature_key in PREDICTION_FEATURE_NAMES
+        ),
+        ranking_feature_recipe=build_ranking_feature_recipe_spec(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M),
     )
     model_specs = [
         build_prediction_model_spec(

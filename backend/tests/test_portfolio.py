@@ -2,7 +2,9 @@ import pandas as pd
 
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
+    build_derived_feature_spec,
     build_feature_spec,
+    build_feature_input_spec,
     build_prediction_calibration_spec,
     build_prediction_model_spec,
     build_prediction_objective_spec,
@@ -23,7 +25,6 @@ from app.portfolio import (
     compute_trade_cost,
     compute_strategy_score_series,
     evaluate_predictor_spec,
-    serialize_ranking_feature_recipe,
     should_rebalance,
 )
 
@@ -112,14 +113,15 @@ def make_predictor_spec(
         feature_spec=build_feature_spec(
             key=f"features__{predictor_key}",
             label=f"{label} features",
-            inputs=tuple(strategy.selection.feature_inputs),
-            parameters={
-                "rankingFeatureRecipe": serialize_ranking_feature_recipe(
-                    build_ranking_feature_recipe_spec(strategy.selection)
-                ),
-                "windowSpec": {"unit": "bars", "value": 3},
-                "featureKeys": PREDICTION_FEATURE_NAMES,
-            },
+            feature_inputs=tuple(
+                build_feature_input_spec(key=feature_input)
+                for feature_input in strategy.selection.feature_inputs
+            ),
+            derived_features=tuple(
+                build_derived_feature_spec(key=feature_key)
+                for feature_key in PREDICTION_FEATURE_NAMES
+            ),
+            ranking_feature_recipe=build_ranking_feature_recipe_spec(strategy.selection),
         ),
         model_spec=build_prediction_model_spec(
             key=f"model__{predictor_key}",

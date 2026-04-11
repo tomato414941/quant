@@ -127,10 +127,6 @@ def make_predictor_spec(
             key=f"model__{predictor_key}",
             kind="linear_regression",
             label=f"{label} linear",
-            parameters={
-                "scoreModelKind": strategy.selection.score_model.kind,
-                "windowSpec": {"unit": "bars", "value": 3},
-            },
         ),
         training_spec=build_training_spec(
             key=f"training__{predictor_key}",

@@ -248,7 +248,9 @@ class PredictionModelSpec:
     key: str
     kind: str
     label: str
-    parameters: tuple[tuple[str, object], ...] = ()
+    ridge_alpha: float | None = None
+    signal_weight: float | None = None
+    linear_weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1110,13 +1112,22 @@ def build_prediction_model_spec(
     key: str,
     kind: str,
     label: str,
-    parameters: dict[str, object] | None = None,
+    ridge_alpha: float | None = None,
+    signal_weight: float | None = None,
+    linear_weight: float | None = None,
 ) -> PredictionModelSpec:
+    if kind == "ridge_regression" and ridge_alpha is None:
+        raise ValueError("ridge_alpha is required for ridge_regression.")
+    if kind == "blended_signal_model":
+        if signal_weight is None or linear_weight is None:
+            raise ValueError("signal_weight and linear_weight are required for blended_signal_model.")
     return PredictionModelSpec(
         key=key,
         kind=kind,
         label=label,
-        parameters=tuple(sorted((parameters or {}).items())),
+        ridge_alpha=ridge_alpha,
+        signal_weight=signal_weight,
+        linear_weight=linear_weight,
     )
 
 
@@ -1211,9 +1222,9 @@ def serialize_prediction_model_spec(
         "key": model_spec.key,
         "modelKind": model_spec.kind,
         "label": model_spec.label,
-        "parameters": {
-            key: value for key, value in model_spec.parameters
-        },
+        "ridgeAlpha": model_spec.ridge_alpha,
+        "signalWeight": model_spec.signal_weight,
+        "linearWeight": model_spec.linear_weight,
     }
 
 
@@ -1341,30 +1352,18 @@ def build_predictor_specs(
                 key=f"model__{ranking_spec.key}__signal",
                 kind="ranking_signal_model",
                 label=f"{ranking_spec.selection.score_model.label} signal",
-                parameters={
-                    "scoreModelKind": ranking_spec.selection.score_model.kind,
-                    **ranking_parameters,
-                },
             ),
             build_prediction_model_spec(
                 key=f"model__{ranking_spec.key}__linear",
                 kind="linear_regression",
                 label=f"{ranking_spec.selection.score_model.label} linear",
-                parameters={
-                    "scoreModelKind": ranking_spec.selection.score_model.kind,
-                    **ranking_parameters,
-                },
             ),
             build_prediction_model_spec(
                 key=f"model__{ranking_spec.key}__blend",
                 kind="blended_signal_model",
                 label=f"{ranking_spec.selection.score_model.label} blend",
-                parameters={
-                    "scoreModelKind": ranking_spec.selection.score_model.kind,
-                    "signalWeight": 0.8,
-                    "linearWeight": 0.2,
-                    **ranking_parameters,
-                },
+                signal_weight=0.8,
+                linear_weight=0.2,
             ),
         ]
         for target_spec in target_specs:
@@ -2110,10 +2109,9 @@ def compute_predictor_panel(
     xtx = np.zeros((feature_count + 1, feature_count + 1), dtype="float64")
     xty = np.zeros(feature_count + 1, dtype="float64")
     train_sample_count = 0
-    model_parameters = {key: value for key, value in predictor_spec.model_spec.parameters}
     min_train_samples = predictor_spec.training_spec.min_train_samples
-    signal_weight = float(model_parameters.get("signalWeight", 0.8))
-    linear_weight = float(model_parameters.get("linearWeight", 0.2))
+    signal_weight = float(predictor_spec.model_spec.signal_weight or 0.8)
+    linear_weight = float(predictor_spec.model_spec.linear_weight or 0.2)
 
     for index in range(2, len(scoped_returns)):
         history_returns = scoped_returns.iloc[:index]
@@ -2158,7 +2156,7 @@ def compute_predictor_panel(
                     [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
                 )
                 if predictor_spec.model_spec.kind == "ridge_regression":
-                    ridge_alpha = float(model_parameters.get("ridgeAlpha", 1.0))
+                    ridge_alpha = float(predictor_spec.model_spec.ridge_alpha or 1.0)
                     penalty = np.eye(xtx.shape[0], dtype="float64") * ridge_alpha
                     penalty[0, 0] = 0.0
                     beta = np.linalg.pinv(xtx + penalty) @ xty

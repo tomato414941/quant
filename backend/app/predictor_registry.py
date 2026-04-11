@@ -63,20 +63,12 @@ def _build_registered_predictors() -> list[PredictorSpec]:
             key="model__pred-fu-momo2-supplement-linear",
             kind="linear_regression",
             label="2ヶ月モメンタム supplement linear",
-            parameters={
-                "scoreModelKind": FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.score_model.kind,
-                **ranking_parameters,
-            },
         ),
         build_prediction_model_spec(
             key="model__pred-fu-momo2-supplement-ridge",
             kind="ridge_regression",
             label="2ヶ月モメンタム supplement ridge",
-            parameters={
-                "scoreModelKind": FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.score_model.kind,
-                "ridgeAlpha": 1.0,
-                **ranking_parameters,
-            },
+            ridge_alpha=1.0,
         ),
     ]
     target_specs = DEFAULT_PREDICTION_TARGET_SPECS

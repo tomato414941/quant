@@ -110,6 +110,7 @@ def make_predictor_spec(
             label=label,
             horizon_spec={"unit": "bars", "value": horizon_bars},
             baseline="cross_sectional_mean",
+            transform="identity",
         ),
         feature_spec=build_feature_spec(
             key=f"features__{predictor_key}",

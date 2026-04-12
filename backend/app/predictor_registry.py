@@ -34,12 +34,14 @@ DEFAULT_PREDICTION_TARGET_SPECS = [
         label="次の5bar超過収益",
         horizon_spec={"unit": "bars", "value": 5},
         baseline="cross_sectional_mean",
+        transform="identity",
     ),
     build_prediction_target_spec(
         key="next_10bar_excess_return",
         label="次の10bar超過収益",
         horizon_spec={"unit": "bars", "value": 10},
         baseline="cross_sectional_mean",
+        transform="identity",
     ),
 ]
 

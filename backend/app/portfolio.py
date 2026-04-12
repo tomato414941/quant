@@ -228,6 +228,7 @@ class PredictionTargetSpec:
     label: str
     horizon_spec: tuple[tuple[str, object], ...]
     baseline: str
+    transform: str
 
 
 @dataclass(frozen=True)
@@ -1039,14 +1040,18 @@ def build_prediction_target_spec(
     label: str,
     horizon_spec: dict[str, object],
     baseline: str,
+    transform: str,
 ) -> PredictionTargetSpec:
     if baseline not in {"cross_sectional_mean", "none"}:
         raise ValueError("Unsupported prediction target baseline.")
+    if transform not in {"identity"}:
+        raise ValueError("Unsupported prediction target transform.")
     return PredictionTargetSpec(
         key=key,
         label=label,
         horizon_spec=tuple(sorted(horizon_spec.items())),
         baseline=baseline,
+        transform=transform,
     )
 
 
@@ -1062,6 +1067,7 @@ def serialize_prediction_target_spec(
             key: value for key, value in target_spec.horizon_spec
         },
         "baseline": target_spec.baseline,
+        "transform": target_spec.transform,
     }
 
 
@@ -1090,6 +1096,15 @@ def serialize_predicted_quantity_spec(
         "label": predicted_quantity_spec.label,
         "quantityKind": predicted_quantity_spec.kind,
     }
+
+
+def apply_prediction_target_transform(
+    target_values: pd.Series,
+    target_spec: PredictionTargetSpec,
+) -> pd.Series:
+    if target_spec.transform == "identity":
+        return target_values
+    raise ValueError("Unsupported prediction target transform.")
 
 
 FEATURE_INPUT_LABELS = {
@@ -2260,6 +2275,10 @@ def compute_predictor_panel(
             target_values = forward_returns - float(forward_returns.mean())
         else:
             raise ValueError("Unsupported prediction target baseline.")
+        target_values = apply_prediction_target_transform(
+            target_values,
+            predictor_spec.target_spec,
+        )
         if target_values.nunique() < 2:
             continue
 
@@ -2482,6 +2501,10 @@ def evaluate_predictor_spec(
             target_values = forward_returns - float(forward_returns.mean())
         else:
             raise ValueError("Unsupported prediction target baseline.")
+        target_values = apply_prediction_target_transform(
+            target_values,
+            predictor_spec.target_spec,
+        )
 
         if target_values.nunique() < 2:
             continue

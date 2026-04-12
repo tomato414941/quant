@@ -1234,7 +1234,13 @@ def build_prediction_output_spec(
     kind: str,
     scope: str,
 ) -> PredictionOutputSpec:
-    if kind not in {"standardized_score"}:
+    if kind not in {
+        "score",
+        "probability",
+        "return_estimate",
+        "state_label",
+        "state_probability_vector",
+    }:
         raise ValueError("Unsupported prediction output kind.")
     if scope not in {"cross_sectional"}:
         raise ValueError("Unsupported prediction output scope.")
@@ -1462,9 +1468,9 @@ def build_predictor_specs(
                             min_train_samples=50,
                         ),
                         output_spec=build_prediction_output_spec(
-                            key="output__cross_sectional_standard_score",
-                            label="Cross-sectional standardized score",
-                            kind="standardized_score",
+                            key="output__cross_sectional_score",
+                            label="Cross-sectional score",
+                            kind="score",
                             scope="cross_sectional",
                         ),
                         decision_use_spec=build_decision_use_spec(

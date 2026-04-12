@@ -139,7 +139,7 @@ def make_predictor_spec(
         output_spec=build_prediction_output_spec(
             key=f"output__{predictor_key}",
             label=f"{label} output",
-            kind="standardized_score",
+            kind="score",
             scope="cross_sectional",
         ),
         decision_use_spec=build_decision_use_spec(strategy.selection),

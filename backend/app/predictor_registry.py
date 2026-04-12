@@ -101,9 +101,9 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     min_train_samples=50,
                 ),
                 output_spec=build_prediction_output_spec(
-                    key="output__cross_sectional_standard_score",
-                    label="Cross-sectional standardized score",
-                    kind="standardized_score",
+                    key="output__cross_sectional_score",
+                    label="Cross-sectional score",
+                    kind="score",
                     scope="cross_sectional",
                 ),
                 decision_use_spec=build_decision_use_spec(

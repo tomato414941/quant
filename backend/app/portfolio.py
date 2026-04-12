@@ -194,6 +194,24 @@ class PortfolioState:
 
 
 @dataclass(frozen=True)
+class CandidateSetSpec:
+    key: str
+    label: str
+    description: str
+    universe_policy: UniversePolicySpec
+    filter_rules: tuple[FilterRuleSpec, ...]
+    fallback_rule: FallbackRuleSpec
+
+
+@dataclass(frozen=True)
+class PredictorDecisionContextSpec:
+    key: str
+    label: str
+    description: str
+    candidate_set_spec: CandidateSetSpec
+
+
+@dataclass(frozen=True)
 class AssetRankingSpec:
     key: str
     label: str
@@ -282,8 +300,7 @@ class PredictorSpec:
     model_spec: PredictionModelSpec
     training_spec: TrainingSpec
     calibration_spec: PredictionCalibrationSpec
-    source_strategy_keys: tuple[str, ...]
-    source_strategy_labels: tuple[str, ...]
+    decision_context_spec: PredictorDecisionContextSpec
 
 
 @dataclass(frozen=True)
@@ -716,6 +733,67 @@ def serialize_ranking_source_spec(ranking_source: RankingSourceSpec) -> dict:
 
 def serialize_selection_spec(selection: SelectionSpec) -> dict:
     return serialize_ranking_source_spec(selection)
+
+
+def build_candidate_set_spec(selection: SelectionSpec) -> CandidateSetSpec:
+    filter_label = " / ".join(filter_rule.label for filter_rule in selection.filter_rules)
+    candidate_label = selection.universe_policy.label if not filter_label else f"{selection.universe_policy.label} / {filter_label}"
+    return CandidateSetSpec(
+        key=f"candidate_set__{selection.key}",
+        label=candidate_label,
+        description=selection.description,
+        universe_policy=selection.universe_policy,
+        filter_rules=selection.filter_rules,
+        fallback_rule=selection.fallback_rule,
+    )
+
+
+def serialize_candidate_set_spec(candidate_set_spec: CandidateSetSpec) -> dict:
+    return {
+        "kind": "candidate_set_spec",
+        "schemaVersion": "v1",
+        "key": candidate_set_spec.key,
+        "label": candidate_set_spec.label,
+        "description": candidate_set_spec.description,
+        "universePolicy": {
+            "key": candidate_set_spec.universe_policy.key,
+            "label": candidate_set_spec.universe_policy.label,
+        },
+        "filterRules": [
+            {
+                "key": filter_rule.key,
+                "label": filter_rule.label,
+            }
+            for filter_rule in candidate_set_spec.filter_rules
+        ],
+        "fallbackRule": {
+            "key": candidate_set_spec.fallback_rule.key,
+            "label": candidate_set_spec.fallback_rule.label,
+        },
+    }
+
+
+def build_predictor_decision_context_spec(selection: SelectionSpec) -> PredictorDecisionContextSpec:
+    candidate_set_spec = build_candidate_set_spec(selection)
+    return PredictorDecisionContextSpec(
+        key=f"decision_context__{selection.key}",
+        label=candidate_set_spec.label,
+        description=selection.description,
+        candidate_set_spec=candidate_set_spec,
+    )
+
+
+def serialize_predictor_decision_context_spec(
+    decision_context_spec: PredictorDecisionContextSpec,
+) -> dict:
+    return {
+        "kind": "predictor_decision_context_spec",
+        "schemaVersion": "v1",
+        "key": decision_context_spec.key,
+        "label": decision_context_spec.label,
+        "description": decision_context_spec.description,
+        "candidateSet": serialize_candidate_set_spec(decision_context_spec.candidate_set_spec),
+    }
 
 
 def deserialize_ranking_feature_recipe(payload: dict[str, object]) -> RankingFeatureRecipeSpec:
@@ -1190,8 +1268,7 @@ def build_predictor_spec(
     model_spec: PredictionModelSpec,
     training_spec: TrainingSpec,
     calibration_spec: PredictionCalibrationSpec,
-    source_strategy_keys: tuple[str, ...] = (),
-    source_strategy_labels: tuple[str, ...] = (),
+    decision_context_spec: PredictorDecisionContextSpec,
 ) -> PredictorSpec:
     return PredictorSpec(
         key=key,
@@ -1205,8 +1282,7 @@ def build_predictor_spec(
         model_spec=model_spec,
         training_spec=training_spec,
         calibration_spec=calibration_spec,
-        source_strategy_keys=source_strategy_keys,
-        source_strategy_labels=source_strategy_labels,
+        decision_context_spec=decision_context_spec,
     )
 
 
@@ -1389,8 +1465,9 @@ def build_predictor_specs(
                             kind="standardized_score",
                             scope="cross_sectional",
                         ),
-                        source_strategy_keys=ranking_spec.source_strategy_keys,
-                        source_strategy_labels=ranking_spec.source_strategy_labels,
+                        decision_context_spec=build_predictor_decision_context_spec(
+                            ranking_spec.selection
+                        ),
                     )
                 )
     predictor_specs.sort(key=lambda predictor_spec: predictor_spec.label)
@@ -1443,8 +1520,9 @@ def serialize_predictor_spec(
         "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
         "trainingSpec": serialize_training_spec(predictor_spec.training_spec),
         "calibrationSpec": serialize_prediction_calibration_spec(predictor_spec.calibration_spec),
-        "sourceStrategyKeys": list(predictor_spec.source_strategy_keys),
-        "sourceStrategyLabels": list(predictor_spec.source_strategy_labels),
+        "decisionContextSpec": serialize_predictor_decision_context_spec(
+            predictor_spec.decision_context_spec
+        ),
     }
 
 

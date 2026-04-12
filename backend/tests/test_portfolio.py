@@ -6,6 +6,7 @@ from app.portfolio import (
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_calibration_spec,
+    build_predictor_decision_context_spec,
     build_prediction_model_spec,
     build_prediction_objective_spec,
     build_prediction_target_spec,
@@ -140,8 +141,7 @@ def make_predictor_spec(
             kind="standardized_score",
             scope="cross_sectional",
         ),
-        source_strategy_keys=(strategy.key,),
-        source_strategy_labels=(strategy.label,),
+        decision_context_spec=build_predictor_decision_context_spec(strategy.selection),
     )
 
 

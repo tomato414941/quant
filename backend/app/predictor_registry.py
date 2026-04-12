@@ -11,6 +11,7 @@ from app.portfolio import (
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_calibration_spec,
+    build_predictor_decision_context_spec,
     build_prediction_model_spec,
     build_prediction_objective_spec,
     build_prediction_target_spec,
@@ -103,8 +104,9 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     kind="standardized_score",
                     scope="cross_sectional",
                 ),
-                source_strategy_keys=("stg-fu-momo2-top035-pred5blend-hrp-month",),
-                source_strategy_labels=("全資産モメンタム傾斜 上位優遇 2ヶ月 + 5bar予測補助 × HRP × 月次",),
+                decision_context_spec=build_predictor_decision_context_spec(
+                    FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M
+                ),
             ))
     return predictor_specs
 

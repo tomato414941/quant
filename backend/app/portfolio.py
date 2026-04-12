@@ -260,7 +260,7 @@ class FeatureSpec:
 
 
 @dataclass(frozen=True)
-class PredictionModelSpec:
+class PredictionEngineSpec:
     key: str
     kind: str
     label: str
@@ -294,7 +294,7 @@ class PredictorSpec:
     predicted_quantity_spec: PredictedQuantitySpec
     target_spec: PredictionTargetSpec
     feature_spec: FeatureSpec
-    model_spec: PredictionModelSpec
+    engine_spec: PredictionEngineSpec
     training_spec: TrainingSpec
     output_spec: PredictionOutputSpec
     decision_use_spec: DecisionUseSpec
@@ -1187,7 +1187,7 @@ def serialize_feature_spec(
     }
 
 
-def build_prediction_model_spec(
+def build_prediction_engine_spec(
     *,
     key: str,
     kind: str,
@@ -1195,13 +1195,13 @@ def build_prediction_model_spec(
     ridge_alpha: float | None = None,
     signal_weight: float | None = None,
     linear_weight: float | None = None,
-) -> PredictionModelSpec:
+) -> PredictionEngineSpec:
     if kind == "ridge_regression" and ridge_alpha is None:
         raise ValueError("ridge_alpha is required for ridge_regression.")
-    if kind == "blended_signal_model":
+    if kind == "blended_signal":
         if signal_weight is None or linear_weight is None:
-            raise ValueError("signal_weight and linear_weight are required for blended_signal_model.")
-    return PredictionModelSpec(
+            raise ValueError("signal_weight and linear_weight are required for blended_signal.")
+    return PredictionEngineSpec(
         key=key,
         kind=kind,
         label=label,
@@ -1269,7 +1269,7 @@ def build_predictor_spec(
     predicted_quantity_spec: PredictedQuantitySpec,
     target_spec: PredictionTargetSpec,
     feature_spec: FeatureSpec,
-    model_spec: PredictionModelSpec,
+    engine_spec: PredictionEngineSpec,
     training_spec: TrainingSpec,
     output_spec: PredictionOutputSpec,
     decision_use_spec: DecisionUseSpec,
@@ -1283,25 +1283,25 @@ def build_predictor_spec(
         predicted_quantity_spec=predicted_quantity_spec,
         target_spec=target_spec,
         feature_spec=feature_spec,
-        model_spec=model_spec,
+        engine_spec=engine_spec,
         training_spec=training_spec,
         output_spec=output_spec,
         decision_use_spec=decision_use_spec,
     )
 
 
-def serialize_prediction_model_spec(
-    model_spec: PredictionModelSpec,
+def serialize_prediction_engine_spec(
+    engine_spec: PredictionEngineSpec,
 ) -> dict:
     return {
-        "kind": "prediction_model_spec",
+        "kind": "prediction_engine_spec",
         "schemaVersion": "v1",
-        "key": model_spec.key,
-        "modelKind": model_spec.kind,
-        "label": model_spec.label,
-        "ridgeAlpha": model_spec.ridge_alpha,
-        "signalWeight": model_spec.signal_weight,
-        "linearWeight": model_spec.linear_weight,
+        "key": engine_spec.key,
+        "engineKind": engine_spec.kind,
+        "label": engine_spec.label,
+        "ridgeAlpha": engine_spec.ridge_alpha,
+        "signalWeight": engine_spec.signal_weight,
+        "linearWeight": engine_spec.linear_weight,
     }
 
 
@@ -1419,31 +1419,31 @@ def build_predictor_specs(
             ),
             ranking_feature_recipe=build_ranking_feature_recipe_spec(ranking_spec.selection),
         )
-        model_specs = [
-            build_prediction_model_spec(
-                key=f"model__{ranking_spec.key}__signal",
-                kind="ranking_signal_model",
+        engine_specs = [
+            build_prediction_engine_spec(
+                key=f"engine__{ranking_spec.key}__signal",
+                kind="ranking_signal",
                 label=f"{ranking_spec.selection.score_model.label} signal",
             ),
-            build_prediction_model_spec(
-                key=f"model__{ranking_spec.key}__linear",
+            build_prediction_engine_spec(
+                key=f"engine__{ranking_spec.key}__linear",
                 kind="linear_regression",
                 label=f"{ranking_spec.selection.score_model.label} linear",
             ),
-            build_prediction_model_spec(
-                key=f"model__{ranking_spec.key}__blend",
-                kind="blended_signal_model",
+            build_prediction_engine_spec(
+                key=f"engine__{ranking_spec.key}__blend",
+                kind="blended_signal",
                 label=f"{ranking_spec.selection.score_model.label} blend",
                 signal_weight=0.8,
                 linear_weight=0.2,
             ),
         ]
         for target_spec in target_specs:
-            for model_spec in model_specs:
+            for engine_spec in engine_specs:
                 predictor_specs.append(
                     build_predictor_spec(
-                        key=f"prediction__{ranking_spec.key}__{model_spec.kind}__{target_spec.key}",
-                        label=f"{ranking_spec.label} / {model_spec.label} -> {target_spec.label}",
+                        key=f"prediction__{ranking_spec.key}__{engine_spec.kind}__{target_spec.key}",
+                        label=f"{ranking_spec.label} / {engine_spec.label} -> {target_spec.label}",
                         description=ranking_spec.description,
                         timeframe=ranking_spec.timeframe,
                         investment_universe=ranking_spec.investment_universe,
@@ -1454,9 +1454,9 @@ def build_predictor_specs(
                         ),
                         target_spec=target_spec,
                         feature_spec=feature_spec,
-                        model_spec=model_spec,
+                        engine_spec=engine_spec,
                         training_spec=build_training_spec(
-                            key=f"training__{ranking_spec.key}__{model_spec.kind}",
+                            key=f"training__{ranking_spec.key}__{engine_spec.kind}",
                             label=f"{ranking_spec.selection.score_model.label} training",
                             fit_mode="expanding",
                             min_train_samples=50,
@@ -1520,7 +1520,7 @@ def serialize_predictor_spec(
         ),
         "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
         "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
-        "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
+        "engineSpec": serialize_prediction_engine_spec(predictor_spec.engine_spec),
         "trainingSpec": serialize_training_spec(predictor_spec.training_spec),
         "outputSpec": serialize_prediction_output_spec(predictor_spec.output_spec),
         "decisionUseSpec": serialize_decision_use_spec(
@@ -2185,8 +2185,8 @@ def compute_predictor_panel(
     xty = np.zeros(feature_count + 1, dtype="float64")
     train_sample_count = 0
     min_train_samples = predictor_spec.training_spec.min_train_samples
-    signal_weight = float(predictor_spec.model_spec.signal_weight or 0.8)
-    linear_weight = float(predictor_spec.model_spec.linear_weight or 0.2)
+    signal_weight = float(predictor_spec.engine_spec.signal_weight or 0.8)
+    linear_weight = float(predictor_spec.engine_spec.linear_weight or 0.2)
 
     for index in range(2, len(scoped_returns)):
         history_returns = scoped_returns.iloc[:index]
@@ -2223,15 +2223,15 @@ def compute_predictor_panel(
             continue
 
         prediction_values: pd.Series | None = None
-        if predictor_spec.model_spec.kind == "ranking_signal_model":
+        if predictor_spec.engine_spec.kind == "ranking_signal":
             prediction_values = selected_scores
-        elif predictor_spec.model_spec.kind in {"linear_regression", "ridge_regression", "blended_signal_model"}:
+        elif predictor_spec.engine_spec.kind in {"linear_regression", "ridge_regression", "blended_signal"}:
             if train_sample_count >= min_train_samples:
                 design_matrix = np.column_stack(
                     [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
                 )
-                if predictor_spec.model_spec.kind == "ridge_regression":
-                    ridge_alpha = float(predictor_spec.model_spec.ridge_alpha or 1.0)
+                if predictor_spec.engine_spec.kind == "ridge_regression":
+                    ridge_alpha = float(predictor_spec.engine_spec.ridge_alpha or 1.0)
                     penalty = np.eye(xtx.shape[0], dtype="float64") * ridge_alpha
                     penalty[0, 0] = 0.0
                     beta = np.linalg.pinv(xtx + penalty) @ xty
@@ -2243,7 +2243,7 @@ def compute_predictor_panel(
                     dtype="float64",
                 )
                 if linear_prediction_values.nunique() >= 2:
-                    if predictor_spec.model_spec.kind in {"linear_regression", "ridge_regression"}:
+                    if predictor_spec.engine_spec.kind in {"linear_regression", "ridge_regression"}:
                         prediction_values = linear_prediction_values
                     else:
                         blended = (

@@ -12,7 +12,7 @@ from app.portfolio import (
     build_feature_input_spec,
     build_prediction_output_spec,
     build_decision_use_spec,
-    build_prediction_model_spec,
+    build_prediction_engine_spec,
     build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
@@ -61,14 +61,14 @@ def _build_registered_predictors() -> list[PredictorSpec]:
         ),
         ranking_feature_recipe=build_ranking_feature_recipe_spec(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M),
     )
-    model_specs = [
-        build_prediction_model_spec(
-            key="model__pred-fu-momo2-supplement-linear",
+    engine_specs = [
+        build_prediction_engine_spec(
+            key="engine__pred-fu-momo2-supplement-linear",
             kind="linear_regression",
             label="2ヶ月モメンタム supplement linear",
         ),
-        build_prediction_model_spec(
-            key="model__pred-fu-momo2-supplement-ridge",
+        build_prediction_engine_spec(
+            key="engine__pred-fu-momo2-supplement-ridge",
             kind="ridge_regression",
             label="2ヶ月モメンタム supplement ridge",
             ridge_alpha=1.0,
@@ -76,13 +76,13 @@ def _build_registered_predictors() -> list[PredictorSpec]:
     ]
     target_specs = DEFAULT_PREDICTION_TARGET_SPECS
     predictor_specs: list[PredictorSpec] = []
-    for model_spec in model_specs:
+    for engine_spec in engine_specs:
         for target_spec in target_specs:
             horizon_value = _horizon_value(target_spec)
-            model_suffix = model_spec.kind.replace("_regression", "")
+            model_suffix = engine_spec.kind.replace("_regression", "")
             predictor_specs.append(build_predictor_spec(
                 key=f"pred-fu-momo2-supplement-{horizon_value}bar-{model_suffix}",
-                label=f"2ヶ月モメンタム / {target_spec.label} / {model_spec.label}",
+                label=f"2ヶ月モメンタム / {target_spec.label} / {engine_spec.label}",
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
                 investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
@@ -93,9 +93,9 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 ),
                 target_spec=target_spec,
                 feature_spec=feature_spec,
-                model_spec=model_spec,
+                engine_spec=engine_spec,
                 training_spec=build_training_spec(
-                    key=f"training__pred-fu-momo2-supplement-{model_spec.kind}",
+                    key=f"training__pred-fu-momo2-supplement-{engine_spec.kind}",
                     label="2ヶ月モメンタム supplement training",
                     fit_mode="expanding",
                     min_train_samples=50,

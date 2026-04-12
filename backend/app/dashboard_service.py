@@ -605,7 +605,7 @@ def build_predictor_run_index_payload(
     comparison: ComparisonSpec,
     *,
     limit: int = 50,
-    model_kind: str | None = None,
+    engine_kind: str | None = None,
     horizon_value: int | None = None,
     sort_by: str = "test_rank_ic",
 ) -> dict:
@@ -614,10 +614,10 @@ def build_predictor_run_index_payload(
         compact_predictor_run_record(record)
         for record in run_store.list_records(run_kind="predictor_run")
     ]
-    if model_kind is not None:
+    if engine_kind is not None:
         all_records = [
             record for record in all_records
-            if record["modelKind"] == model_kind
+            if record["engineKind"] == engine_kind
         ]
     if horizon_value is not None:
         all_records = [
@@ -633,7 +633,7 @@ def build_predictor_run_index_payload(
         "limit": limit,
         "sortBy": sort_by,
         "filters": {
-            "modelKind": model_kind,
+            "engineKind": engine_kind,
             "horizonValue": horizon_value,
         },
         "totalCount": len(all_records),
@@ -1004,7 +1004,7 @@ def compact_predictor_run_record(record: dict) -> dict:
         "predictorKey": predictor.get("key"),
         "predictorLabel": predictor.get("label"),
         "featureKey": feature.get("key"),
-        "modelKind": predictor.get("modelSpec", {}).get("modelKind"),
+        "engineKind": predictor.get("engineSpec", {}).get("engineKind"),
         "trainingFitMode": training.get("fitMode"),
         "trainingMinSamples": training.get("minTrainSamples"),
         "timeframe": predictor.get("timeframe", {}).get("key"),

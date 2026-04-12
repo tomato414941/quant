@@ -7,7 +7,7 @@ from app.portfolio import (
     build_feature_input_spec,
     build_prediction_output_spec,
     build_decision_use_spec,
-    build_prediction_model_spec,
+    build_prediction_engine_spec,
     build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
@@ -125,8 +125,8 @@ def make_predictor_spec(
             ),
             ranking_feature_recipe=build_ranking_feature_recipe_spec(strategy.selection),
         ),
-        model_spec=build_prediction_model_spec(
-            key=f"model__{predictor_key}",
+        engine_spec=build_prediction_engine_spec(
+            key=f"engine__{predictor_key}",
             kind="linear_regression",
             label=f"{label} linear",
         ),

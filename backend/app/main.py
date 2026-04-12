@@ -52,7 +52,7 @@ def dashboard() -> dict:
 @app.get("/api/predictor-runs")
 def predictor_run_index(
     limit: int = Query(50, ge=1, le=500),
-    model_kind: str | None = Query(None),
+    engine_kind: str | None = Query(None),
     horizon_value: int | None = Query(None, ge=1),
     sort_by: str = Query("test_rank_ic"),
 ) -> dict:
@@ -60,7 +60,7 @@ def predictor_run_index(
         return build_predictor_run_index_payload(
             DEFAULT_COMPARISON_SPEC,
             limit=limit,
-            model_kind=model_kind,
+            engine_kind=engine_kind,
             horizon_value=horizon_value,
             sort_by=sort_by,
         )

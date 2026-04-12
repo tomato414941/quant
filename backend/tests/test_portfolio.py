@@ -5,7 +5,7 @@ from app.portfolio import (
     build_derived_feature_spec,
     build_feature_spec,
     build_feature_input_spec,
-    build_prediction_calibration_spec,
+    build_prediction_output_spec,
     build_decision_use_spec,
     build_prediction_model_spec,
     build_predicted_quantity_spec,
@@ -136,9 +136,9 @@ def make_predictor_spec(
             fit_mode="expanding",
             min_train_samples=min_train_samples,
         ),
-        calibration_spec=build_prediction_calibration_spec(
-            key=f"calibration__{predictor_key}",
-            label=f"{label} calibration",
+        output_spec=build_prediction_output_spec(
+            key=f"output__{predictor_key}",
+            label=f"{label} output",
             kind="standardized_score",
             scope="cross_sectional",
         ),

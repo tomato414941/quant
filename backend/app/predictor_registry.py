@@ -10,7 +10,7 @@ from app.portfolio import (
     build_derived_feature_spec,
     build_feature_spec,
     build_feature_input_spec,
-    build_prediction_calibration_spec,
+    build_prediction_output_spec,
     build_decision_use_spec,
     build_prediction_model_spec,
     build_predicted_quantity_spec,
@@ -100,8 +100,8 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     fit_mode="expanding",
                     min_train_samples=50,
                 ),
-                calibration_spec=build_prediction_calibration_spec(
-                    key="calibration__cross_sectional_standard_score",
+                output_spec=build_prediction_output_spec(
+                    key="output__cross_sectional_standard_score",
                     label="Cross-sectional standardized score",
                     kind="standardized_score",
                     scope="cross_sectional",

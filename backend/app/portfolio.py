@@ -278,7 +278,7 @@ class TrainingSpec:
 
 
 @dataclass(frozen=True)
-class PredictionCalibrationSpec:
+class PredictionOutputSpec:
     key: str
     label: str
     kind: str
@@ -297,7 +297,7 @@ class PredictorSpec:
     feature_spec: FeatureSpec
     model_spec: PredictionModelSpec
     training_spec: TrainingSpec
-    calibration_spec: PredictionCalibrationSpec
+    output_spec: PredictionOutputSpec
     decision_use_spec: DecisionUseSpec
 
 
@@ -1227,18 +1227,18 @@ def build_training_spec(
     )
 
 
-def build_prediction_calibration_spec(
+def build_prediction_output_spec(
     *,
     key: str,
     label: str,
     kind: str,
     scope: str,
-) -> PredictionCalibrationSpec:
+) -> PredictionOutputSpec:
     if kind not in {"standardized_score"}:
-        raise ValueError("Unsupported prediction calibration kind.")
+        raise ValueError("Unsupported prediction output kind.")
     if scope not in {"cross_sectional"}:
-        raise ValueError("Unsupported prediction calibration scope.")
-    return PredictionCalibrationSpec(
+        raise ValueError("Unsupported prediction output scope.")
+    return PredictionOutputSpec(
         key=key,
         label=label,
         kind=kind,
@@ -1246,16 +1246,16 @@ def build_prediction_calibration_spec(
     )
 
 
-def serialize_prediction_calibration_spec(
-    calibration_spec: PredictionCalibrationSpec,
+def serialize_prediction_output_spec(
+    output_spec: PredictionOutputSpec,
 ) -> dict:
     return {
-        "kind": "prediction_calibration_spec",
+        "kind": "prediction_output_spec",
         "schemaVersion": "v1",
-        "key": calibration_spec.key,
-        "label": calibration_spec.label,
-        "calibrationKind": calibration_spec.kind,
-        "scope": calibration_spec.scope,
+        "key": output_spec.key,
+        "label": output_spec.label,
+        "outputKind": output_spec.kind,
+        "scope": output_spec.scope,
     }
 
 
@@ -1271,7 +1271,7 @@ def build_predictor_spec(
     feature_spec: FeatureSpec,
     model_spec: PredictionModelSpec,
     training_spec: TrainingSpec,
-    calibration_spec: PredictionCalibrationSpec,
+    output_spec: PredictionOutputSpec,
     decision_use_spec: DecisionUseSpec,
 ) -> PredictorSpec:
     return PredictorSpec(
@@ -1285,7 +1285,7 @@ def build_predictor_spec(
         feature_spec=feature_spec,
         model_spec=model_spec,
         training_spec=training_spec,
-        calibration_spec=calibration_spec,
+        output_spec=output_spec,
         decision_use_spec=decision_use_spec,
     )
 
@@ -1461,8 +1461,8 @@ def build_predictor_specs(
                             fit_mode="expanding",
                             min_train_samples=50,
                         ),
-                        calibration_spec=build_prediction_calibration_spec(
-                            key="calibration__cross_sectional_standard_score",
+                        output_spec=build_prediction_output_spec(
+                            key="output__cross_sectional_standard_score",
                             label="Cross-sectional standardized score",
                             kind="standardized_score",
                             scope="cross_sectional",
@@ -1523,7 +1523,7 @@ def serialize_predictor_spec(
         "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
         "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
         "trainingSpec": serialize_training_spec(predictor_spec.training_spec),
-        "calibrationSpec": serialize_prediction_calibration_spec(predictor_spec.calibration_spec),
+        "outputSpec": serialize_prediction_output_spec(predictor_spec.output_spec),
         "decisionUseSpec": serialize_decision_use_spec(
             predictor_spec.decision_use_spec
         ),

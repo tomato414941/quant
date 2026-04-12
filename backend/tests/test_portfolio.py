@@ -138,7 +138,7 @@ def make_predictor_spec(
             key=f"calibration__{predictor_key}",
             label=f"{label} calibration",
             kind="standardized_score",
-            parameters={"scope": "cross_sectional"},
+            scope="cross_sectional",
         ),
         source_strategy_keys=(strategy.key,),
         source_strategy_labels=(strategy.label,),

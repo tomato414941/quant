@@ -266,7 +266,7 @@ class PredictionCalibrationSpec:
     key: str
     label: str
     kind: str
-    parameters: tuple[tuple[str, object], ...] = ()
+    scope: str
 
 
 @dataclass(frozen=True)
@@ -1150,15 +1150,17 @@ def build_prediction_calibration_spec(
     key: str,
     label: str,
     kind: str,
-    parameters: dict[str, object] | None = None,
+    scope: str,
 ) -> PredictionCalibrationSpec:
     if kind not in {"standardized_score"}:
         raise ValueError("Unsupported prediction calibration kind.")
+    if scope not in {"cross_sectional"}:
+        raise ValueError("Unsupported prediction calibration scope.")
     return PredictionCalibrationSpec(
         key=key,
         label=label,
         kind=kind,
-        parameters=tuple(sorted((parameters or {}).items())),
+        scope=scope,
     )
 
 
@@ -1171,9 +1173,7 @@ def serialize_prediction_calibration_spec(
         "key": calibration_spec.key,
         "label": calibration_spec.label,
         "calibrationKind": calibration_spec.kind,
-        "parameters": {
-            key: value for key, value in calibration_spec.parameters
-        },
+        "scope": calibration_spec.scope,
     }
 
 
@@ -1387,7 +1387,7 @@ def build_predictor_specs(
                             key="calibration__cross_sectional_standard_score",
                             label="Cross-sectional standardized score",
                             kind="standardized_score",
-                            parameters={"scope": "cross_sectional"},
+                            scope="cross_sectional",
                         ),
                         source_strategy_keys=ranking_spec.source_strategy_keys,
                         source_strategy_labels=ranking_spec.source_strategy_labels,

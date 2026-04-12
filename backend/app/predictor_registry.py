@@ -101,7 +101,7 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     key="calibration__cross_sectional_standard_score",
                     label="Cross-sectional standardized score",
                     kind="standardized_score",
-                    parameters={"scope": "cross_sectional"},
+                    scope="cross_sectional",
                 ),
                 source_strategy_keys=("stg-fu-momo2-top035-pred5blend-hrp-month",),
                 source_strategy_labels=("全資産モメンタム傾斜 上位優遇 2ヶ月 + 5bar予測補助 × HRP × 月次",),

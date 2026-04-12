@@ -315,6 +315,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["sortBy"] == "test_rank_ic"
     assert index_payload["records"][0]["runKind"] == "predictor_run"
     assert "trainingFitMode" in index_payload["records"][0]
+    assert "signalSourceKind" in index_payload["records"][0]
     run_key = index_payload["records"][0]["runKey"]
 
     detail_response = client.get(f"/api/predictor-runs/{run_key}")
@@ -342,6 +343,27 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert all(record["learnerKind"] == "linear_regression" for record in filtered_payload["records"])
     assert all(record["combinerKind"] == "learner_only" for record in filtered_payload["records"])
     assert all(record["horizonValue"] == 5 for record in filtered_payload["records"])
+
+    signal_filtered_response = client.get(
+        "/api/predictor-runs",
+        params={
+            "signal_source_kind": "derived_feature",
+            "signal_source_feature_key": "momentum",
+        },
+    )
+    assert signal_filtered_response.status_code == 200
+    signal_filtered_payload = signal_filtered_response.json()
+    assert signal_filtered_payload["filters"]["signalSourceKind"] == "derived_feature"
+    assert signal_filtered_payload["filters"]["signalSourceFeatureKey"] == "momentum"
+    assert signal_filtered_payload["recordCount"] >= 1
+    assert all(
+        record["signalSourceKind"] == "derived_feature"
+        for record in signal_filtered_payload["records"]
+    )
+    assert all(
+        record["signalSourceFeatureKey"] == "momentum"
+        for record in signal_filtered_payload["records"]
+    )
 
     second_response = client.post("/api/predictor-runs")
     assert second_response.status_code == 200

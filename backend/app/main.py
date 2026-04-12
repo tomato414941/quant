@@ -54,6 +54,8 @@ def predictor_run_index(
     limit: int = Query(50, ge=1, le=500),
     learner_kind: str | None = Query(None),
     combiner_kind: str | None = Query(None),
+    signal_source_kind: str | None = Query(None),
+    signal_source_feature_key: str | None = Query(None),
     horizon_value: int | None = Query(None, ge=1),
     sort_by: str = Query("test_rank_ic"),
 ) -> dict:
@@ -63,6 +65,8 @@ def predictor_run_index(
             limit=limit,
             learner_kind=learner_kind,
             combiner_kind=combiner_kind,
+            signal_source_kind=signal_source_kind,
+            signal_source_feature_key=signal_source_feature_key,
             horizon_value=horizon_value,
             sort_by=sort_by,
         )

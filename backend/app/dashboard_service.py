@@ -607,6 +607,8 @@ def build_predictor_run_index_payload(
     limit: int = 50,
     learner_kind: str | None = None,
     combiner_kind: str | None = None,
+    signal_source_kind: str | None = None,
+    signal_source_feature_key: str | None = None,
     horizon_value: int | None = None,
     sort_by: str = "test_rank_ic",
 ) -> dict:
@@ -625,6 +627,16 @@ def build_predictor_run_index_payload(
             record for record in all_records
             if record["combinerKind"] == combiner_kind
         ]
+    if signal_source_kind is not None:
+        all_records = [
+            record for record in all_records
+            if record["signalSourceKind"] == signal_source_kind
+        ]
+    if signal_source_feature_key is not None:
+        all_records = [
+            record for record in all_records
+            if record["signalSourceFeatureKey"] == signal_source_feature_key
+        ]
     if horizon_value is not None:
         all_records = [
             record for record in all_records
@@ -641,6 +653,8 @@ def build_predictor_run_index_payload(
         "filters": {
             "learnerKind": learner_kind,
             "combinerKind": combiner_kind,
+            "signalSourceKind": signal_source_kind,
+            "signalSourceFeatureKey": signal_source_feature_key,
             "horizonValue": horizon_value,
         },
         "totalCount": len(all_records),
@@ -1002,6 +1016,7 @@ def compact_predictor_run_record(record: dict) -> dict:
     feature = predictor.get("featureSpec", {})
     training = predictor.get("trainingSpec", {})
     engine = predictor.get("engineSpec", {})
+    signal_source = engine.get("signalSourceSpec") or {}
     learner = engine.get("learnerSpec") or {}
     combiner = engine.get("combinerSpec") or {}
     overall = result.get("overall", {})
@@ -1014,6 +1029,8 @@ def compact_predictor_run_record(record: dict) -> dict:
         "predictorKey": predictor.get("key"),
         "predictorLabel": predictor.get("label"),
         "featureKey": feature.get("key"),
+        "signalSourceKind": signal_source.get("signalSourceKind"),
+        "signalSourceFeatureKey": signal_source.get("featureKey"),
         "learnerKind": learner.get("learnerKind"),
         "combinerKind": combiner.get("combinerKind"),
         "trainingFitMode": training.get("fitMode"),

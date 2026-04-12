@@ -259,7 +259,6 @@ class TrainingSpec:
     label: str
     fit_mode: str
     min_train_samples: int
-    parameters: tuple[tuple[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1137,14 +1136,12 @@ def build_training_spec(
     label: str,
     fit_mode: str,
     min_train_samples: int,
-    parameters: dict[str, object] | None = None,
 ) -> TrainingSpec:
     return TrainingSpec(
         key=key,
         label=label,
         fit_mode=fit_mode,
         min_train_samples=min_train_samples,
-        parameters=tuple(sorted((parameters or {}).items())),
     )
 
 
@@ -1238,9 +1235,6 @@ def serialize_training_spec(
         "label": training_spec.label,
         "fitMode": training_spec.fit_mode,
         "minTrainSamples": training_spec.min_train_samples,
-        "parameters": {
-            key: value for key, value in training_spec.parameters
-        },
     }
 
 

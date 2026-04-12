@@ -104,7 +104,6 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     key="output__cross_sectional_score",
                     label="Cross-sectional score",
                     kind="score",
-                    scope="cross_sectional",
                 ),
                 decision_use_spec=build_decision_use_spec(
                     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M

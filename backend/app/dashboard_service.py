@@ -1013,7 +1013,6 @@ def compact_predictor_run_record(record: dict) -> dict:
         "targetBaseline": target.get("baseline"),
         "targetTransform": target.get("transform"),
         "outputKind": output.get("outputKind"),
-        "outputScope": output.get("scope"),
         "horizonUnit": horizon.get("unit"),
         "horizonValue": horizon.get("value"),
         "period": run_spec.get("marketSlice", {}).get("period"),

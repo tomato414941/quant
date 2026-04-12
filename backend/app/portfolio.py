@@ -282,7 +282,6 @@ class PredictionOutputSpec:
     key: str
     label: str
     kind: str
-    scope: str
 
 
 @dataclass(frozen=True)
@@ -1232,7 +1231,6 @@ def build_prediction_output_spec(
     key: str,
     label: str,
     kind: str,
-    scope: str,
 ) -> PredictionOutputSpec:
     if kind not in {
         "score",
@@ -1242,13 +1240,10 @@ def build_prediction_output_spec(
         "state_probability_vector",
     }:
         raise ValueError("Unsupported prediction output kind.")
-    if scope not in {"cross_sectional"}:
-        raise ValueError("Unsupported prediction output scope.")
     return PredictionOutputSpec(
         key=key,
         label=label,
         kind=kind,
-        scope=scope,
     )
 
 
@@ -1261,7 +1256,6 @@ def serialize_prediction_output_spec(
         "key": output_spec.key,
         "label": output_spec.label,
         "outputKind": output_spec.kind,
-        "scope": output_spec.scope,
     }
 
 
@@ -1471,7 +1465,6 @@ def build_predictor_specs(
                             key="output__cross_sectional_score",
                             label="Cross-sectional score",
                             kind="score",
-                            scope="cross_sectional",
                         ),
                         decision_use_spec=build_decision_use_spec(
                             ranking_spec.selection

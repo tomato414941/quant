@@ -260,14 +260,36 @@ class FeatureSpec:
 
 
 @dataclass(frozen=True)
+class PredictionSignalSourceSpec:
+    key: str
+    label: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class PredictionLearnerSpec:
+    key: str
+    label: str
+    kind: str
+    ridge_alpha: float | None = None
+
+
+@dataclass(frozen=True)
+class PredictionCombinerSpec:
+    key: str
+    label: str
+    kind: str
+    signal_source_weight: float | None = None
+    learner_weight: float | None = None
+
+
+@dataclass(frozen=True)
 class PredictionEngineSpec:
     key: str
     label: str
-    learner_kind: str
-    combiner_kind: str
-    ridge_alpha: float | None = None
-    baseline_signal_weight: float | None = None
-    learner_weight: float | None = None
+    signal_source_spec: PredictionSignalSourceSpec | None
+    learner_spec: PredictionLearnerSpec | None
+    combiner_spec: PredictionCombinerSpec
 
 
 @dataclass(frozen=True)
@@ -1188,41 +1210,129 @@ def serialize_feature_spec(
     }
 
 
+def build_prediction_signal_source_spec(
+    *,
+    key: str,
+    label: str,
+) -> PredictionSignalSourceSpec:
+    return PredictionSignalSourceSpec(
+        key=key,
+        label=label,
+        kind="ranking_signal",
+    )
+
+
+def serialize_prediction_signal_source_spec(
+    signal_source_spec: PredictionSignalSourceSpec,
+) -> dict:
+    return {
+        "kind": "prediction_signal_source_spec",
+        "schemaVersion": "v1",
+        "key": signal_source_spec.key,
+        "label": signal_source_spec.label,
+        "signalSourceKind": signal_source_spec.kind,
+    }
+
+
+def build_prediction_learner_spec(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    ridge_alpha: float | None = None,
+) -> PredictionLearnerSpec:
+    if kind not in {"linear_regression", "ridge_regression"}:
+        raise ValueError("Unsupported prediction learner kind.")
+    if kind == "ridge_regression" and ridge_alpha is None:
+        raise ValueError("ridge_alpha is required for ridge_regression.")
+    return PredictionLearnerSpec(
+        key=key,
+        label=label,
+        kind=kind,
+        ridge_alpha=ridge_alpha,
+    )
+
+
+def serialize_prediction_learner_spec(
+    learner_spec: PredictionLearnerSpec,
+) -> dict:
+    return {
+        "kind": "prediction_learner_spec",
+        "schemaVersion": "v1",
+        "key": learner_spec.key,
+        "label": learner_spec.label,
+        "learnerKind": learner_spec.kind,
+        "ridgeAlpha": learner_spec.ridge_alpha,
+    }
+
+
+def build_prediction_combiner_spec(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    signal_source_weight: float | None = None,
+    learner_weight: float | None = None,
+) -> PredictionCombinerSpec:
+    if kind not in {"baseline_signal_only", "learner_only", "weighted_blend"}:
+        raise ValueError("Unsupported prediction combiner kind.")
+    if kind == "weighted_blend":
+        if signal_source_weight is None or learner_weight is None:
+            raise ValueError(
+                "signal_source_weight and learner_weight are required for weighted_blend."
+            )
+    return PredictionCombinerSpec(
+        key=key,
+        label=label,
+        kind=kind,
+        signal_source_weight=signal_source_weight,
+        learner_weight=learner_weight,
+    )
+
+
+def serialize_prediction_combiner_spec(
+    combiner_spec: PredictionCombinerSpec,
+) -> dict:
+    return {
+        "kind": "prediction_combiner_spec",
+        "schemaVersion": "v1",
+        "key": combiner_spec.key,
+        "label": combiner_spec.label,
+        "combinerKind": combiner_spec.kind,
+        "signalSourceWeight": combiner_spec.signal_source_weight,
+        "learnerWeight": combiner_spec.learner_weight,
+    }
+
+
 def build_prediction_engine_spec(
     *,
     key: str,
     label: str,
-    learner_kind: str,
-    combiner_kind: str,
-    ridge_alpha: float | None = None,
-    baseline_signal_weight: float | None = None,
-    learner_weight: float | None = None,
+    signal_source_spec: PredictionSignalSourceSpec | None,
+    learner_spec: PredictionLearnerSpec | None,
+    combiner_spec: PredictionCombinerSpec,
 ) -> PredictionEngineSpec:
-    if learner_kind not in {"none", "linear_regression", "ridge_regression"}:
-        raise ValueError("Unsupported prediction engine learner kind.")
-    if combiner_kind not in {"baseline_signal_only", "learner_only", "weighted_blend"}:
-        raise ValueError("Unsupported prediction engine combiner kind.")
-    if learner_kind == "ridge_regression" and ridge_alpha is None:
-        raise ValueError("ridge_alpha is required for ridge_regression.")
-    if learner_kind == "none" and combiner_kind != "baseline_signal_only":
-        raise ValueError("learner_kind=none requires baseline_signal_only combiner.")
-    if combiner_kind == "learner_only" and learner_kind == "none":
-        raise ValueError("learner_only combiner requires a learner.")
-    if combiner_kind == "weighted_blend":
-        if learner_kind == "none":
-            raise ValueError("weighted_blend combiner requires a learner.")
-        if baseline_signal_weight is None or learner_weight is None:
+    if combiner_spec.kind == "baseline_signal_only":
+        if signal_source_spec is None or learner_spec is not None:
             raise ValueError(
-                "baseline_signal_weight and learner_weight are required for weighted_blend."
+                "baseline_signal_only combiner requires a signal source and no learner."
+            )
+    if combiner_spec.kind == "learner_only":
+        if signal_source_spec is not None or learner_spec is None:
+            raise ValueError(
+                "learner_only combiner requires a learner and no signal source."
+            )
+    if combiner_spec.kind == "weighted_blend":
+        if signal_source_spec is None or learner_spec is None:
+            raise ValueError(
+                "weighted_blend combiner requires both a signal source and a learner."
             )
     return PredictionEngineSpec(
         key=key,
         label=label,
-        learner_kind=learner_kind,
-        combiner_kind=combiner_kind,
-        ridge_alpha=ridge_alpha,
-        baseline_signal_weight=baseline_signal_weight,
-        learner_weight=learner_weight,
+        signal_source_spec=signal_source_spec,
+        learner_spec=learner_spec,
+        combiner_spec=combiner_spec,
     )
 
 
@@ -1313,11 +1423,17 @@ def serialize_prediction_engine_spec(
         "schemaVersion": "v1",
         "key": engine_spec.key,
         "label": engine_spec.label,
-        "learnerKind": engine_spec.learner_kind,
-        "combinerKind": engine_spec.combiner_kind,
-        "ridgeAlpha": engine_spec.ridge_alpha,
-        "baselineSignalWeight": engine_spec.baseline_signal_weight,
-        "learnerWeight": engine_spec.learner_weight,
+        "signalSourceSpec": (
+            serialize_prediction_signal_source_spec(engine_spec.signal_source_spec)
+            if engine_spec.signal_source_spec is not None
+            else None
+        ),
+        "learnerSpec": (
+            serialize_prediction_learner_spec(engine_spec.learner_spec)
+            if engine_spec.learner_spec is not None
+            else None
+        ),
+        "combinerSpec": serialize_prediction_combiner_spec(engine_spec.combiner_spec),
     }
 
 
@@ -1439,31 +1555,66 @@ def build_predictor_specs(
             build_prediction_engine_spec(
                 key=f"engine__{ranking_spec.key}__signal",
                 label=f"{ranking_spec.selection.score_model.label} signal",
-                learner_kind="none",
-                combiner_kind="baseline_signal_only",
+                signal_source_spec=build_prediction_signal_source_spec(
+                    key=f"signal-source__{ranking_spec.key}",
+                    label=f"{ranking_spec.selection.score_model.label} signal source",
+                ),
+                learner_spec=None,
+                combiner_spec=build_prediction_combiner_spec(
+                    key=f"combiner__{ranking_spec.key}__baseline-only",
+                    label="Baseline signal only",
+                    kind="baseline_signal_only",
+                ),
             ),
             build_prediction_engine_spec(
                 key=f"engine__{ranking_spec.key}__linear",
                 label=f"{ranking_spec.selection.score_model.label} linear",
-                learner_kind="linear_regression",
-                combiner_kind="learner_only",
+                signal_source_spec=None,
+                learner_spec=build_prediction_learner_spec(
+                    key=f"learner__{ranking_spec.key}__linear",
+                    label=f"{ranking_spec.selection.score_model.label} linear learner",
+                    kind="linear_regression",
+                ),
+                combiner_spec=build_prediction_combiner_spec(
+                    key=f"combiner__{ranking_spec.key}__learner-only",
+                    label="Learner only",
+                    kind="learner_only",
+                ),
             ),
             build_prediction_engine_spec(
                 key=f"engine__{ranking_spec.key}__blend",
                 label=f"{ranking_spec.selection.score_model.label} blend",
-                learner_kind="linear_regression",
-                combiner_kind="weighted_blend",
-                baseline_signal_weight=0.8,
-                learner_weight=0.2,
+                signal_source_spec=build_prediction_signal_source_spec(
+                    key=f"signal-source__{ranking_spec.key}",
+                    label=f"{ranking_spec.selection.score_model.label} signal source",
+                ),
+                learner_spec=build_prediction_learner_spec(
+                    key=f"learner__{ranking_spec.key}__linear",
+                    label=f"{ranking_spec.selection.score_model.label} linear learner",
+                    kind="linear_regression",
+                ),
+                combiner_spec=build_prediction_combiner_spec(
+                    key=f"combiner__{ranking_spec.key}__weighted-blend",
+                    label="Weighted blend",
+                    kind="weighted_blend",
+                    signal_source_weight=0.8,
+                    learner_weight=0.2,
+                ),
             ),
         ]
         for target_spec in target_specs:
             for engine_spec in engine_specs:
+                learner_key = (
+                    engine_spec.learner_spec.kind
+                    if engine_spec.learner_spec is not None
+                    else "no-learner"
+                )
+                combiner_key = engine_spec.combiner_spec.kind
                 predictor_specs.append(
                     build_predictor_spec(
                         key=(
                             f"prediction__{ranking_spec.key}__"
-                            f"{engine_spec.learner_kind}__{engine_spec.combiner_kind}__{target_spec.key}"
+                            f"{learner_key}__{combiner_key}__{target_spec.key}"
                         ),
                         label=f"{ranking_spec.label} / {engine_spec.label} -> {target_spec.label}",
                         description=ranking_spec.description,
@@ -1480,7 +1631,7 @@ def build_predictor_specs(
                         training_spec=build_training_spec(
                             key=(
                                 f"training__{ranking_spec.key}__"
-                                f"{engine_spec.learner_kind}__{engine_spec.combiner_kind}"
+                                f"{learner_key}__{combiner_key}"
                             ),
                             label=f"{ranking_spec.selection.score_model.label} training",
                             fit_mode="expanding",
@@ -2210,8 +2361,8 @@ def compute_predictor_panel(
     xty = np.zeros(feature_count + 1, dtype="float64")
     train_sample_count = 0
     min_train_samples = predictor_spec.training_spec.min_train_samples
-    baseline_signal_weight = float(predictor_spec.engine_spec.baseline_signal_weight or 0.8)
-    learner_weight = float(predictor_spec.engine_spec.learner_weight or 0.2)
+    signal_source_weight = float(predictor_spec.engine_spec.combiner_spec.signal_source_weight or 0.8)
+    learner_weight = float(predictor_spec.engine_spec.combiner_spec.learner_weight or 0.2)
 
     for index in range(2, len(scoped_returns)):
         history_returns = scoped_returns.iloc[:index]
@@ -2247,16 +2398,18 @@ def compute_predictor_panel(
         if len(aligned_features) < 2:
             continue
 
+        signal_source_values: pd.Series | None = None
+        if predictor_spec.engine_spec.signal_source_spec is not None:
+            signal_source_values = selected_scores
+
         learner_prediction_values: pd.Series | None = None
-        if (
-            predictor_spec.engine_spec.learner_kind in {"linear_regression", "ridge_regression"}
-            and train_sample_count >= min_train_samples
-        ):
+        learner_spec = predictor_spec.engine_spec.learner_spec
+        if learner_spec is not None and train_sample_count >= min_train_samples:
             design_matrix = np.column_stack(
                 [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
             )
-            if predictor_spec.engine_spec.learner_kind == "ridge_regression":
-                ridge_alpha = float(predictor_spec.engine_spec.ridge_alpha or 1.0)
+            if learner_spec.kind == "ridge_regression":
+                ridge_alpha = float(learner_spec.ridge_alpha or 1.0)
                 penalty = np.eye(xtx.shape[0], dtype="float64") * ridge_alpha
                 penalty[0, 0] = 0.0
                 beta = np.linalg.pinv(xtx + penalty) @ xty
@@ -2271,13 +2424,13 @@ def compute_predictor_panel(
                 learner_prediction_values = None
 
         prediction_values: pd.Series | None = None
-        if predictor_spec.engine_spec.combiner_kind == "baseline_signal_only":
-            prediction_values = selected_scores
-        elif predictor_spec.engine_spec.combiner_kind == "learner_only":
+        if predictor_spec.engine_spec.combiner_spec.kind == "baseline_signal_only":
+            prediction_values = signal_source_values
+        elif predictor_spec.engine_spec.combiner_spec.kind == "learner_only":
             prediction_values = learner_prediction_values
-        elif learner_prediction_values is not None:
+        elif signal_source_values is not None and learner_prediction_values is not None:
             blended = (
-                baseline_signal_weight * standardize_prediction_series(selected_scores)
+                signal_source_weight * standardize_prediction_series(signal_source_values)
                 + learner_weight * standardize_prediction_series(learner_prediction_values)
             )
             if blended.nunique() >= 2:

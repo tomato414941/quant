@@ -1001,6 +1001,9 @@ def compact_predictor_run_record(record: dict) -> dict:
     horizon = target.get("horizonSpec", {})
     feature = predictor.get("featureSpec", {})
     training = predictor.get("trainingSpec", {})
+    engine = predictor.get("engineSpec", {})
+    learner = engine.get("learnerSpec") or {}
+    combiner = engine.get("combinerSpec") or {}
     overall = result.get("overall", {})
     test = result.get("test", {})
 
@@ -1011,8 +1014,8 @@ def compact_predictor_run_record(record: dict) -> dict:
         "predictorKey": predictor.get("key"),
         "predictorLabel": predictor.get("label"),
         "featureKey": feature.get("key"),
-        "learnerKind": predictor.get("engineSpec", {}).get("learnerKind"),
-        "combinerKind": predictor.get("engineSpec", {}).get("combinerKind"),
+        "learnerKind": learner.get("learnerKind"),
+        "combinerKind": combiner.get("combinerKind"),
         "trainingFitMode": training.get("fitMode"),
         "trainingMinSamples": training.get("minTrainSamples"),
         "timeframe": predictor.get("timeframe", {}).get("key"),

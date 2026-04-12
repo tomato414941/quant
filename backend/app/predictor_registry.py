@@ -7,12 +7,14 @@ from app.strategy_registry import (
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
     PredictorSpec,
+    build_prediction_combiner_spec,
     build_derived_feature_spec,
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_output_spec,
     build_decision_use_spec,
     build_prediction_engine_spec,
+    build_prediction_learner_spec,
     build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
@@ -65,15 +67,33 @@ def _build_registered_predictors() -> list[PredictorSpec]:
         build_prediction_engine_spec(
             key="engine__pred-fu-momo2-supplement-linear",
             label="2ヶ月モメンタム supplement linear",
-            learner_kind="linear_regression",
-            combiner_kind="learner_only",
+            signal_source_spec=None,
+            learner_spec=build_prediction_learner_spec(
+                key="learner__pred-fu-momo2-supplement-linear",
+                label="2ヶ月モメンタム supplement linear learner",
+                kind="linear_regression",
+            ),
+            combiner_spec=build_prediction_combiner_spec(
+                key="combiner__pred-fu-momo2-supplement-learner-only",
+                label="Learner only",
+                kind="learner_only",
+            ),
         ),
         build_prediction_engine_spec(
             key="engine__pred-fu-momo2-supplement-ridge",
             label="2ヶ月モメンタム supplement ridge",
-            learner_kind="ridge_regression",
-            combiner_kind="learner_only",
-            ridge_alpha=1.0,
+            signal_source_spec=None,
+            learner_spec=build_prediction_learner_spec(
+                key="learner__pred-fu-momo2-supplement-ridge",
+                label="2ヶ月モメンタム supplement ridge learner",
+                kind="ridge_regression",
+                ridge_alpha=1.0,
+            ),
+            combiner_spec=build_prediction_combiner_spec(
+                key="combiner__pred-fu-momo2-supplement-learner-only",
+                label="Learner only",
+                kind="learner_only",
+            ),
         ),
     ]
     target_specs = DEFAULT_PREDICTION_TARGET_SPECS
@@ -81,8 +101,8 @@ def _build_registered_predictors() -> list[PredictorSpec]:
     for engine_spec in engine_specs:
         for target_spec in target_specs:
             horizon_value = _horizon_value(target_spec)
-            learner_suffix = engine_spec.learner_kind.replace("_regression", "")
-            combiner_suffix = engine_spec.combiner_kind.replace("_only", "")
+            learner_suffix = engine_spec.learner_spec.kind.replace("_regression", "")
+            combiner_suffix = engine_spec.combiner_spec.kind.replace("_only", "")
             predictor_specs.append(build_predictor_spec(
                 key=f"pred-fu-momo2-supplement-{horizon_value}bar-{learner_suffix}-{combiner_suffix}",
                 label=f"2ヶ月モメンタム / {target_spec.label} / {engine_spec.label}",
@@ -100,7 +120,7 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 training_spec=build_training_spec(
                     key=(
                         f"training__pred-fu-momo2-supplement-"
-                        f"{engine_spec.learner_kind}-{engine_spec.combiner_kind}"
+                        f"{engine_spec.learner_spec.kind}-{engine_spec.combiner_spec.kind}"
                     ),
                     label="2ヶ月モメンタム supplement training",
                     fit_mode="expanding",

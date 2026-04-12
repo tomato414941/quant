@@ -2,12 +2,14 @@ import pandas as pd
 
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
+    build_prediction_combiner_spec,
     build_derived_feature_spec,
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_output_spec,
     build_decision_use_spec,
     build_prediction_engine_spec,
+    build_prediction_learner_spec,
     build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
@@ -128,8 +130,17 @@ def make_predictor_spec(
         engine_spec=build_prediction_engine_spec(
             key=f"engine__{predictor_key}",
             label=f"{label} linear",
-            learner_kind="linear_regression",
-            combiner_kind="learner_only",
+            signal_source_spec=None,
+            learner_spec=build_prediction_learner_spec(
+                key=f"learner__{predictor_key}",
+                label=f"{label} linear learner",
+                kind="linear_regression",
+            ),
+            combiner_spec=build_prediction_combiner_spec(
+                key=f"combiner__{predictor_key}",
+                label=f"{label} learner only",
+                kind="learner_only",
+            ),
         ),
         training_spec=build_training_spec(
             key=f"training__{predictor_key}",

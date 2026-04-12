@@ -11,9 +11,9 @@ from app.portfolio import (
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_calibration_spec,
-    build_predictor_decision_context_spec,
+    build_decision_use_spec,
     build_prediction_model_spec,
-    build_prediction_task_spec,
+    build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_ranking_feature_recipe_spec,
@@ -32,13 +32,11 @@ DEFAULT_PREDICTION_TARGET_SPECS = [
     build_prediction_target_spec(
         key="next_5bar_excess_return",
         label="次の5bar超過収益",
-        kind="forward_excess_return",
         horizon_spec={"unit": "bars", "value": 5},
     ),
     build_prediction_target_spec(
         key="next_10bar_excess_return",
         label="次の10bar超過収益",
-        kind="forward_excess_return",
         horizon_spec={"unit": "bars", "value": 10},
     ),
 ]
@@ -84,10 +82,11 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
                 investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-                task_spec=build_prediction_task_spec(
-                    key="task__cross_sectional_alpha",
-                    label="Cross-sectional alpha forecast",
-                    kind="cross_sectional_alpha_forecast",
+                predicted_quantity_spec=build_predicted_quantity_spec(
+                    key="quantity__forward_excess_return",
+                    label="Forward excess return",
+                    kind="forward_excess_return",
+                    baseline="cross_sectional_mean",
                 ),
                 target_spec=target_spec,
                 feature_spec=feature_spec,
@@ -104,7 +103,7 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     kind="standardized_score",
                     scope="cross_sectional",
                 ),
-                decision_context_spec=build_predictor_decision_context_spec(
+                decision_use_spec=build_decision_use_spec(
                     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M
                 ),
             ))

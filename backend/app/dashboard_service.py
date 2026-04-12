@@ -988,6 +988,7 @@ def compact_predictor_run_record(record: dict) -> dict:
     run_spec = record["runSpec"]
     result = record["result"]
     predictor = run_spec.get("strategy", {}).get("predictor", {})
+    predicted_quantity = predictor.get("predictedQuantitySpec", {})
     target = predictor.get("targetSpec", {})
     horizon = target.get("horizonSpec", {})
     feature = predictor.get("featureSpec", {})
@@ -1007,7 +1008,8 @@ def compact_predictor_run_record(record: dict) -> dict:
         "trainingMinSamples": training.get("minTrainSamples"),
         "timeframe": predictor.get("timeframe", {}).get("key"),
         "targetKey": target.get("key"),
-        "targetKind": target.get("targetKind"),
+        "predictedQuantityKind": predicted_quantity.get("quantityKind"),
+        "predictedQuantityBaseline": predicted_quantity.get("baseline"),
         "horizonUnit": horizon.get("unit"),
         "horizonValue": horizon.get("value"),
         "period": run_spec.get("marketSlice", {}).get("period"),

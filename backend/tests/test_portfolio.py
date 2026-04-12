@@ -6,9 +6,9 @@ from app.portfolio import (
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_calibration_spec,
-    build_predictor_decision_context_spec,
+    build_decision_use_spec,
     build_prediction_model_spec,
-    build_prediction_task_spec,
+    build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_predictor_use_spec,
@@ -100,15 +100,15 @@ def make_predictor_spec(
         description=strategy.description,
         timeframe=strategy.timeframe,
         investment_universe=strategy.investment_universe,
-        task_spec=build_prediction_task_spec(
-            key=f"task__{predictor_key}",
-            label=f"{label} task",
-            kind="cross_sectional_alpha_forecast",
+        predicted_quantity_spec=build_predicted_quantity_spec(
+            key=f"quantity__{predictor_key}",
+            label=f"{label} quantity",
+            kind="forward_excess_return",
+            baseline="cross_sectional_mean",
         ),
         target_spec=build_prediction_target_spec(
             key=f"{predictor_key}__target",
             label=label,
-            kind="forward_excess_return",
             horizon_spec={"unit": "bars", "value": horizon_bars},
         ),
         feature_spec=build_feature_spec(
@@ -141,7 +141,7 @@ def make_predictor_spec(
             kind="standardized_score",
             scope="cross_sectional",
         ),
-        decision_context_spec=build_predictor_decision_context_spec(strategy.selection),
+        decision_use_spec=build_decision_use_spec(strategy.selection),
     )
 
 

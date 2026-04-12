@@ -204,10 +204,11 @@ class CandidateSetSpec:
 
 
 @dataclass(frozen=True)
-class PredictorDecisionContextSpec:
+class DecisionUseSpec:
     key: str
     label: str
     description: str
+    kind: str
     candidate_set_spec: CandidateSetSpec
 
 
@@ -225,16 +226,15 @@ class AssetRankingSpec:
 class PredictionTargetSpec:
     key: str
     label: str
-    kind: str
     horizon_spec: tuple[tuple[str, object], ...]
-    baseline: str
 
 
 @dataclass(frozen=True)
-class PredictionTaskSpec:
+class PredictedQuantitySpec:
     key: str
     label: str
     kind: str
+    baseline: str
 
 
 @dataclass(frozen=True)
@@ -291,13 +291,13 @@ class PredictorSpec:
     description: str
     timeframe: TimeframeSpec
     investment_universe: InvestmentUniverseSpec
-    task_spec: PredictionTaskSpec
+    predicted_quantity_spec: PredictedQuantitySpec
     target_spec: PredictionTargetSpec
     feature_spec: FeatureSpec
     model_spec: PredictionModelSpec
     training_spec: TrainingSpec
     calibration_spec: PredictionCalibrationSpec
-    decision_context_spec: PredictorDecisionContextSpec
+    decision_use_spec: DecisionUseSpec
 
 
 @dataclass(frozen=True)
@@ -770,26 +770,28 @@ def serialize_candidate_set_spec(candidate_set_spec: CandidateSetSpec) -> dict:
     }
 
 
-def build_predictor_decision_context_spec(selection: SelectionSpec) -> PredictorDecisionContextSpec:
+def build_decision_use_spec(selection: SelectionSpec) -> DecisionUseSpec:
     candidate_set_spec = build_candidate_set_spec(selection)
-    return PredictorDecisionContextSpec(
-        key=f"decision_context__{selection.key}",
-        label=candidate_set_spec.label,
+    return DecisionUseSpec(
+        key=f"decision_use__{selection.key}",
+        label="Candidate ranking signal",
         description=selection.description,
+        kind="candidate_ranking_signal",
         candidate_set_spec=candidate_set_spec,
     )
 
 
-def serialize_predictor_decision_context_spec(
-    decision_context_spec: PredictorDecisionContextSpec,
+def serialize_decision_use_spec(
+    decision_use_spec: DecisionUseSpec,
 ) -> dict:
     return {
-        "kind": "predictor_decision_context_spec",
+        "kind": "decision_use_spec",
         "schemaVersion": "v1",
-        "key": decision_context_spec.key,
-        "label": decision_context_spec.label,
-        "description": decision_context_spec.description,
-        "candidateSet": serialize_candidate_set_spec(decision_context_spec.candidate_set_spec),
+        "key": decision_use_spec.key,
+        "label": decision_use_spec.label,
+        "description": decision_use_spec.description,
+        "useKind": decision_use_spec.kind,
+        "candidateSet": serialize_candidate_set_spec(decision_use_spec.candidate_set_spec),
     }
 
 
@@ -1035,18 +1037,12 @@ def build_prediction_target_spec(
     *,
     key: str,
     label: str,
-    kind: str,
     horizon_spec: dict[str, object],
-    baseline: str = "cross_sectional_mean",
 ) -> PredictionTargetSpec:
-    if kind not in {"forward_excess_return"}:
-        raise ValueError("Unsupported prediction target kind.")
     return PredictionTargetSpec(
         key=key,
         label=label,
-        kind=kind,
         horizon_spec=tuple(sorted(horizon_spec.items())),
-        baseline=baseline,
     )
 
 
@@ -1058,38 +1054,41 @@ def serialize_prediction_target_spec(
         "schemaVersion": "v1",
         "key": target_spec.key,
         "label": target_spec.label,
-        "targetKind": target_spec.kind,
         "horizonSpec": {
             key: value for key, value in target_spec.horizon_spec
         },
-        "baseline": target_spec.baseline,
     }
 
 
-def build_prediction_task_spec(
+def build_predicted_quantity_spec(
     *,
     key: str,
     label: str,
     kind: str,
-) -> PredictionTaskSpec:
-    if kind not in {"cross_sectional_alpha_forecast"}:
-        raise ValueError("Unsupported prediction task kind.")
-    return PredictionTaskSpec(
+    baseline: str,
+) -> PredictedQuantitySpec:
+    if kind not in {"forward_excess_return", "market_regime"}:
+        raise ValueError("Unsupported predicted quantity kind.")
+    if baseline not in {"cross_sectional_mean", "none"}:
+        raise ValueError("Unsupported predicted quantity baseline.")
+    return PredictedQuantitySpec(
         key=key,
         label=label,
         kind=kind,
+        baseline=baseline,
     )
 
 
-def serialize_prediction_task_spec(
-    task_spec: PredictionTaskSpec,
+def serialize_predicted_quantity_spec(
+    predicted_quantity_spec: PredictedQuantitySpec,
 ) -> dict:
     return {
-        "kind": "prediction_task_spec",
+        "kind": "predicted_quantity_spec",
         "schemaVersion": "v1",
-        "key": task_spec.key,
-        "label": task_spec.label,
-        "taskKind": task_spec.kind,
+        "key": predicted_quantity_spec.key,
+        "label": predicted_quantity_spec.label,
+        "quantityKind": predicted_quantity_spec.kind,
+        "baseline": predicted_quantity_spec.baseline,
     }
 
 
@@ -1252,13 +1251,13 @@ def build_predictor_spec(
     description: str,
     timeframe: TimeframeSpec,
     investment_universe: InvestmentUniverseSpec,
-    task_spec: PredictionTaskSpec,
+    predicted_quantity_spec: PredictedQuantitySpec,
     target_spec: PredictionTargetSpec,
     feature_spec: FeatureSpec,
     model_spec: PredictionModelSpec,
     training_spec: TrainingSpec,
     calibration_spec: PredictionCalibrationSpec,
-    decision_context_spec: PredictorDecisionContextSpec,
+    decision_use_spec: DecisionUseSpec,
 ) -> PredictorSpec:
     return PredictorSpec(
         key=key,
@@ -1266,13 +1265,13 @@ def build_predictor_spec(
         description=description,
         timeframe=timeframe,
         investment_universe=investment_universe,
-        task_spec=task_spec,
+        predicted_quantity_spec=predicted_quantity_spec,
         target_spec=target_spec,
         feature_spec=feature_spec,
         model_spec=model_spec,
         training_spec=training_spec,
         calibration_spec=calibration_spec,
-        decision_context_spec=decision_context_spec,
+        decision_use_spec=decision_use_spec,
     )
 
 
@@ -1433,10 +1432,11 @@ def build_predictor_specs(
                         description=ranking_spec.description,
                         timeframe=ranking_spec.timeframe,
                         investment_universe=ranking_spec.investment_universe,
-                        task_spec=build_prediction_task_spec(
-                            key="task__cross_sectional_alpha",
-                            label="Cross-sectional alpha forecast",
-                            kind="cross_sectional_alpha_forecast",
+                        predicted_quantity_spec=build_predicted_quantity_spec(
+                            key="quantity__forward_excess_return",
+                            label="Forward excess return",
+                            kind="forward_excess_return",
+                            baseline="cross_sectional_mean",
                         ),
                         target_spec=target_spec,
                         feature_spec=feature_spec,
@@ -1453,7 +1453,7 @@ def build_predictor_specs(
                             kind="standardized_score",
                             scope="cross_sectional",
                         ),
-                        decision_context_spec=build_predictor_decision_context_spec(
+                        decision_use_spec=build_decision_use_spec(
                             ranking_spec.selection
                         ),
                     )
@@ -1502,14 +1502,16 @@ def serialize_predictor_spec(
             "assetCount": len(predictor_spec.investment_universe.tickers),
             "tickers": list(predictor_spec.investment_universe.tickers),
         },
-        "taskSpec": serialize_prediction_task_spec(predictor_spec.task_spec),
+        "predictedQuantitySpec": serialize_predicted_quantity_spec(
+            predictor_spec.predicted_quantity_spec
+        ),
         "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
         "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
         "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),
         "trainingSpec": serialize_training_spec(predictor_spec.training_spec),
         "calibrationSpec": serialize_prediction_calibration_spec(predictor_spec.calibration_spec),
-        "decisionContextSpec": serialize_predictor_decision_context_spec(
-            predictor_spec.decision_context_spec
+        "decisionUseSpec": serialize_decision_use_spec(
+            predictor_spec.decision_use_spec
         ),
     }
 
@@ -2255,10 +2257,10 @@ def compute_predictor_panel(
         aligned_features = aligned_features.loc[forward_returns.index]
         if len(aligned_features) < 2:
             continue
-        if predictor_spec.target_spec.baseline == "cross_sectional_mean":
+        if predictor_spec.predicted_quantity_spec.baseline == "cross_sectional_mean":
             target_values = forward_returns - float(forward_returns.mean())
         else:
-            raise ValueError("Unsupported prediction target baseline.")
+            raise ValueError("Unsupported predicted quantity baseline.")
         if target_values.nunique() < 2:
             continue
 
@@ -2477,10 +2479,10 @@ def evaluate_predictor_spec(
         if len(prediction_values) < 2 or prediction_values.nunique() < 2 or forward_returns.nunique() < 2:
             continue
 
-        if predictor_spec.target_spec.baseline == "cross_sectional_mean":
+        if predictor_spec.predicted_quantity_spec.baseline == "cross_sectional_mean":
             target_values = forward_returns - float(forward_returns.mean())
         else:
-            raise ValueError("Unsupported prediction target baseline.")
+            raise ValueError("Unsupported predicted quantity baseline.")
 
         if target_values.nunique() < 2:
             continue

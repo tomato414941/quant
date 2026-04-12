@@ -125,6 +125,9 @@ Predictor が予測したい対象そのもの。
 - 主な使い道は、銘柄順位そのものではなく、exposure 制御、risk budget 調整、Strategy 切り替え
 - したがって、将来的には `Predicted Quantity` や `Decision Use` の違いとして表現するのが自然
 
+参照:
+- 詳しい設計原則は [prediction-surface.md](/home/dev/projects/quant/docs/prediction-surface.md)
+
 ### Asset Ranking Model
 
 Feature から各資産の相対順位や相対的な持ちたさを作る層。  

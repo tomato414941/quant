@@ -665,6 +665,14 @@ def build_predictor_run_index_payload(
                 all_records,
                 group_fields=("signalSourceKind", "signalSourceFeatureKey"),
             ),
+            "bestBySignalSourceAndHorizon": summarize_predictor_record_groups(
+                all_records,
+                group_fields=("signalSourceKind", "signalSourceFeatureKey", "horizonValue"),
+            ),
+            "bestBySignalSourceAndPeriod": summarize_predictor_record_groups(
+                all_records,
+                group_fields=("signalSourceKind", "signalSourceFeatureKey", "period"),
+            ),
             "bestBySourceLearnerCombiner": summarize_predictor_record_groups(
                 all_records,
                 group_fields=(

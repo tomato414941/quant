@@ -660,6 +660,21 @@ def build_predictor_run_index_payload(
         "totalCount": len(all_records),
         "recordCount": len(records),
         "records": records,
+        "groupedSummaries": {
+            "bestBySignalSource": summarize_predictor_record_groups(
+                all_records,
+                group_fields=("signalSourceKind", "signalSourceFeatureKey"),
+            ),
+            "bestBySourceLearnerCombiner": summarize_predictor_record_groups(
+                all_records,
+                group_fields=(
+                    "signalSourceKind",
+                    "signalSourceFeatureKey",
+                    "learnerKind",
+                    "combinerKind",
+                ),
+            ),
+        },
     }
 
 
@@ -1000,6 +1015,62 @@ def sort_predictor_run_records(records: list[dict], *, sort_by: str) -> list[dic
             else float("-inf"),
             record.get("overallRankIc") if record.get("overallRankIc") is not None else float("-inf"),
             record["runKey"],
+        ),
+        reverse=True,
+    )
+
+
+def _metric_sort_value(record: dict, key: str) -> float:
+    value = record.get(key)
+    if value is None:
+        return float("-inf")
+    return float(value)
+
+
+def summarize_predictor_record_groups(
+    records: list[dict],
+    *,
+    group_fields: tuple[str, ...],
+) -> list[dict]:
+    grouped: dict[tuple[object, ...], list[dict]] = {}
+    for record in records:
+        group_key = tuple(record.get(field) for field in group_fields)
+        grouped.setdefault(group_key, []).append(record)
+
+    summaries: list[dict] = []
+    for group_key, group_records in grouped.items():
+        best_record = max(
+            group_records,
+            key=lambda record: (
+                _metric_sort_value(record, "testRankIc"),
+                _metric_sort_value(record, "testTopMinusBottomPct"),
+                _metric_sort_value(record, "overallRankIc"),
+                record["runKey"],
+            ),
+        )
+        summary = {
+            field: value for field, value in zip(group_fields, group_key, strict=False)
+        }
+        summary.update(
+            {
+                "recordCount": len(group_records),
+                "bestRunKey": best_record["runKey"],
+                "bestPredictorKey": best_record["predictorKey"],
+                "bestPredictorLabel": best_record["predictorLabel"],
+                "bestTestRankIc": best_record.get("testRankIc"),
+                "bestTestTopMinusBottomPct": best_record.get("testTopMinusBottomPct"),
+                "bestTestHitRatePct": best_record.get("testHitRatePct"),
+                "bestHorizonValue": best_record.get("horizonValue"),
+            }
+        )
+        summaries.append(summary)
+
+    return sorted(
+        summaries,
+        key=lambda summary: (
+            _metric_sort_value(summary, "bestTestRankIc"),
+            _metric_sort_value(summary, "bestTestTopMinusBottomPct"),
+            summary["bestRunKey"],
         ),
         reverse=True,
     )

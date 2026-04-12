@@ -316,6 +316,8 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["records"][0]["runKind"] == "predictor_run"
     assert "trainingFitMode" in index_payload["records"][0]
     assert "signalSourceKind" in index_payload["records"][0]
+    assert "groupedSummaries" in index_payload
+    assert "bestBySignalSource" in index_payload["groupedSummaries"]
     run_key = index_payload["records"][0]["runKey"]
 
     detail_response = client.get(f"/api/predictor-runs/{run_key}")
@@ -363,6 +365,11 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert all(
         record["signalSourceFeatureKey"] == "momentum"
         for record in signal_filtered_payload["records"]
+    )
+    assert any(
+        summary["signalSourceKind"] == "derived_feature"
+        and summary["signalSourceFeatureKey"] == "momentum"
+        for summary in signal_filtered_payload["groupedSummaries"]["bestBySignalSource"]
     )
 
     second_response = client.post("/api/predictor-runs")

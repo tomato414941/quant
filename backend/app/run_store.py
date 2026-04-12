@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v52"
+RUN_STORE_LOGIC_VERSION = "v53"
 
 
 @dataclass(frozen=True)

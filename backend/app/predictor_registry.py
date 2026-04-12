@@ -21,7 +21,6 @@ from app.portfolio import (
     build_predictor_spec,
     build_ranking_feature_recipe_spec,
     build_training_spec,
-    extract_ranking_score_parameters,
 )
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME
 
@@ -50,7 +49,6 @@ DEFAULT_PREDICTION_TARGET_SPECS = [
 
 
 def _build_registered_predictors() -> list[PredictorSpec]:
-    ranking_parameters = extract_ranking_score_parameters(FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M)
     feature_spec = build_feature_spec(
         key="features__pred-fu-momo2-supplement",
         label="2ヶ月モメンタム supplement features",
@@ -96,29 +94,39 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 kind="learner_only",
             ),
         ),
-        build_prediction_engine_spec(
-            key="engine__pred-fu-momo2-supplement-momentum-blend",
-            label="2ヶ月モメンタム supplement momentum blend",
-            signal_source_spec=build_prediction_signal_source_spec(
-                key="signal-source__pred-fu-momo2-supplement-momentum",
-                label="Momentum signal source",
-                kind="derived_feature",
-                feature_key="momentum",
-            ),
-            learner_spec=build_prediction_learner_spec(
-                key="learner__pred-fu-momo2-supplement-linear-blend",
-                label="2ヶ月モメンタム supplement linear learner",
-                kind="linear_regression",
-            ),
-            combiner_spec=build_prediction_combiner_spec(
-                key="combiner__pred-fu-momo2-supplement-weighted-blend",
-                label="Weighted blend",
-                kind="weighted_blend",
-                signal_source_weight=0.7,
-                learner_weight=0.3,
-            ),
-        ),
     ]
+    for signal_source_weight, learner_weight in ((0.9, 0.1), (0.7, 0.3), (0.5, 0.5)):
+        weight_key = f"{int(signal_source_weight * 100):02d}-{int(learner_weight * 100):02d}"
+        engine_specs.append(
+            build_prediction_engine_spec(
+                key=f"engine__pred-fu-momo2-supplement-momentum-blend-{weight_key}",
+                label=(
+                    "2ヶ月モメンタム supplement momentum blend "
+                    f"{int(signal_source_weight * 100)}/{int(learner_weight * 100)}"
+                ),
+                signal_source_spec=build_prediction_signal_source_spec(
+                    key="signal-source__pred-fu-momo2-supplement-momentum",
+                    label="Momentum signal source",
+                    kind="derived_feature",
+                    feature_key="momentum",
+                ),
+                learner_spec=build_prediction_learner_spec(
+                    key="learner__pred-fu-momo2-supplement-linear-blend",
+                    label="2ヶ月モメンタム supplement linear learner",
+                    kind="linear_regression",
+                ),
+                combiner_spec=build_prediction_combiner_spec(
+                    key=f"combiner__pred-fu-momo2-supplement-weighted-blend-{weight_key}",
+                    label=(
+                        "Weighted blend "
+                        f"{int(signal_source_weight * 100)}/{int(learner_weight * 100)}"
+                    ),
+                    kind="weighted_blend",
+                    signal_source_weight=signal_source_weight,
+                    learner_weight=learner_weight,
+                ),
+            )
+        )
     target_specs = DEFAULT_PREDICTION_TARGET_SPECS
     predictor_specs: list[PredictorSpec] = []
     for engine_spec in engine_specs:
@@ -132,10 +140,15 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     signal_source_suffix = "-ranking-signal"
                 elif engine_spec.signal_source_spec.feature_key is not None:
                     signal_source_suffix = f"-{engine_spec.signal_source_spec.feature_key}"
+            combiner_weight_suffix = ""
+            if engine_spec.combiner_spec.kind == "weighted_blend":
+                signal_source_weight = int((engine_spec.combiner_spec.signal_source_weight or 0) * 100)
+                learner_weight = int((engine_spec.combiner_spec.learner_weight or 0) * 100)
+                combiner_weight_suffix = f"-{signal_source_weight:02d}{learner_weight:02d}"
             predictor_specs.append(build_predictor_spec(
                 key=(
                     f"pred-fu-momo2-supplement-{horizon_value}bar-"
-                    f"{learner_suffix}{signal_source_suffix}-{combiner_suffix}"
+                    f"{learner_suffix}{signal_source_suffix}-{combiner_suffix}{combiner_weight_suffix}"
                 ),
                 label=f"2ヶ月モメンタム / {target_spec.label} / {engine_spec.label}",
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",

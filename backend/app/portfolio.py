@@ -235,7 +235,6 @@ class PredictionTaskSpec:
     key: str
     label: str
     kind: str
-    parameters: tuple[tuple[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1072,7 +1071,6 @@ def build_prediction_task_spec(
     key: str,
     label: str,
     kind: str,
-    parameters: dict[str, object] | None = None,
 ) -> PredictionTaskSpec:
     if kind not in {"cross_sectional_alpha_forecast"}:
         raise ValueError("Unsupported prediction task kind.")
@@ -1080,7 +1078,6 @@ def build_prediction_task_spec(
         key=key,
         label=label,
         kind=kind,
-        parameters=tuple(sorted((parameters or {}).items())),
     )
 
 
@@ -1093,9 +1090,6 @@ def serialize_prediction_task_spec(
         "key": task_spec.key,
         "label": task_spec.label,
         "taskKind": task_spec.kind,
-        "parameters": {
-            key: value for key, value in task_spec.parameters
-        },
     }
 
 

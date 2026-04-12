@@ -219,8 +219,6 @@ class AssetRankingSpec:
     timeframe: TimeframeSpec
     investment_universe: InvestmentUniverseSpec
     selection: SelectionSpec
-    source_strategy_keys: tuple[str, ...]
-    source_strategy_labels: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -1031,8 +1029,6 @@ def serialize_asset_ranking_spec(
             "key": selection.fallback_rule.key,
             "label": selection.fallback_rule.label,
         },
-        "sourceStrategyKeys": list(ranking_spec.source_strategy_keys),
-        "sourceStrategyLabels": list(ranking_spec.source_strategy_labels),
     }
 
 
@@ -1388,8 +1384,6 @@ def build_asset_ranking_specs(
                 timeframe=strategies[0].timeframe,
                 investment_universe=strategies[0].investment_universe,
                 selection=representative,
-                source_strategy_keys=tuple(strategy.key for strategy in strategies),
-                source_strategy_labels=tuple(strategy.label for strategy in strategies),
             )
         )
 

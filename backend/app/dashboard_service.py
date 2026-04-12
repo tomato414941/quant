@@ -1009,7 +1009,7 @@ def compact_predictor_run_record(record: dict) -> dict:
         "timeframe": predictor.get("timeframe", {}).get("key"),
         "targetKey": target.get("key"),
         "predictedQuantityKind": predicted_quantity.get("quantityKind"),
-        "predictedQuantityBaseline": predicted_quantity.get("baseline"),
+        "targetBaseline": target.get("baseline"),
         "horizonUnit": horizon.get("unit"),
         "horizonValue": horizon.get("value"),
         "period": run_spec.get("marketSlice", {}).get("period"),

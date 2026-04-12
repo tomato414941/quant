@@ -33,11 +33,13 @@ DEFAULT_PREDICTION_TARGET_SPECS = [
         key="next_5bar_excess_return",
         label="次の5bar超過収益",
         horizon_spec={"unit": "bars", "value": 5},
+        baseline="cross_sectional_mean",
     ),
     build_prediction_target_spec(
         key="next_10bar_excess_return",
         label="次の10bar超過収益",
         horizon_spec={"unit": "bars", "value": 10},
+        baseline="cross_sectional_mean",
     ),
 ]
 
@@ -83,10 +85,9 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
                 investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
                 predicted_quantity_spec=build_predicted_quantity_spec(
-                    key="quantity__forward_excess_return",
-                    label="Forward excess return",
-                    kind="forward_excess_return",
-                    baseline="cross_sectional_mean",
+                    key="quantity__return",
+                    label="Return",
+                    kind="return",
                 ),
                 target_spec=target_spec,
                 feature_spec=feature_spec,

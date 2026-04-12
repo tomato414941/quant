@@ -103,13 +103,13 @@ def make_predictor_spec(
         predicted_quantity_spec=build_predicted_quantity_spec(
             key=f"quantity__{predictor_key}",
             label=f"{label} quantity",
-            kind="forward_excess_return",
-            baseline="cross_sectional_mean",
+            kind="return",
         ),
         target_spec=build_prediction_target_spec(
             key=f"{predictor_key}__target",
             label=label,
             horizon_spec={"unit": "bars", "value": horizon_bars},
+            baseline="cross_sectional_mean",
         ),
         feature_spec=build_feature_spec(
             key=f"features__{predictor_key}",

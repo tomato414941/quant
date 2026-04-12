@@ -227,6 +227,7 @@ class PredictionTargetSpec:
     key: str
     label: str
     horizon_spec: tuple[tuple[str, object], ...]
+    baseline: str
 
 
 @dataclass(frozen=True)
@@ -234,7 +235,6 @@ class PredictedQuantitySpec:
     key: str
     label: str
     kind: str
-    baseline: str
 
 
 @dataclass(frozen=True)
@@ -1038,11 +1038,15 @@ def build_prediction_target_spec(
     key: str,
     label: str,
     horizon_spec: dict[str, object],
+    baseline: str,
 ) -> PredictionTargetSpec:
+    if baseline not in {"cross_sectional_mean", "none"}:
+        raise ValueError("Unsupported prediction target baseline.")
     return PredictionTargetSpec(
         key=key,
         label=label,
         horizon_spec=tuple(sorted(horizon_spec.items())),
+        baseline=baseline,
     )
 
 
@@ -1057,6 +1061,7 @@ def serialize_prediction_target_spec(
         "horizonSpec": {
             key: value for key, value in target_spec.horizon_spec
         },
+        "baseline": target_spec.baseline,
     }
 
 
@@ -1065,17 +1070,13 @@ def build_predicted_quantity_spec(
     key: str,
     label: str,
     kind: str,
-    baseline: str,
 ) -> PredictedQuantitySpec:
-    if kind not in {"forward_excess_return", "market_regime"}:
+    if kind not in {"return", "market_regime"}:
         raise ValueError("Unsupported predicted quantity kind.")
-    if baseline not in {"cross_sectional_mean", "none"}:
-        raise ValueError("Unsupported predicted quantity baseline.")
     return PredictedQuantitySpec(
         key=key,
         label=label,
         kind=kind,
-        baseline=baseline,
     )
 
 
@@ -1088,7 +1089,6 @@ def serialize_predicted_quantity_spec(
         "key": predicted_quantity_spec.key,
         "label": predicted_quantity_spec.label,
         "quantityKind": predicted_quantity_spec.kind,
-        "baseline": predicted_quantity_spec.baseline,
     }
 
 
@@ -1433,10 +1433,9 @@ def build_predictor_specs(
                         timeframe=ranking_spec.timeframe,
                         investment_universe=ranking_spec.investment_universe,
                         predicted_quantity_spec=build_predicted_quantity_spec(
-                            key="quantity__forward_excess_return",
-                            label="Forward excess return",
-                            kind="forward_excess_return",
-                            baseline="cross_sectional_mean",
+                            key="quantity__return",
+                            label="Return",
+                            kind="return",
                         ),
                         target_spec=target_spec,
                         feature_spec=feature_spec,
@@ -2257,10 +2256,10 @@ def compute_predictor_panel(
         aligned_features = aligned_features.loc[forward_returns.index]
         if len(aligned_features) < 2:
             continue
-        if predictor_spec.predicted_quantity_spec.baseline == "cross_sectional_mean":
+        if predictor_spec.target_spec.baseline == "cross_sectional_mean":
             target_values = forward_returns - float(forward_returns.mean())
         else:
-            raise ValueError("Unsupported predicted quantity baseline.")
+            raise ValueError("Unsupported prediction target baseline.")
         if target_values.nunique() < 2:
             continue
 
@@ -2479,10 +2478,10 @@ def evaluate_predictor_spec(
         if len(prediction_values) < 2 or prediction_values.nunique() < 2 or forward_returns.nunique() < 2:
             continue
 
-        if predictor_spec.predicted_quantity_spec.baseline == "cross_sectional_mean":
+        if predictor_spec.target_spec.baseline == "cross_sectional_mean":
             target_values = forward_returns - float(forward_returns.mean())
         else:
-            raise ValueError("Unsupported predicted quantity baseline.")
+            raise ValueError("Unsupported prediction target baseline.")
 
         if target_values.nunique() < 2:
             continue

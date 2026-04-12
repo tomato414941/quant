@@ -15,6 +15,7 @@ from app.portfolio import (
     build_decision_use_spec,
     build_prediction_engine_spec,
     build_prediction_learner_spec,
+    build_prediction_signal_source_spec,
     build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
@@ -95,6 +96,28 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 kind="learner_only",
             ),
         ),
+        build_prediction_engine_spec(
+            key="engine__pred-fu-momo2-supplement-momentum-blend",
+            label="2ヶ月モメンタム supplement momentum blend",
+            signal_source_spec=build_prediction_signal_source_spec(
+                key="signal-source__pred-fu-momo2-supplement-momentum",
+                label="Momentum signal source",
+                kind="derived_feature",
+                feature_key="momentum",
+            ),
+            learner_spec=build_prediction_learner_spec(
+                key="learner__pred-fu-momo2-supplement-linear-blend",
+                label="2ヶ月モメンタム supplement linear learner",
+                kind="linear_regression",
+            ),
+            combiner_spec=build_prediction_combiner_spec(
+                key="combiner__pred-fu-momo2-supplement-weighted-blend",
+                label="Weighted blend",
+                kind="weighted_blend",
+                signal_source_weight=0.7,
+                learner_weight=0.3,
+            ),
+        ),
     ]
     target_specs = DEFAULT_PREDICTION_TARGET_SPECS
     predictor_specs: list[PredictorSpec] = []
@@ -103,8 +126,17 @@ def _build_registered_predictors() -> list[PredictorSpec]:
             horizon_value = _horizon_value(target_spec)
             learner_suffix = engine_spec.learner_spec.kind.replace("_regression", "")
             combiner_suffix = engine_spec.combiner_spec.kind.replace("_only", "")
+            signal_source_suffix = ""
+            if engine_spec.signal_source_spec is not None:
+                if engine_spec.signal_source_spec.kind == "ranking_signal":
+                    signal_source_suffix = "-ranking-signal"
+                elif engine_spec.signal_source_spec.feature_key is not None:
+                    signal_source_suffix = f"-{engine_spec.signal_source_spec.feature_key}"
             predictor_specs.append(build_predictor_spec(
-                key=f"pred-fu-momo2-supplement-{horizon_value}bar-{learner_suffix}-{combiner_suffix}",
+                key=(
+                    f"pred-fu-momo2-supplement-{horizon_value}bar-"
+                    f"{learner_suffix}{signal_source_suffix}-{combiner_suffix}"
+                ),
                 label=f"2ヶ月モメンタム / {target_spec.label} / {engine_spec.label}",
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,

@@ -264,6 +264,7 @@ class PredictionSignalSourceSpec:
     key: str
     label: str
     kind: str
+    feature_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1214,11 +1215,21 @@ def build_prediction_signal_source_spec(
     *,
     key: str,
     label: str,
+    kind: str = "ranking_signal",
+    feature_key: str | None = None,
 ) -> PredictionSignalSourceSpec:
+    if kind not in {"ranking_signal", "derived_feature"}:
+        raise ValueError("Unsupported prediction signal source kind.")
+    if kind == "derived_feature":
+        if feature_key not in PREDICTION_FEATURE_NAMES:
+            raise ValueError("Unsupported prediction signal source feature key.")
+    elif feature_key is not None:
+        raise ValueError("feature_key is only supported for derived_feature signal sources.")
     return PredictionSignalSourceSpec(
         key=key,
         label=label,
-        kind="ranking_signal",
+        kind=kind,
+        feature_key=feature_key,
     )
 
 
@@ -1231,6 +1242,7 @@ def serialize_prediction_signal_source_spec(
         "key": signal_source_spec.key,
         "label": signal_source_spec.label,
         "signalSourceKind": signal_source_spec.kind,
+        "featureKey": signal_source_spec.feature_key,
     }
 
 
@@ -2399,8 +2411,18 @@ def compute_predictor_panel(
             continue
 
         signal_source_values: pd.Series | None = None
-        if predictor_spec.engine_spec.signal_source_spec is not None:
-            signal_source_values = selected_scores
+        signal_source_spec = predictor_spec.engine_spec.signal_source_spec
+        if signal_source_spec is not None:
+            if signal_source_spec.kind == "ranking_signal":
+                signal_source_values = selected_scores
+            elif signal_source_spec.feature_key is not None:
+                candidate_signal_values = (
+                    feature_frame.loc[selected_scores.index, signal_source_spec.feature_key]
+                    .astype("float64")
+                    .dropna()
+                )
+                if len(candidate_signal_values) >= 2 and candidate_signal_values.nunique() >= 2:
+                    signal_source_values = candidate_signal_values
 
         learner_prediction_values: pd.Series | None = None
         learner_spec = predictor_spec.engine_spec.learner_spec

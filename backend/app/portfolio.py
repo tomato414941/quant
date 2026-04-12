@@ -262,11 +262,12 @@ class FeatureSpec:
 @dataclass(frozen=True)
 class PredictionEngineSpec:
     key: str
-    kind: str
     label: str
+    learner_kind: str
+    combiner_kind: str
     ridge_alpha: float | None = None
-    signal_weight: float | None = None
-    linear_weight: float | None = None
+    baseline_signal_weight: float | None = None
+    learner_weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1190,24 +1191,38 @@ def serialize_feature_spec(
 def build_prediction_engine_spec(
     *,
     key: str,
-    kind: str,
     label: str,
+    learner_kind: str,
+    combiner_kind: str,
     ridge_alpha: float | None = None,
-    signal_weight: float | None = None,
-    linear_weight: float | None = None,
+    baseline_signal_weight: float | None = None,
+    learner_weight: float | None = None,
 ) -> PredictionEngineSpec:
-    if kind == "ridge_regression" and ridge_alpha is None:
+    if learner_kind not in {"none", "linear_regression", "ridge_regression"}:
+        raise ValueError("Unsupported prediction engine learner kind.")
+    if combiner_kind not in {"baseline_signal_only", "learner_only", "weighted_blend"}:
+        raise ValueError("Unsupported prediction engine combiner kind.")
+    if learner_kind == "ridge_regression" and ridge_alpha is None:
         raise ValueError("ridge_alpha is required for ridge_regression.")
-    if kind == "blended_signal":
-        if signal_weight is None or linear_weight is None:
-            raise ValueError("signal_weight and linear_weight are required for blended_signal.")
+    if learner_kind == "none" and combiner_kind != "baseline_signal_only":
+        raise ValueError("learner_kind=none requires baseline_signal_only combiner.")
+    if combiner_kind == "learner_only" and learner_kind == "none":
+        raise ValueError("learner_only combiner requires a learner.")
+    if combiner_kind == "weighted_blend":
+        if learner_kind == "none":
+            raise ValueError("weighted_blend combiner requires a learner.")
+        if baseline_signal_weight is None or learner_weight is None:
+            raise ValueError(
+                "baseline_signal_weight and learner_weight are required for weighted_blend."
+            )
     return PredictionEngineSpec(
         key=key,
-        kind=kind,
         label=label,
+        learner_kind=learner_kind,
+        combiner_kind=combiner_kind,
         ridge_alpha=ridge_alpha,
-        signal_weight=signal_weight,
-        linear_weight=linear_weight,
+        baseline_signal_weight=baseline_signal_weight,
+        learner_weight=learner_weight,
     )
 
 
@@ -1297,11 +1312,12 @@ def serialize_prediction_engine_spec(
         "kind": "prediction_engine_spec",
         "schemaVersion": "v1",
         "key": engine_spec.key,
-        "engineKind": engine_spec.kind,
         "label": engine_spec.label,
+        "learnerKind": engine_spec.learner_kind,
+        "combinerKind": engine_spec.combiner_kind,
         "ridgeAlpha": engine_spec.ridge_alpha,
-        "signalWeight": engine_spec.signal_weight,
-        "linearWeight": engine_spec.linear_weight,
+        "baselineSignalWeight": engine_spec.baseline_signal_weight,
+        "learnerWeight": engine_spec.learner_weight,
     }
 
 
@@ -1422,27 +1438,33 @@ def build_predictor_specs(
         engine_specs = [
             build_prediction_engine_spec(
                 key=f"engine__{ranking_spec.key}__signal",
-                kind="ranking_signal",
                 label=f"{ranking_spec.selection.score_model.label} signal",
+                learner_kind="none",
+                combiner_kind="baseline_signal_only",
             ),
             build_prediction_engine_spec(
                 key=f"engine__{ranking_spec.key}__linear",
-                kind="linear_regression",
                 label=f"{ranking_spec.selection.score_model.label} linear",
+                learner_kind="linear_regression",
+                combiner_kind="learner_only",
             ),
             build_prediction_engine_spec(
                 key=f"engine__{ranking_spec.key}__blend",
-                kind="blended_signal",
                 label=f"{ranking_spec.selection.score_model.label} blend",
-                signal_weight=0.8,
-                linear_weight=0.2,
+                learner_kind="linear_regression",
+                combiner_kind="weighted_blend",
+                baseline_signal_weight=0.8,
+                learner_weight=0.2,
             ),
         ]
         for target_spec in target_specs:
             for engine_spec in engine_specs:
                 predictor_specs.append(
                     build_predictor_spec(
-                        key=f"prediction__{ranking_spec.key}__{engine_spec.kind}__{target_spec.key}",
+                        key=(
+                            f"prediction__{ranking_spec.key}__"
+                            f"{engine_spec.learner_kind}__{engine_spec.combiner_kind}__{target_spec.key}"
+                        ),
                         label=f"{ranking_spec.label} / {engine_spec.label} -> {target_spec.label}",
                         description=ranking_spec.description,
                         timeframe=ranking_spec.timeframe,
@@ -1456,7 +1478,10 @@ def build_predictor_specs(
                         feature_spec=feature_spec,
                         engine_spec=engine_spec,
                         training_spec=build_training_spec(
-                            key=f"training__{ranking_spec.key}__{engine_spec.kind}",
+                            key=(
+                                f"training__{ranking_spec.key}__"
+                                f"{engine_spec.learner_kind}__{engine_spec.combiner_kind}"
+                            ),
                             label=f"{ranking_spec.selection.score_model.label} training",
                             fit_mode="expanding",
                             min_train_samples=50,
@@ -2185,8 +2210,8 @@ def compute_predictor_panel(
     xty = np.zeros(feature_count + 1, dtype="float64")
     train_sample_count = 0
     min_train_samples = predictor_spec.training_spec.min_train_samples
-    signal_weight = float(predictor_spec.engine_spec.signal_weight or 0.8)
-    linear_weight = float(predictor_spec.engine_spec.linear_weight or 0.2)
+    baseline_signal_weight = float(predictor_spec.engine_spec.baseline_signal_weight or 0.8)
+    learner_weight = float(predictor_spec.engine_spec.learner_weight or 0.2)
 
     for index in range(2, len(scoped_returns)):
         history_returns = scoped_returns.iloc[:index]
@@ -2222,36 +2247,41 @@ def compute_predictor_panel(
         if len(aligned_features) < 2:
             continue
 
+        learner_prediction_values: pd.Series | None = None
+        if (
+            predictor_spec.engine_spec.learner_kind in {"linear_regression", "ridge_regression"}
+            and train_sample_count >= min_train_samples
+        ):
+            design_matrix = np.column_stack(
+                [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
+            )
+            if predictor_spec.engine_spec.learner_kind == "ridge_regression":
+                ridge_alpha = float(predictor_spec.engine_spec.ridge_alpha or 1.0)
+                penalty = np.eye(xtx.shape[0], dtype="float64") * ridge_alpha
+                penalty[0, 0] = 0.0
+                beta = np.linalg.pinv(xtx + penalty) @ xty
+            else:
+                beta = np.linalg.pinv(xtx) @ xty
+            learner_prediction_values = pd.Series(
+                design_matrix @ beta,
+                index=aligned_features.index,
+                dtype="float64",
+            )
+            if learner_prediction_values.nunique() < 2:
+                learner_prediction_values = None
+
         prediction_values: pd.Series | None = None
-        if predictor_spec.engine_spec.kind == "ranking_signal":
+        if predictor_spec.engine_spec.combiner_kind == "baseline_signal_only":
             prediction_values = selected_scores
-        elif predictor_spec.engine_spec.kind in {"linear_regression", "ridge_regression", "blended_signal"}:
-            if train_sample_count >= min_train_samples:
-                design_matrix = np.column_stack(
-                    [np.ones(len(aligned_features), dtype="float64"), aligned_features.to_numpy(dtype="float64")]
-                )
-                if predictor_spec.engine_spec.kind == "ridge_regression":
-                    ridge_alpha = float(predictor_spec.engine_spec.ridge_alpha or 1.0)
-                    penalty = np.eye(xtx.shape[0], dtype="float64") * ridge_alpha
-                    penalty[0, 0] = 0.0
-                    beta = np.linalg.pinv(xtx + penalty) @ xty
-                else:
-                    beta = np.linalg.pinv(xtx) @ xty
-                linear_prediction_values = pd.Series(
-                    design_matrix @ beta,
-                    index=aligned_features.index,
-                    dtype="float64",
-                )
-                if linear_prediction_values.nunique() >= 2:
-                    if predictor_spec.engine_spec.kind in {"linear_regression", "ridge_regression"}:
-                        prediction_values = linear_prediction_values
-                    else:
-                        blended = (
-                            signal_weight * standardize_prediction_series(selected_scores)
-                            + linear_weight * standardize_prediction_series(linear_prediction_values)
-                        )
-                        if blended.nunique() >= 2:
-                            prediction_values = blended
+        elif predictor_spec.engine_spec.combiner_kind == "learner_only":
+            prediction_values = learner_prediction_values
+        elif learner_prediction_values is not None:
+            blended = (
+                baseline_signal_weight * standardize_prediction_series(selected_scores)
+                + learner_weight * standardize_prediction_series(learner_prediction_values)
+            )
+            if blended.nunique() >= 2:
+                prediction_values = blended
 
         if prediction_values is not None:
             prediction_panel.loc[scoped_returns.index[index], prediction_values.index] = prediction_values.to_numpy(

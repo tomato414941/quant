@@ -452,7 +452,7 @@ CANONICAL_CANDIDATE_STRATEGIES = [
             execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
             risk_controls=DEFAULT_RISK_CONTROLS,
             predictor_use=build_predictor_use_spec(
-                predictor_key="pred-fu-momo2-supplement-5bar-linear",
+                predictor_key="pred-fu-momo2-supplement-5bar-linear-learner",
                 signal_weight=0.8,
                 predictor_weight=0.2,
             ),

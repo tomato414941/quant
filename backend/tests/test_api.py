@@ -327,17 +327,20 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     filtered_response = client.get(
         "/api/predictor-runs",
         params={
-            "engine_kind": "linear_regression",
+            "learner_kind": "linear_regression",
+            "combiner_kind": "learner_only",
             "horizon_value": 5,
             "sort_by": "test_top_minus_bottom",
         },
     )
     assert filtered_response.status_code == 200
     filtered_payload = filtered_response.json()
-    assert filtered_payload["filters"]["engineKind"] == "linear_regression"
+    assert filtered_payload["filters"]["learnerKind"] == "linear_regression"
+    assert filtered_payload["filters"]["combinerKind"] == "learner_only"
     assert filtered_payload["filters"]["horizonValue"] == 5
     assert filtered_payload["sortBy"] == "test_top_minus_bottom"
-    assert all(record["engineKind"] == "linear_regression" for record in filtered_payload["records"])
+    assert all(record["learnerKind"] == "linear_regression" for record in filtered_payload["records"])
+    assert all(record["combinerKind"] == "learner_only" for record in filtered_payload["records"])
     assert all(record["horizonValue"] == 5 for record in filtered_payload["records"])
 
     second_response = client.post("/api/predictor-runs")

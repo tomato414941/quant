@@ -127,8 +127,9 @@ def make_predictor_spec(
         ),
         engine_spec=build_prediction_engine_spec(
             key=f"engine__{predictor_key}",
-            kind="linear_regression",
             label=f"{label} linear",
+            learner_kind="linear_regression",
+            combiner_kind="learner_only",
         ),
         training_spec=build_training_spec(
             key=f"training__{predictor_key}",

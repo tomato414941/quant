@@ -64,13 +64,15 @@ def _build_registered_predictors() -> list[PredictorSpec]:
     engine_specs = [
         build_prediction_engine_spec(
             key="engine__pred-fu-momo2-supplement-linear",
-            kind="linear_regression",
             label="2ヶ月モメンタム supplement linear",
+            learner_kind="linear_regression",
+            combiner_kind="learner_only",
         ),
         build_prediction_engine_spec(
             key="engine__pred-fu-momo2-supplement-ridge",
-            kind="ridge_regression",
             label="2ヶ月モメンタム supplement ridge",
+            learner_kind="ridge_regression",
+            combiner_kind="learner_only",
             ridge_alpha=1.0,
         ),
     ]
@@ -79,9 +81,10 @@ def _build_registered_predictors() -> list[PredictorSpec]:
     for engine_spec in engine_specs:
         for target_spec in target_specs:
             horizon_value = _horizon_value(target_spec)
-            model_suffix = engine_spec.kind.replace("_regression", "")
+            learner_suffix = engine_spec.learner_kind.replace("_regression", "")
+            combiner_suffix = engine_spec.combiner_kind.replace("_only", "")
             predictor_specs.append(build_predictor_spec(
-                key=f"pred-fu-momo2-supplement-{horizon_value}bar-{model_suffix}",
+                key=f"pred-fu-momo2-supplement-{horizon_value}bar-{learner_suffix}-{combiner_suffix}",
                 label=f"2ヶ月モメンタム / {target_spec.label} / {engine_spec.label}",
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
@@ -95,7 +98,10 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 feature_spec=feature_spec,
                 engine_spec=engine_spec,
                 training_spec=build_training_spec(
-                    key=f"training__pred-fu-momo2-supplement-{engine_spec.kind}",
+                    key=(
+                        f"training__pred-fu-momo2-supplement-"
+                        f"{engine_spec.learner_kind}-{engine_spec.combiner_kind}"
+                    ),
                     label="2ヶ月モメンタム supplement training",
                     fit_mode="expanding",
                     min_train_samples=50,

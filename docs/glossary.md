@@ -33,6 +33,98 @@ Raw Data を加工して作る説明変数。
 - 実現ボラティリティ
 - 出来高強度
 
+## Prediction Terms
+
+### Predictor
+
+将来の量を予測し、Strategy の意思決定に使うためのモデル。
+
+補足:
+- `Predictor` は必ずしも `alpha` そのものを直接予測するとは限らない
+- 大事なのは、何を予測するかと、その予測をどう使うか
+- 予測対象が違えば、必要な入力、評価指標、下流の使い方も変わる
+
+### Predicted Quantity
+
+Predictor が予測したい対象そのもの。
+
+例:
+- 次の5bar超過収益
+- 次の10bar超過収益
+- 市場レジーム
+- 将来ボラティリティ
+
+補足:
+- `Predicted Quantity` は「何を予測するか」を表す
+- horizon はここに含めてもよいが、実装上は別の `Prediction Target` として分けてもよい
+
+### Prediction Target
+
+予測対象を、実際の学習・推論に使う形に落とした定義。
+
+現在の感覚では、少なくとも次を含む。
+- 何を予測するか
+- どの horizon で予測するか
+- どの baseline からの差として扱うか
+
+例:
+- 次の5bar超過収益
+- 次の10bar超過収益
+
+### Decision Use
+
+予測結果を Strategy 側でどう使うかを表す。
+
+例:
+- 候補集合内の順位付け
+- ウェイト傾斜の補助
+- exposure の gate
+- regime に応じた Strategy 切り替え
+
+補足:
+- `Predictor` の価値は、予測精度だけでなく `Decision Use` まで含めて評価すべき
+- 同じ予測対象でも、使い方が違えば別物として扱う方が自然なことがある
+
+### Candidate Set
+
+予測や順位付けの対象として実際に比較する資産集合。
+
+例:
+- 全資産
+- 上昇資産のみ
+- 上昇資産のうち低ボラ群
+
+補足:
+- `Investment Universe` は Strategy 全体の投資対象
+- `Candidate Set` はその時点の予測や選別の入力となる比較集合
+- `Predictor` は Strategy ID ではなく、このような集合定義に依存する方が自然
+
+### Current Prediction Question
+
+現時点で主に解いている予測問題は次。
+
+- 候補資産集合の中で、次の数 bar で相対的に強い資産はどれか
+
+このため、今の Predictor は主に
+- `Predicted Quantity`: 次の5bar / 10bar 超過収益
+- `Decision Use`: 候補集合内の順位付けや weighting 補助
+
+を担っている。
+
+### Regime Prediction
+
+近いうちに扱いたい別系統の予測問題。
+
+例:
+- risk-on / risk-off
+- inflation-sensitive / growth-sensitive
+- trend-following が効きやすい局面かどうか
+
+補足:
+- `Regime Prediction` は、現在の cross-sectional な順位予測とは別問題
+- 主な使い道は、銘柄順位そのものではなく、exposure 制御、risk budget 調整、Strategy 切り替え
+- したがって、将来的には `Predicted Quantity` や `Decision Use` の違いとして表現するのが自然
+
 ### Asset Ranking Model
 
 Feature から各資産の相対順位や相対的な持ちたさを作る層。  

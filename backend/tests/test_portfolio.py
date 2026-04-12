@@ -8,7 +8,7 @@ from app.portfolio import (
     build_prediction_calibration_spec,
     build_predictor_decision_context_spec,
     build_prediction_model_spec,
-    build_prediction_objective_spec,
+    build_prediction_task_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_predictor_use_spec,
@@ -100,9 +100,9 @@ def make_predictor_spec(
         description=strategy.description,
         timeframe=strategy.timeframe,
         investment_universe=strategy.investment_universe,
-        objective_spec=build_prediction_objective_spec(
-            key=f"objective__{predictor_key}",
-            label=f"{label} objective",
+        task_spec=build_prediction_task_spec(
+            key=f"task__{predictor_key}",
+            label=f"{label} task",
             kind="cross_sectional_alpha_forecast",
         ),
         target_spec=build_prediction_target_spec(

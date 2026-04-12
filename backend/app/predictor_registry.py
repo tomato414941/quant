@@ -13,7 +13,7 @@ from app.portfolio import (
     build_prediction_calibration_spec,
     build_predictor_decision_context_spec,
     build_prediction_model_spec,
-    build_prediction_objective_spec,
+    build_prediction_task_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_ranking_feature_recipe_spec,
@@ -84,9 +84,9 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
                 investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-                objective_spec=build_prediction_objective_spec(
-                    key="objective__cross_sectional_alpha",
-                    label="Cross-sectional alpha",
+                task_spec=build_prediction_task_spec(
+                    key="task__cross_sectional_alpha",
+                    label="Cross-sectional alpha forecast",
                     kind="cross_sectional_alpha_forecast",
                 ),
                 target_spec=target_spec,

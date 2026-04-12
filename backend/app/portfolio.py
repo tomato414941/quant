@@ -231,7 +231,7 @@ class PredictionTargetSpec:
 
 
 @dataclass(frozen=True)
-class PredictionObjectiveSpec:
+class PredictionTaskSpec:
     key: str
     label: str
     kind: str
@@ -292,7 +292,7 @@ class PredictorSpec:
     description: str
     timeframe: TimeframeSpec
     investment_universe: InvestmentUniverseSpec
-    objective_spec: PredictionObjectiveSpec
+    task_spec: PredictionTaskSpec
     target_spec: PredictionTargetSpec
     feature_spec: FeatureSpec
     model_spec: PredictionModelSpec
@@ -1067,16 +1067,16 @@ def serialize_prediction_target_spec(
     }
 
 
-def build_prediction_objective_spec(
+def build_prediction_task_spec(
     *,
     key: str,
     label: str,
     kind: str,
     parameters: dict[str, object] | None = None,
-) -> PredictionObjectiveSpec:
+) -> PredictionTaskSpec:
     if kind not in {"cross_sectional_alpha_forecast"}:
-        raise ValueError("Unsupported prediction objective kind.")
-    return PredictionObjectiveSpec(
+        raise ValueError("Unsupported prediction task kind.")
+    return PredictionTaskSpec(
         key=key,
         label=label,
         kind=kind,
@@ -1084,17 +1084,17 @@ def build_prediction_objective_spec(
     )
 
 
-def serialize_prediction_objective_spec(
-    objective_spec: PredictionObjectiveSpec,
+def serialize_prediction_task_spec(
+    task_spec: PredictionTaskSpec,
 ) -> dict:
     return {
-        "kind": "prediction_objective_spec",
+        "kind": "prediction_task_spec",
         "schemaVersion": "v1",
-        "key": objective_spec.key,
-        "label": objective_spec.label,
-        "objectiveKind": objective_spec.kind,
+        "key": task_spec.key,
+        "label": task_spec.label,
+        "taskKind": task_spec.kind,
         "parameters": {
-            key: value for key, value in objective_spec.parameters
+            key: value for key, value in task_spec.parameters
         },
     }
 
@@ -1258,7 +1258,7 @@ def build_predictor_spec(
     description: str,
     timeframe: TimeframeSpec,
     investment_universe: InvestmentUniverseSpec,
-    objective_spec: PredictionObjectiveSpec,
+    task_spec: PredictionTaskSpec,
     target_spec: PredictionTargetSpec,
     feature_spec: FeatureSpec,
     model_spec: PredictionModelSpec,
@@ -1272,7 +1272,7 @@ def build_predictor_spec(
         description=description,
         timeframe=timeframe,
         investment_universe=investment_universe,
-        objective_spec=objective_spec,
+        task_spec=task_spec,
         target_spec=target_spec,
         feature_spec=feature_spec,
         model_spec=model_spec,
@@ -1439,9 +1439,9 @@ def build_predictor_specs(
                         description=ranking_spec.description,
                         timeframe=ranking_spec.timeframe,
                         investment_universe=ranking_spec.investment_universe,
-                        objective_spec=build_prediction_objective_spec(
-                            key="objective__cross_sectional_alpha",
-                            label="Cross-sectional alpha",
+                        task_spec=build_prediction_task_spec(
+                            key="task__cross_sectional_alpha",
+                            label="Cross-sectional alpha forecast",
                             kind="cross_sectional_alpha_forecast",
                         ),
                         target_spec=target_spec,
@@ -1508,7 +1508,7 @@ def serialize_predictor_spec(
             "assetCount": len(predictor_spec.investment_universe.tickers),
             "tickers": list(predictor_spec.investment_universe.tickers),
         },
-        "objectiveSpec": serialize_prediction_objective_spec(predictor_spec.objective_spec),
+        "taskSpec": serialize_prediction_task_spec(predictor_spec.task_spec),
         "targetSpec": serialize_prediction_target_spec(predictor_spec.target_spec),
         "featureSpec": serialize_feature_spec(predictor_spec.feature_spec),
         "modelSpec": serialize_prediction_model_spec(predictor_spec.model_spec),

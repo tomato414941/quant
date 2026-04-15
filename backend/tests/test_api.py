@@ -144,10 +144,12 @@ def test_dashboard_endpoint(monkeypatch, tmp_path) -> None:
     payload = response.json()
     expected_strategy_count = len(config.candidate_strategies)
     expected_reference_count = len(config.reference_strategies)
-    expected_predictor_count = sum(
-        1
-        for strategy in config.candidate_strategies
-        if strategy.predictor_use is not None
+    expected_predictor_count = len(
+        {
+            strategy.predictor_use.predictor_key
+            for strategy in config.candidate_strategies
+            if strategy.predictor_use is not None
+        }
     )
 
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
@@ -301,6 +303,9 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["runSpec"]["kind"] == "comparison_run_spec"
     assert len(payload["predictorSpecs"]) == expected_predictor_count
     assert len(payload["predictorRuns"]) == expected_predictor_count
+    assert payload["predictorSpecs"][0]["signalSpec"]["kind"] == "signal_spec"
+    assert payload["predictorSpecs"][0]["signalSpec"]["observationSpec"]["kind"] == "observation_spec"
+    assert payload["predictorSpecs"][0]["signalSpec"]["observationSpec"]["assetCount"] >= 1
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == expected_predictor_count * 2
     assert len(payload["sanityChecks"]) == 1
@@ -316,6 +321,8 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["records"][0]["runKind"] == "predictor_run"
     assert "trainingFitMode" in index_payload["records"][0]
     assert "signalSourceKind" in index_payload["records"][0]
+    assert "observationLabel" in index_payload["records"][0]
+    assert "signalEntityKind" in index_payload["records"][0]
     assert "groupedSummaries" in index_payload
     assert "bestBySignalSource" in index_payload["groupedSummaries"]
     assert "bestBySignalSourceAndHorizon" in index_payload["groupedSummaries"]
@@ -399,8 +406,12 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     payload = response.json()
     expected_strategy_count = len(config.candidate_strategies)
     expected_reference_count = len(config.reference_strategies)
-    expected_predictor_count = sum(
-        1 for strategy in config.candidate_strategies if strategy.predictor_use is not None
+    expected_predictor_count = len(
+        {
+            strategy.predictor_use.predictor_key
+            for strategy in config.candidate_strategies
+            if strategy.predictor_use is not None
+        }
     )
     assert payload["kind"] == "strategy_run_collection"
     assert payload["comparisonId"] == "etf_portfolio_models_10y"

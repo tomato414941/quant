@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from app.strategy_registry import (
+from app.strategy_presets import (
     DEFAULT_INVESTMENT_UNIVERSE,
     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
 )
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
     PredictorSpec,
+    build_observation_spec,
     build_prediction_combiner_spec,
     build_derived_feature_spec,
     build_feature_spec,
@@ -16,6 +17,7 @@ from app.portfolio import (
     build_prediction_engine_spec,
     build_prediction_learner_spec,
     build_prediction_signal_source_spec,
+    build_signal_spec,
     build_predicted_quantity_spec,
     build_prediction_target_spec,
     build_predictor_spec,
@@ -54,7 +56,7 @@ def _build_registered_predictors() -> list[PredictorSpec]:
         label="2ヶ月モメンタム supplement features",
         feature_inputs=tuple(
             build_feature_input_spec(key=feature_input)
-            for feature_input in FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.feature_inputs
+            for feature_input in FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.ranking_signal.feature_inputs
         ),
         derived_features=tuple(
             build_derived_feature_spec(key=feature_key)
@@ -153,7 +155,26 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                 label=f"2ヶ月モメンタム / {target_spec.label} / {engine_spec.label}",
                 description=f"2ヶ月モメンタム特徴から{target_spec.label}を推定する",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
-                investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+                signal_spec=build_signal_spec(
+                    key=f"signal__pred-fu-momo2-supplement-{horizon_value}bar",
+                    label="2ヶ月モメンタム supplement signal",
+                    observation_spec=build_observation_spec(
+                        key=f"observation__pred-fu-momo2-supplement-{horizon_value}bar",
+                        label="2ヶ月モメンタム supplement observation",
+                        tickers=DEFAULT_INVESTMENT_UNIVERSE.tickers,
+                        fields=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.ranking_signal.feature_inputs,
+                    ),
+                    entity_kind="asset_set",
+                    entity_identifiers=DEFAULT_INVESTMENT_UNIVERSE.tickers,
+                    output_spec=build_prediction_output_spec(
+                        key="output__cross_sectional_score",
+                        label="Cross-sectional score",
+                        kind="score",
+                    ),
+                    decision_use_spec=build_decision_use_spec(
+                        FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M
+                    ),
+                ),
                 predicted_quantity_spec=build_predicted_quantity_spec(
                     key="quantity__return",
                     label="Return",
@@ -170,14 +191,6 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     label="2ヶ月モメンタム supplement training",
                     fit_mode="expanding",
                     min_train_samples=50,
-                ),
-                output_spec=build_prediction_output_spec(
-                    key="output__cross_sectional_score",
-                    label="Cross-sectional score",
-                    kind="score",
-                ),
-                decision_use_spec=build_decision_use_spec(
-                    FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M
                 ),
             ))
     return predictor_specs

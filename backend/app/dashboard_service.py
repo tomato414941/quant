@@ -28,12 +28,15 @@ from app.timeframe_models import TimeframeSpec
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def collect_comparison_tickers(comparison: ComparisonSpec) -> list[str]:
+def collect_comparison_tickers(comparison: ComparisonSpec, predictor_specs: list | None = None) -> list[str]:
     seen: dict[str, None] = {}
     for strategy in (
         comparison.candidate_strategies + comparison.reference_strategies
     ):
         for ticker in strategy.investment_universe.tickers:
+            seen.setdefault(ticker, None)
+    for predictor_spec in predictor_specs or []:
+        for ticker in predictor_spec.signal_spec.observation_spec.tickers:
             seen.setdefault(ticker, None)
     return list(seen.keys())
 
@@ -50,12 +53,15 @@ def collect_comparison_timeframes(comparison: ComparisonSpec) -> list[TimeframeS
     )
 
 
-def collect_required_market_fields(comparison: ComparisonSpec) -> list[str]:
+def collect_required_market_fields(comparison: ComparisonSpec, predictor_specs: list | None = None) -> list[str]:
     fields: dict[str, None] = {"close": None}
     for strategy in (
         comparison.candidate_strategies + comparison.reference_strategies
     ):
-        for field in strategy.selection.feature_inputs:
+        for field in strategy.selection.ranking_signal.feature_inputs:
+            fields.setdefault(field, None)
+    for predictor_spec in predictor_specs or []:
+        for field in predictor_spec.signal_spec.observation_spec.fields:
             fields.setdefault(field, None)
     if comparison.run_spec.execution_assumptions.cost_model.kind == "asset_specific_adv_cost":
         fields.setdefault("volume", None)
@@ -75,8 +81,6 @@ def collect_strategy_predictor_specs(strategy_specs: list) -> list:
             raise ValueError(f"Unknown predictor key: {predictor_key}")
         if predictor_spec.timeframe.key != strategy_spec.timeframe.key:
             raise ValueError("Supplemental predictor timeframe must match strategy timeframe.")
-        if predictor_spec.investment_universe.tickers != strategy_spec.investment_universe.tickers:
-            raise ValueError("Supplemental predictor universe must match strategy universe.")
         if predictor_key in seen_keys:
             continue
         seen_keys.add(predictor_key)
@@ -89,9 +93,10 @@ def fetch_market_data_by_timeframe(
     comparison: ComparisonSpec,
     *,
     period: str,
+    predictor_specs: list | None = None,
     fetch_market_universe_bundle,
 ) -> tuple[dict[str, dict], dict[str, dict], list[str], list[TimeframeSpec]]:
-    comparison_tickers = collect_comparison_tickers(comparison)
+    comparison_tickers = collect_comparison_tickers(comparison, predictor_specs)
     timeframes = collect_comparison_timeframes(comparison)
     bundles_by_timeframe: dict[str, dict] = {}
     metadata_by_timeframe: dict[str, dict] = {}
@@ -114,6 +119,9 @@ def build_dashboard_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
     (
         market_bundles_by_timeframe,
         metadata_by_timeframe,
@@ -122,10 +130,8 @@ def build_dashboard_payload(
     ) = fetch_market_data_by_timeframe(
         comparison,
         period=comparison.run_spec.market_slice.period,
+        predictor_specs=predictor_specs,
         fetch_market_universe_bundle=fetch_market_universe_bundle,
-    )
-    predictor_specs = collect_strategy_predictor_specs(
-        comparison.candidate_strategies + comparison.reference_strategies
     )
     predictor_runs, predictor_panels_by_key, predictor_run_store_summary = build_predictor_runs(
         comparison=comparison,
@@ -154,7 +160,7 @@ def build_dashboard_payload(
         predictor_panels_by_key=predictor_panels_by_key,
     )
     sanity_checks = []
-    required_fields = collect_required_market_fields(comparison)
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
     total_cached_runs = (
         predictor_run_store_summary.cached_run_count
         + candidate_run_store_summary.cached_run_count
@@ -174,6 +180,7 @@ def build_dashboard_payload(
         ) = fetch_market_data_by_timeframe(
             comparison,
             period=period,
+            predictor_specs=predictor_specs,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
         (
@@ -276,6 +283,7 @@ def build_predictor_runs_payload(
     ) = fetch_market_data_by_timeframe(
         comparison,
         period=comparison.run_spec.market_slice.period,
+        predictor_specs=predictor_specs,
         fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     predictor_runs, _predictor_panels_by_key, predictor_run_store_summary = build_predictor_runs(
@@ -286,7 +294,7 @@ def build_predictor_runs_payload(
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
     )
-    required_fields = collect_required_market_fields(comparison)
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
     sanity_checks = []
     total_cached_runs = predictor_run_store_summary.cached_run_count
     total_computed_runs = predictor_run_store_summary.computed_run_count
@@ -300,6 +308,7 @@ def build_predictor_runs_payload(
         ) = fetch_market_data_by_timeframe(
             comparison,
             period=period,
+            predictor_specs=predictor_specs,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
         sanity_predictor_runs, _sanity_panels_by_key, sanity_run_store_summary = build_predictor_runs(
@@ -349,6 +358,9 @@ def build_strategy_runs_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
     (
         market_bundles_by_timeframe,
         metadata_by_timeframe,
@@ -357,10 +369,8 @@ def build_strategy_runs_payload(
     ) = fetch_market_data_by_timeframe(
         comparison,
         period=comparison.run_spec.market_slice.period,
+        predictor_specs=predictor_specs,
         fetch_market_universe_bundle=fetch_market_universe_bundle,
-    )
-    predictor_specs = collect_strategy_predictor_specs(
-        comparison.candidate_strategies + comparison.reference_strategies
     )
     predictor_runs, predictor_panels_by_key, predictor_run_store_summary = build_predictor_runs(
         comparison=comparison,
@@ -388,7 +398,7 @@ def build_strategy_runs_payload(
         run_store=run_store,
         predictor_panels_by_key=predictor_panels_by_key,
     )
-    required_fields = collect_required_market_fields(comparison)
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
     sanity_checks = []
     total_cached_runs = (
         predictor_run_store_summary.cached_run_count
@@ -410,6 +420,7 @@ def build_strategy_runs_payload(
         ) = fetch_market_data_by_timeframe(
             comparison,
             period=period,
+            predictor_specs=predictor_specs,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
         (
@@ -510,6 +521,7 @@ def build_condition_sweep_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
+    predictor_specs = collect_strategy_predictor_specs(comparison.candidate_strategies)
     (
         market_bundles_by_timeframe,
         metadata_by_timeframe,
@@ -518,6 +530,7 @@ def build_condition_sweep_payload(
     ) = fetch_market_data_by_timeframe(
         comparison,
         period=comparison.run_spec.market_slice.period,
+        predictor_specs=predictor_specs,
         fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     results, run_store_summary = build_condition_sweep_runs(
@@ -745,6 +758,9 @@ def generate_parameter_sweep_runs_payload(
     fetch_market_universe_bundle,
 ) -> dict:
     run_store = build_run_result_store(comparison)
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
     (
         market_bundles_by_timeframe,
         metadata_by_timeframe,
@@ -753,6 +769,7 @@ def generate_parameter_sweep_runs_payload(
     ) = fetch_market_data_by_timeframe(
         comparison,
         period=comparison.run_spec.market_slice.period,
+        predictor_specs=predictor_specs,
         fetch_market_universe_bundle=fetch_market_universe_bundle,
     )
     results, run_store_summary = build_parameter_sweep_runs(
@@ -881,7 +898,10 @@ def serialize_run_spec(
     metadata_by_timeframe: dict[str, dict[str, str]],
     timeframes: list[TimeframeSpec],
 ) -> dict:
-    fields = collect_required_market_fields(comparison)
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
+    fields = collect_required_market_fields(comparison, predictor_specs)
     return {
         "kind": "comparison_run_spec",
         "schemaVersion": "v1",
@@ -1088,13 +1108,16 @@ def compact_predictor_run_record(record: dict) -> dict:
     run_spec = record["runSpec"]
     result = record["result"]
     predictor = run_spec.get("strategy", {}).get("predictor", {})
+    signal = predictor.get("signalSpec", {})
+    observation = signal.get("observationSpec", {})
     predicted_quantity = predictor.get("predictedQuantitySpec", {})
     target = predictor.get("targetSpec", {})
-    output = predictor.get("outputSpec", {})
+    output = signal.get("outputSpec", {})
     horizon = target.get("horizonSpec", {})
     feature = predictor.get("featureSpec", {})
     training = predictor.get("trainingSpec", {})
     engine = predictor.get("engineSpec", {})
+    decision_use = signal.get("decisionUseSpec", {})
     signal_source = engine.get("signalSourceSpec") or {}
     learner = engine.get("learnerSpec") or {}
     combiner = engine.get("combinerSpec") or {}
@@ -1107,6 +1130,13 @@ def compact_predictor_run_record(record: dict) -> dict:
         "runKind": run_spec.get("runKind"),
         "predictorKey": predictor.get("key"),
         "predictorLabel": predictor.get("label"),
+        "observationKey": observation.get("key"),
+        "observationLabel": observation.get("label"),
+        "observationAssetCount": observation.get("assetCount"),
+        "observationFields": observation.get("fields"),
+        "signalEntityKind": signal.get("entityKind"),
+        "signalEntityCount": len(signal.get("entityIdentifiers") or []),
+        "decisionUseKind": decision_use.get("useKind"),
         "featureKey": feature.get("key"),
         "signalSourceKind": signal_source.get("signalSourceKind"),
         "signalSourceFeatureKey": signal_source.get("featureKey"),
@@ -1144,7 +1174,8 @@ def build_strategy_runs(
     predictor_panels_by_key: dict[str, object] | None = None,
 ) -> tuple[list[dict], RunStoreSummary]:
     serialized_execution_assumptions = serialize_execution_assumptions(comparison)
-    required_fields = collect_required_market_fields(comparison)
+    predictor_specs = collect_strategy_predictor_specs(strategy_specs)
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
     runs: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -1218,16 +1249,16 @@ def build_predictor_runs(
     predictor_panels_by_key: dict[str, object] = {}
     cached_run_count = 0
     computed_run_count = 0
-    required_fields = collect_required_market_fields(comparison)
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
     serialized_execution_assumptions = serialize_execution_assumptions(comparison)
 
     for predictor_spec in predictor_specs:
         timeframe_key = predictor_spec.timeframe.key
         market_bundle = market_bundles_by_timeframe[timeframe_key]
         dataset_metadata = metadata_by_timeframe[timeframe_key]
-        closes = market_bundle["closes"][list(predictor_spec.investment_universe.tickers)]
+        closes = market_bundle["closes"][list(predictor_spec.signal_spec.observation_spec.tickers)]
         volumes = (
-            market_bundle["volumes"][list(predictor_spec.investment_universe.tickers)]
+            market_bundle["volumes"][list(predictor_spec.signal_spec.observation_spec.tickers)]
             if market_bundle["volumes"] is not None
             else None
         )
@@ -1299,7 +1330,8 @@ def build_condition_sweep_runs(
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
-    required_fields = collect_required_market_fields(comparison)
+    predictor_specs = collect_strategy_predictor_specs(comparison.candidate_strategies)
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
 
     for strategy_spec in comparison.candidate_strategies:
         timeframe_key = strategy_spec.timeframe.key
@@ -1492,7 +1524,10 @@ def build_parameter_sweep_runs(
         "batchKey": "local_tilt_search_9m_v1",
         "spec": build_parameter_sweep_generation_spec(),
     }
-    required_fields = collect_required_market_fields(comparison)
+    predictor_specs = collect_strategy_predictor_specs(
+        comparison.candidate_strategies + comparison.reference_strategies
+    )
+    required_fields = collect_required_market_fields(comparison, predictor_specs)
 
     family_specs = [
         {

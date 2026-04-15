@@ -2,6 +2,7 @@ import pandas as pd
 
 from app.portfolio import (
     PREDICTION_FEATURE_NAMES,
+    build_observation_spec,
     build_prediction_combiner_spec,
     build_derived_feature_spec,
     build_feature_spec,
@@ -12,6 +13,7 @@ from app.portfolio import (
     build_prediction_learner_spec,
     build_predicted_quantity_spec,
     build_prediction_signal_source_spec,
+    build_signal_spec,
     build_prediction_target_spec,
     build_predictor_spec,
     build_predictor_use_spec,
@@ -131,7 +133,24 @@ def make_predictor_spec(
         label=label,
         description=strategy.description,
         timeframe=strategy.timeframe,
-        investment_universe=strategy.investment_universe,
+        signal_spec=build_signal_spec(
+            key=f"signal__{predictor_key}",
+            label=f"{label} signal",
+            observation_spec=build_observation_spec(
+                key=f"observation__{predictor_key}",
+                label=f"{label} observation",
+                tickers=strategy.investment_universe.tickers,
+                fields=strategy.selection.ranking_signal.feature_inputs,
+            ),
+            entity_kind="asset_set",
+            entity_identifiers=strategy.investment_universe.tickers,
+            output_spec=build_prediction_output_spec(
+                key=f"output__{predictor_key}",
+                label=f"{label} output",
+                kind="score",
+            ),
+            decision_use_spec=build_decision_use_spec(strategy.selection),
+        ),
         predicted_quantity_spec=build_predicted_quantity_spec(
             key=f"quantity__{predictor_key}",
             label=f"{label} quantity",
@@ -149,7 +168,7 @@ def make_predictor_spec(
             label=f"{label} features",
             feature_inputs=tuple(
                 build_feature_input_spec(key=feature_input)
-                for feature_input in strategy.selection.feature_inputs
+                for feature_input in strategy.selection.ranking_signal.feature_inputs
             ),
             derived_features=tuple(
                 build_derived_feature_spec(key=feature_key)
@@ -170,12 +189,6 @@ def make_predictor_spec(
             fit_mode="expanding",
             min_train_samples=min_train_samples,
         ),
-        output_spec=build_prediction_output_spec(
-            key=f"output__{predictor_key}",
-            label=f"{label} output",
-            kind="score",
-        ),
-        decision_use_spec=build_decision_use_spec(strategy.selection),
     )
 
 

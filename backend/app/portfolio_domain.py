@@ -1081,8 +1081,8 @@ def serialize_strategy_definition(strategy: StrategyDefinition) -> dict:
             },
         },
         "executionSupport": {
-            "legacyAdapterCompatible": not compatibility_issues,
-            "legacyAdapterIssues": compatibility_issues,
+            "strategySpecAdapterCompatible": not compatibility_issues,
+            "strategySpecAdapterIssues": compatibility_issues,
             "directExecutionCompatible": not direct_execution_issues,
             "directExecutionIssues": direct_execution_issues,
         },

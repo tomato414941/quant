@@ -79,7 +79,7 @@ def resolve_strategy_market_data_timeframe(strategy_spec) -> TimeframeSpec:
 
 def serialize_strategy_definition_payload(strategy_definition: StrategyDefinition) -> dict:
     if not isinstance(strategy_definition, StrategyDefinition):
-        raise ValueError("StrategyDefinition is required; legacy StrategySpec payloads are not supported.")
+        raise ValueError("StrategyDefinition is required; StrategySpec payloads are not supported.")
     return serialize_canonical_strategy_definition(strategy_definition)
 
 

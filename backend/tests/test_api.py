@@ -362,7 +362,9 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
         payload["comparison"]["candidateStrategies"][0]["components"]["core"]["executionPlan"]["rebalanceSchedule"]
         == "year_end"
     )
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is True
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is True
+    assert "legacyAdapterCompatible" not in payload["comparison"]["candidateStrategies"][0]["executionSupport"]
+    assert "legacyAdapterIssues" not in payload["comparison"]["candidateStrategies"][0]["executionSupport"]
     assert payload["comparison"]["candidateStrategies"][0]["components"]["optional"]["signals"][0]["sourceKind"] == "selection_signal"
     assert (
         payload["candidateRuns"][5]["strategy"]["components"]["optional"]["signals"][0]["signalParameters"]["scoreParameters"]["windowSpec"]["unit"]
@@ -580,7 +582,7 @@ def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path
     payload = response.json()
     assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
     assert payload["comparison"]["candidateStrategies"][0]["strategyId"] == definition.strategy_id
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is True
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is True
     signal_market_data_contexts = [
         context
         for context in payload["comparison"]["runSpec"]["evaluation"]["signalMarketDataContexts"]
@@ -671,7 +673,7 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is False
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is False
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     direct_signal_contexts = [
         context
@@ -984,7 +986,7 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candi
     assert response.status_code == 200
     payload = response.json()
     strategy_payload = payload["candidateRuns"][0]["strategy"]
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is False
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is False
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     assert strategy_payload["kind"] == "strategy_definition"
     assert strategy_payload["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"

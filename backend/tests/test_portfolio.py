@@ -62,6 +62,7 @@ from app.portfolio import (
     resample_returns_frame_to_timeframe,
     resolve_decision_schedule,
     resolve_strategy_market_data_timeframe_key,
+    serialize_strategy_definition,
     serialize_strategy_spec,
     serialize_strategy_signal_spec,
     select_assets,
@@ -476,9 +477,9 @@ def test_build_strategy_spec_from_definition_round_trips_legacy_strategy() -> No
     strategy = build_strategy_spec(
         strategy_id="strategy__round_trip",
         version="v7",
-        hypothesis="Round-trip legacy adapter.",
+        hypothesis="Round-trip StrategySpec adapter.",
         label="Round trip strategy",
-        description="Legacy strategy for definition round-trip tests.",
+        description="StrategySpec adapter round-trip test strategy.",
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ", "TLT"],
             key="round_trip_universe",
@@ -529,6 +530,12 @@ def test_build_strategy_spec_from_definition_round_trips_legacy_strategy() -> No
     assert rebuilt.predictor_signal_execution_context is not None
     assert rebuilt.predictor_signal_execution_context["predictorKey"] == predictor_use.predictor_key
     assert dict(rebuilt.extensions) == dict(strategy.extensions)
+    payload = serialize_strategy_definition(build_strategy_definition_from_strategy_spec(strategy))
+    support = payload["executionSupport"]
+    assert support["strategySpecAdapterCompatible"] is True
+    assert support["strategySpecAdapterIssues"] == []
+    assert "legacyAdapterCompatible" not in support
+    assert "legacyAdapterIssues" not in support
 
 
 def test_build_strategy_spec_from_definition_rejects_split_execution_plan() -> None:
@@ -1800,7 +1807,7 @@ def test_legacy_definition_compatibility_helper_reports_blockers() -> None:
         assert "StrategySpec adapter incompatibilities" in str(exc)
         assert "requires matching decision and rebalance schedules" in str(exc)
     else:
-        raise AssertionError("Expected legacy adapter incompatibility error")
+        raise AssertionError("Expected StrategySpec adapter incompatibility error")
 
 
 

@@ -31,6 +31,7 @@
 - `comparison_service` は `StrategyDefinition` を直接実行入口として扱う
 - `StrategySpec` は公開正本ではなく、低レベル evaluator 用の内部 DTO として残る
 - `comparison_service` は strategy / condition / parameter / predictor / ranking の runSpec を `StrategyDefinition` 正本で生成する
+- `executionSupport` は `strategySpecAdapter*` と `directExecution*` で実行互換性を表す
 - runtime の `extensions` fallback は通常実行経路から削除済み
 - `evaluate_strategy_definition_run` が multi-timeframe / predictor / multi-selection を通す
 - run store は `v59` で `strategyDefinition` と `evaluationSubject` の fingerprint を正本化した
@@ -80,6 +81,7 @@
 - `comparison_service` から `StrategySpec` 変換の直接 import を削除済み
 - parameter sweep は `StrategySpec` を経由せず `StrategyDefinition` を直接生成する
 - ranking 用の evaluator DTO 変換は `portfolio.py` の helper に閉じた
+- `legacyAdapter*` 表示は削除し、`strategySpecAdapter*` 表示へ一本化した
 - 個別 subject fingerprint filter は必要になった段階で追加する
 
 ## Remaining Duplication
@@ -97,5 +99,5 @@
 ## Near-Term Next Steps
 
 1. low-level evaluator 内部の `StrategySpec` DTO bridge をさらに薄くする
-2. `legacyAdapterCompatible` など互換表示の名前を、必要なら実態に合わせて整理する
-3. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する
+2. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する
+3. step 20 の完了条件を満たしたら Done へ移す

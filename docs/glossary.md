@@ -149,15 +149,21 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 ### Strategy
 
 このプロジェクトで最終的に採用候補として選ぶ、意思決定ルールの完全な仕様。  
-`Strategy` は上位概念であり、内部に複数の構成要素を持つ。  
-コード上では、`Strategy` は固定的な単一手法名ではなく、`StrategySpec` に近い拡張可能な仕様として扱う。
+`Strategy` は上位概念であり、内部に複数の signal / feature / predictor / execution rule を持つ。
+
+コード上の正本は `StrategyDefinition`。
+`StrategySpec` は公開正本ではなく、低レベル evaluator に渡すための内部 DTO として残っている。
 
 最低限持つもの:
 - `strategy_id`
 - `version`
 - `label`
 - `hypothesis`
-- `components`
+- Investment Universe
+- Signals
+- Portfolio Model
+- Execution Plan
+- Risk Controls
 - `extensions`
 
 考え方:
@@ -167,12 +173,15 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 
 含まれるもの:
 - Investment Universe
-- Universe Policy
+- Signal definitions
+- Data Source / Feature Definition
+- Alignment Policy
 - Asset Ranking Model
 - Filter Rule
 - Fallback Rule
+- Predictor overlay
 - Portfolio Model
-- Execution Policy
+- Execution Plan
 - Risk Controls
 
 含まれないもの:
@@ -182,8 +191,14 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 - generation method
 - fee のような市場前提そのもの
 
+補足:
+- `data_timeframe` / `signal_timeframe` / `decision_schedule` / `rebalance_schedule` は分けて扱う
+- runSpec では由来となる戦略を `strategyDefinition`、実評価対象を `evaluationSubject` として分離する
+- `executionSupport.strategySpecAdapter*` は内部 DTO へ変換できるかを表す
+- `executionSupport.directExecution*` は direct execution 経路で評価できるかを表す
+
 要するに、`Strategy` は「何をどう持つか」の仕様であり、  
-`Portfolio Model` や `Execution Policy` はその構成要素である。
+`Portfolio Model` や `Execution Plan` はその構成要素である。
 
 ## Strategy Components
 
@@ -202,7 +217,7 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 
 - Investment Universe
 - Portfolio Model
-- Execution Policy
+- Execution Plan
 
 ### Optional Components
 
@@ -214,6 +229,7 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 - Fallback Rule
 - Risk Controls
 - 拡張的な Data Sources / custom logic
+- Predictor overlay
 
 例:
 - 全資産を候補にし、12ヶ月モメンタムで上位優遇 tilt をかけ、HRP で配分し、年次で更新する
@@ -272,16 +288,23 @@ Strategy の構成要素の1つ。
 現在の保有状態。  
 今のプロジェクトでは最小構成として、現在ウェイトと cash 比率を持つ。
 
-### Execution Policy
+### Execution Plan
 
 Strategy の構成要素の1つ。  
-目標ウェイトへの変更をどう実行したとみなすかを決めるモデル。
+いつ判断し、いつ実際にリバランスするかを表す。
 
 例:
-- 年次リバランス
-- 月次リバランス
+- 判断は毎日、売買は月末
+- 判断も売買も週次
+- 判断は毎 bar、売買は月末
+
+最低限分けて扱うもの:
+- `decision_schedule`
+- `rebalance_schedule`
 
 補足:
+- `Execution Policy` は、低レベル evaluator DTO や builder 内で使う再利用可能な実行方針として残る
+- StrategyDefinition の公開正本では、strategy-level の実行条件は `Execution Plan` として扱う
 - 手数料や slippage の実数値そのものは、普通は Strategy ではなく評価前提やコスト前提として扱う
 - ただし「どのコストモデルを使うか」は比較対象になりうる
 
@@ -440,9 +463,11 @@ Study は「何を比較したいか」を表し、Run は「その比較の中�
 - `Portfolio Model`
   - `Allocator` より優先
   - Strategy の構成要素として扱う
+- `Execution Plan`
+  - strategy-level の実行条件名として使う
+  - `decision_schedule` と `rebalance_schedule` を分けて扱う
 - `Execution Policy`
-  - `Trading Rule` より優先
-  - Strategy の構成要素として扱う
+  - 低レベル evaluator DTO や builder の再利用可能な実行方針名として使う
 - `Run`
   - `Result` 単体より優先
 - `Study`

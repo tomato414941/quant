@@ -65,11 +65,11 @@
 17. signal ごとに `data_timeframe` と `signal_timeframe` を自然に実行できるようにする
 18. legacy adapter を通さず comparison layer が definition を直接評価する経路を作る
 19. run store を `strategyDefinition + evaluationSubject + marketData + evaluation + logicVersion` fingerprint ベースへ寄せる
-
-### In Progress
-
 20. 評価条件と CLI を正本化し、同条件で再検証できる状態にする
-状況:
+
+### Done Notes
+
+Step 20 の完了内容:
 - `comparison-run-spec` を CLI / API から取得できる
 - canonical payload に strategy definitions / condition variants / comparison fingerprint を含める
 - `rerun-comparison-spec` で保存済み JSON から同条件再実行できる
@@ -83,6 +83,10 @@
 - ranking 用の evaluator DTO 変換は `portfolio.py` の helper に閉じた
 - `legacyAdapter*` 表示は削除し、`strategySpecAdapter*` 表示へ一本化した
 - 個別 subject fingerprint filter は必要になった段階で追加する
+
+### In Progress
+
+なし。次は step 22 相当として、低レベル evaluator 内部の `StrategySpec` DTO bridge をさらに薄くする。
 
 ## Remaining Duplication
 
@@ -98,6 +102,6 @@
 
 ## Near-Term Next Steps
 
-1. low-level evaluator 内部の `StrategySpec` DTO bridge をさらに薄くする
+1. step 22 相当として、low-level evaluator 内部の `StrategySpec` DTO bridge をさらに薄くする
 2. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する
-3. step 20 の完了条件を満たしたら Done へ移す
+3. 新しい構造で戦略探索・比較の改善に戻る

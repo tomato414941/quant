@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-from app.portfolio import build_strategy_spec
+from app.strategy_blueprint_builder import (
+    ExecutionVariantDefinition,
+    PortfolioModelVariantDefinition,
+    SelectionVariantDefinition,
+    build_selection_strategy_blueprint_product,
+)
 from app.strategy_presets import (
+    DEFAULT_ANNUAL_EXECUTION_POLICY,
+    DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_INVESTMENT_UNIVERSE,
     DEFAULT_RISK_CONTROLS,
     EQUAL_WEIGHT,
@@ -29,164 +36,157 @@ from app.strategy_presets import (
 )
 
 
-FULL_UNIVERSE_CANDIDATE_STRATEGIES = [
-    build_strategy_spec(
-        strategy_id="stg-fu-eq",
+FULL_UNIVERSE_CANDIDATE_BLUEPRINTS = [
+    *build_selection_strategy_blueprint_product(
+        strategy_id_pattern="stg-fu-{portfolio_model}",
+        selection_variants=[
+            SelectionVariantDefinition(key="fu", selection=FULL_UNIVERSE),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(key="eq", portfolio_model=EQUAL_WEIGHT),
+            PortfolioModelVariantDefinition(key="rb", portfolio_model=RISK_BUDGETING),
+            PortfolioModelVariantDefinition(key="minvar", portfolio_model=MINIMUM_VARIANCE),
+            PortfolioModelVariantDefinition(key="hrp", portfolio_model=HIERARCHICAL_RISK_PARITY),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="annual",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
+            ),
+        ],
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE,
-        portfolio_model=EQUAL_WEIGHT,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    build_strategy_spec(
-        strategy_id="stg-fu-rb",
+    *build_selection_strategy_blueprint_product(
+        strategy_id_pattern="stg-fu-{selection}-hrp",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="momo12-lin025",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK,
+                hypothesis="全資産を残した弱いモメンタム傾斜は、分散を保ちながら成績を改善しやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo12-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+                hypothesis="全資産を残した上位優遇型のモメンタム傾斜は、分散を保ちながらSharpeを改善しやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo6-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M,
+                hypothesis="全資産を残した6ヶ月モメンタムの上位優遇傾斜は、中期の強さを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo9-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M,
+                hypothesis="全資産を残した9ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo8-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_8M,
+                hypothesis="全資産を残した8ヶ月モメンタムの上位優遇傾斜は、中期寄りの強さを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo10-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_10M,
+                hypothesis="全資産を残した10ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo11-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_11M,
+                hypothesis="全資産を残した11ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo3-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M,
+                hypothesis="全資産を残した3ヶ月モメンタムの上位優遇傾斜は、短期の強さを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="momo15-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M,
+                hypothesis="全資産を残した15ヶ月モメンタムの上位優遇傾斜は、より長いトレンドを取り込みやすい",
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(key="hrp", portfolio_model=HIERARCHICAL_RISK_PARITY),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="annual",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
+            ),
+        ],
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE,
-        portfolio_model=RISK_BUDGETING,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    build_strategy_spec(
-        strategy_id="stg-fu-minvar",
+    *build_selection_strategy_blueprint_product(
+        strategy_id_pattern="{selection}",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="stg-fu-momolv7030-top025-hrp",
+                selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP,
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momolv8515-top025-hrp",
+                selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momomac8515-top025-hrp",
+                selection=FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP,
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momo12-soft025-hrp",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX,
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momo12-lin050-hrp",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT,
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momo12-lin100-hrp",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_STRONG,
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(key="hrp", portfolio_model=HIERARCHICAL_RISK_PARITY),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="annual",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
+            ),
+        ],
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE,
-        portfolio_model=MINIMUM_VARIANCE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    build_strategy_spec(
-        strategy_id="stg-fu-hrp",
+    *build_selection_strategy_blueprint_product(
+        strategy_id_pattern="stg-fu-momo12-top035-{portfolio_model}",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="momo12-top035",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(key="mru", portfolio_model=MEAN_RISK_UTILITY),
+            PortfolioModelVariantDefinition(key="mruc", portfolio_model=MEAN_RISK_UTILITY_CONSERVATIVE),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="annual",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
+            ),
+        ],
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-lin025-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した弱いモメンタム傾斜は、分散を保ちながら成績を改善しやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した上位優遇型のモメンタム傾斜は、分散を保ちながらSharpeを改善しやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo6-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_6M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した6ヶ月モメンタムの上位優遇傾斜は、中期の強さを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo9-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した9ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo8-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_8M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した8ヶ月モメンタムの上位優遇傾斜は、中期寄りの強さを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo10-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_10M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した10ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo11-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_11M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した11ヶ月モメンタムの上位優遇傾斜は、中長期の強さを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo3-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_3M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した3ヶ月モメンタムの上位優遇傾斜は、短期の強さを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo15-top035-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_15M,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-        hypothesis="全資産を残した15ヶ月モメンタムの上位優遇傾斜は、より長いトレンドを取り込みやすい",
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momolv7030-top025-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momolv8515-top025-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momomac8515-top025-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-top035-mru",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
-        portfolio_model=MEAN_RISK_UTILITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-top035-mruc",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP,
-        portfolio_model=MEAN_RISK_UTILITY_CONSERVATIVE,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-soft025-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-lin050-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
-        risk_controls=DEFAULT_RISK_CONTROLS,
-    ),
-    build_strategy_spec(
-        strategy_id="stg-fu-momo12-lin100-hrp",
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-        selection=FULL_UNIVERSE_MOMENTUM_TILT_STRONG,
-        portfolio_model=HIERARCHICAL_RISK_PARITY,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
 ]
 
 
-__all__ = ["FULL_UNIVERSE_CANDIDATE_STRATEGIES"]
+
+__all__ = [
+    "FULL_UNIVERSE_CANDIDATE_BLUEPRINTS",
+]

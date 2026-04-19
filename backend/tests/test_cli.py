@@ -111,10 +111,10 @@ def configure_cli(monkeypatch, tmp_path):
     return config
 
 
-def test_dashboard_summary_command(monkeypatch, tmp_path, capsys) -> None:
+def test_comparison_summary_command(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
-    exit_code = cli_module.main(["dashboard-summary", "--top", "2"])
+    exit_code = cli_module.main(["comparison-summary", "--top", "2"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -126,7 +126,7 @@ def test_dashboard_summary_command(monkeypatch, tmp_path, capsys) -> None:
 def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
-    cli_module.main(["dashboard-summary", "--top", "1"])
+    cli_module.main(["comparison-summary", "--top", "1"])
     capsys.readouterr()
 
     exit_code = cli_module.main(["run-catalog", "--limit", "3", "--json"])
@@ -136,3 +136,140 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
+    assert payload["records"][0]["logicVersion"] == "v57"
+    assert payload["records"][0]["strategyDefinitionFingerprint"]
+    assert payload["records"][0]["marketDataFingerprint"]
+    assert payload["records"][0]["evaluationFingerprint"]
+
+    fingerprint = payload["records"][0]["strategyDefinitionFingerprint"]
+    exit_code = cli_module.main(
+        [
+            "run-catalog",
+            "--limit",
+            "3",
+            "--strategy-definition-fingerprint",
+            fingerprint,
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    filtered_payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert filtered_payload["filters"]["strategyDefinitionFingerprint"] == fingerprint
+    assert filtered_payload["recordCount"] >= 1
+    assert all(
+        record["strategyDefinitionFingerprint"] == fingerprint
+        for record in filtered_payload["records"]
+    )
+
+
+def test_rebuild_run_index_command_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+
+    cli_module.main(["comparison-summary", "--top", "1"])
+    capsys.readouterr()
+
+    exit_code = cli_module.main(["rebuild-run-index", "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["entryCount"] >= 1
+
+
+def test_comparison_run_spec_command_json(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main(["comparison-run-spec", "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["comparisonId"] == config.comparison_id
+    assert payload["kind"] == "comparison_run_spec_payload"
+    assert payload["runSpec"]["kind"] == "comparison_run_spec"
+    assert payload["comparisonFingerprint"]
+    assert payload["runSpecFingerprint"]
+    assert payload["selectionPolicy"]["primaryMetric"] == config.selection_policy.primary_metric
+    assert len(payload["candidateStrategies"]) == len(config.candidate_strategies)
+    assert len(payload["referenceStrategies"]) == len(config.reference_strategies)
+    assert payload["candidateStrategies"][0]["kind"] == "strategy_blueprint_spec"
+    assert payload["referenceStrategies"][0]["kind"] == "strategy_blueprint_spec"
+
+
+def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli(monkeypatch, tmp_path)
+    spec_file = tmp_path / "comparison-run-spec.json"
+
+    exit_code = cli_module.main(["comparison-run-spec", "--json"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    spec_file.write_text(captured.out)
+
+    exit_code = cli_module.main(["rerun-comparison-spec", str(spec_file), "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["comparison"]["comparisonId"] == config.comparison_id
+    assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
+    assert len(payload["referenceRuns"]) == len(config.reference_strategies)
+    assert payload["runStoreSummary"]["cachedRunCount"] + payload["runStoreSummary"]["computedRunCount"] > 0
+
+
+def test_latest_run_command_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+
+    cli_module.main(["comparison-summary", "--top", "1"])
+    capsys.readouterr()
+
+    cli_module.main(["run-catalog", "--limit", "1", "--json"])
+    catalog_payload = json.loads(capsys.readouterr().out)
+    fingerprint = catalog_payload["records"][0]["strategyDefinitionFingerprint"]
+
+    exit_code = cli_module.main([
+        "latest-run",
+        "--run-kind",
+        "strategy_run",
+        "--strategy-definition-fingerprint",
+        fingerprint,
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["filters"]["strategyDefinitionFingerprint"] == fingerprint
+    assert payload["record"] is not None
+    assert payload["record"]["strategyDefinitionFingerprint"] == fingerprint
+
+
+def test_latest_run_command_requires_fingerprint(monkeypatch, tmp_path) -> None:
+    configure_cli(monkeypatch, tmp_path)
+
+    try:
+        cli_module.main(["latest-run", "--json"])
+    except ValueError as exc:
+        assert "At least one fingerprint filter is required" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_rerun_comparison_spec_command_rejects_mismatched_fingerprint(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    spec_file = tmp_path / "comparison-run-spec-invalid.json"
+
+    exit_code = cli_module.main(["comparison-run-spec", "--json"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+
+    payload = json.loads(captured.out)
+    payload["runSpecFingerprint"] = "invalid"
+    spec_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    try:
+        cli_module.main(["rerun-comparison-spec", str(spec_file), "--json"])
+    except ValueError as exc:
+        assert "runSpecFingerprint does not match" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")

@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from typing import Sequence
 
-from app.dashboard_service import build_dashboard_payload, build_run_catalog_payload
+from app.comparison_service import (
+    build_comparison_payload,
+    build_comparison_payload_from_run_spec_payload,
+    build_comparison_run_spec_payload,
+    build_latest_run_payload,
+    build_run_catalog_payload,
+    build_run_result_store,
+)
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
 
@@ -13,12 +21,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    dashboard_parser = subparsers.add_parser(
-        "dashboard-summary",
-        help="Print a terminal summary of the current comparison dashboard.",
+    comparison_parser = subparsers.add_parser(
+        "comparison-summary",
+        help="Print a terminal summary of the current comparison.",
     )
-    dashboard_parser.add_argument("--top", type=int, default=5)
-    dashboard_parser.add_argument("--json", action="store_true", dest="as_json")
+    comparison_parser.add_argument("--top", type=int, default=5)
+    comparison_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    comparison_run_spec_parser = subparsers.add_parser(
+        "comparison-run-spec",
+        help="Print the canonical comparison run spec for reproducible reruns.",
+    )
+    comparison_run_spec_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    rerun_comparison_spec_parser = subparsers.add_parser(
+        "rerun-comparison-spec",
+        help="Rerun a saved comparison-run-spec JSON payload.",
+    )
+    rerun_comparison_spec_parser.add_argument("spec_file")
+    rerun_comparison_spec_parser.add_argument("--top", type=int, default=5)
+    rerun_comparison_spec_parser.add_argument("--json", action="store_true", dest="as_json")
 
     run_catalog_parser = subparsers.add_parser(
         "run-catalog",
@@ -27,7 +49,27 @@ def build_parser() -> argparse.ArgumentParser:
     run_catalog_parser.add_argument("--limit", type=int, default=20)
     run_catalog_parser.add_argument("--run-kind", dest="run_kind")
     run_catalog_parser.add_argument("--generation-method", dest="generation_method")
+    run_catalog_parser.add_argument("--strategy-definition-fingerprint", dest="strategy_definition_fingerprint")
+    run_catalog_parser.add_argument("--market-data-fingerprint", dest="market_data_fingerprint")
+    run_catalog_parser.add_argument("--evaluation-fingerprint", dest="evaluation_fingerprint")
     run_catalog_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    latest_run_parser = subparsers.add_parser(
+        "latest-run",
+        help="Resolve the latest saved run for a fingerprint filter set.",
+    )
+    latest_run_parser.add_argument("--run-kind", dest="run_kind")
+    latest_run_parser.add_argument("--generation-method", dest="generation_method")
+    latest_run_parser.add_argument("--strategy-definition-fingerprint", dest="strategy_definition_fingerprint")
+    latest_run_parser.add_argument("--market-data-fingerprint", dest="market_data_fingerprint")
+    latest_run_parser.add_argument("--evaluation-fingerprint", dest="evaluation_fingerprint")
+    latest_run_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    rebuild_index_parser = subparsers.add_parser(
+        "rebuild-run-index",
+        help="Rebuild the local run store index file.",
+    )
+    rebuild_index_parser.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
 
@@ -47,7 +89,7 @@ def sort_candidate_runs(candidate_runs: list[dict]) -> list[dict]:
     )
 
 
-def render_dashboard_summary(payload: dict, *, top: int) -> str:
+def render_comparison_summary(payload: dict, *, top: int) -> str:
     comparison = payload["comparison"]
     candidate_runs = sort_candidate_runs(payload["candidateRuns"])
     lines = [
@@ -88,6 +130,47 @@ def render_dashboard_summary(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+def render_comparison_run_spec(payload: dict) -> str:
+    lines = [
+        f"Comparison: {payload['title']} ({payload['comparisonId']})",
+        (
+            "Selection policy: "
+            f"{payload['selectionPolicy']['primaryMetric']} / "
+            f"{payload['selectionPolicy']['secondaryMetric']} / "
+            f"{payload['selectionPolicy']['tertiaryMetric']}"
+        ),
+        f"Comparison fingerprint: {payload['comparisonFingerprint']}",
+        f"Run spec fingerprint: {payload['runSpecFingerprint']}",
+        (
+            "Strategy counts: "
+            f"candidate={payload['candidateStrategyCount']} "
+            f"reference={payload['referenceStrategyCount']}"
+        ),
+        "",
+        json.dumps(payload['runSpec'], ensure_ascii=False, indent=2),
+    ]
+    return "\n".join(lines)
+
+
+def render_latest_run(payload: dict) -> str:
+    record = payload["record"]
+    lines = [
+        f"Comparison: {payload['comparisonId']}",
+        f"Run kind: {payload['runKind'] or '-'}",
+    ]
+    if record is None:
+        lines.append("Record: not found")
+        return "\n".join(lines)
+    lines.extend(
+        [
+            f"Run key: {record['runKey']}",
+            f"Strategy: {record.get('strategyLabel')}",
+            f"Logic version: {record.get('logicVersion')}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_run_catalog(payload: dict) -> str:
     lines = [
         f"Comparison: {payload['comparisonId']}",
@@ -112,15 +195,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    if args.command == "dashboard-summary":
-        payload = build_dashboard_payload(
+    if args.command == "comparison-summary":
+        payload = build_comparison_payload(
             DEFAULT_COMPARISON_SPEC,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
-            print(render_dashboard_summary(payload, top=max(args.top, 1)))
+            print(render_comparison_summary(payload, top=max(args.top, 1)))
+        return 0
+
+    if args.command == "comparison-run-spec":
+        payload = build_comparison_run_spec_payload(
+            DEFAULT_COMPARISON_SPEC,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_comparison_run_spec(payload))
+        return 0
+
+    if args.command == "rerun-comparison-spec":
+        payload = json.loads(Path(args.spec_file).read_text())
+        comparison_payload = build_comparison_payload_from_run_spec_payload(
+            payload,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+        if args.as_json:
+            print(json.dumps(comparison_payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_comparison_summary(comparison_payload, top=max(args.top, 1)))
         return 0
 
     if args.command == "run-catalog":
@@ -129,11 +235,37 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit=max(args.limit, 1),
             run_kind=args.run_kind,
             generation_method=args.generation_method,
+            strategy_definition_fingerprint=args.strategy_definition_fingerprint,
+            market_data_fingerprint=args.market_data_fingerprint,
+            evaluation_fingerprint=args.evaluation_fingerprint,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_run_catalog(payload))
+        return 0
+
+    if args.command == "latest-run":
+        payload = build_latest_run_payload(
+            DEFAULT_COMPARISON_SPEC,
+            run_kind=args.run_kind,
+            generation_method=args.generation_method,
+            strategy_definition_fingerprint=args.strategy_definition_fingerprint,
+            market_data_fingerprint=args.market_data_fingerprint,
+            evaluation_fingerprint=args.evaluation_fingerprint,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_latest_run(payload))
+        return 0
+
+    if args.command == "rebuild-run-index":
+        payload = build_run_result_store(DEFAULT_COMPARISON_SPEC).rebuild_index()
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Rebuilt run store index: {payload['entryCount']} entries")
         return 0
 
     parser.error(f"Unknown command: {args.command}")

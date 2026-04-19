@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
-from app.dashboard_service import (
+from app.comparison_service import (
     build_condition_sweep_payload,
-    build_dashboard_payload,
+    build_comparison_payload,
+    build_comparison_payload_from_run_spec_payload,
+    build_comparison_run_spec_payload,
+    build_latest_run_payload,
     build_predictor_run_detail_payload,
     build_predictor_run_index_payload,
     build_predictor_runs_payload,
@@ -38,11 +41,33 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/dashboard")
-def dashboard() -> dict:
+@app.get("/api/comparison")
+def comparison() -> dict:
     try:
-        return build_dashboard_payload(
+        return build_comparison_payload(
             DEFAULT_COMPARISON_SPEC,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/comparison-run-spec")
+def comparison_run_spec() -> dict:
+    try:
+        return build_comparison_run_spec_payload(
+            DEFAULT_COMPARISON_SPEC,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/comparison-run-spec/rerun")
+def rerun_comparison_run_spec(payload: dict = Body(...)) -> dict:
+    try:
+        return build_comparison_payload_from_run_spec_payload(
+            payload,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
     except ValueError as exc:
@@ -57,6 +82,9 @@ def predictor_run_index(
     signal_source_kind: str | None = Query(None),
     signal_source_feature_key: str | None = Query(None),
     horizon_value: int | None = Query(None, ge=1),
+    strategy_definition_fingerprint: str | None = Query(None),
+    market_data_fingerprint: str | None = Query(None),
+    evaluation_fingerprint: str | None = Query(None),
     sort_by: str = Query("test_rank_ic"),
 ) -> dict:
     try:
@@ -68,6 +96,9 @@ def predictor_run_index(
             signal_source_kind=signal_source_kind,
             signal_source_feature_key=signal_source_feature_key,
             horizon_value=horizon_value,
+            strategy_definition_fingerprint=strategy_definition_fingerprint,
+            market_data_fingerprint=market_data_fingerprint,
+            evaluation_fingerprint=evaluation_fingerprint,
             sort_by=sort_by,
         )
     except ValueError as exc:
@@ -98,11 +129,19 @@ def predictor_run_detail(run_key: str) -> dict:
 
 
 @app.get("/api/strategy-runs")
-def strategy_run_index(limit: int = Query(50, ge=1, le=500)) -> dict:
+def strategy_run_index(
+    limit: int = Query(50, ge=1, le=500),
+    strategy_definition_fingerprint: str | None = Query(None),
+    market_data_fingerprint: str | None = Query(None),
+    evaluation_fingerprint: str | None = Query(None),
+) -> dict:
     try:
         return build_strategy_run_index_payload(
             DEFAULT_COMPARISON_SPEC,
             limit=limit,
+            strategy_definition_fingerprint=strategy_definition_fingerprint,
+            market_data_fingerprint=market_data_fingerprint,
+            evaluation_fingerprint=evaluation_fingerprint,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -157,6 +196,9 @@ def run_catalog(
     limit: int = Query(50, ge=1, le=500),
     run_kind: str | None = Query(None),
     generation_method: str | None = Query(None),
+    strategy_definition_fingerprint: str | None = Query(None),
+    market_data_fingerprint: str | None = Query(None),
+    evaluation_fingerprint: str | None = Query(None),
 ) -> dict:
     try:
         return build_run_catalog_payload(
@@ -164,6 +206,30 @@ def run_catalog(
             limit=limit,
             run_kind=run_kind,
             generation_method=generation_method,
+            strategy_definition_fingerprint=strategy_definition_fingerprint,
+            market_data_fingerprint=market_data_fingerprint,
+            evaluation_fingerprint=evaluation_fingerprint,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/run-catalog/latest")
+def latest_run_catalog_record(
+    run_kind: str | None = Query(None),
+    generation_method: str | None = Query(None),
+    strategy_definition_fingerprint: str | None = Query(None),
+    market_data_fingerprint: str | None = Query(None),
+    evaluation_fingerprint: str | None = Query(None),
+) -> dict:
+    try:
+        return build_latest_run_payload(
+            DEFAULT_COMPARISON_SPEC,
+            run_kind=run_kind,
+            generation_method=generation_method,
+            strategy_definition_fingerprint=strategy_definition_fingerprint,
+            market_data_fingerprint=market_data_fingerprint,
+            evaluation_fingerprint=evaluation_fingerprint,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

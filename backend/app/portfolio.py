@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import statistics
 
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
 from app.portfolio_domain import *
+from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
 
 def freeze_parameter_value(value: object) -> object:
     if isinstance(value, dict):
@@ -14,6 +16,535 @@ def freeze_parameter_value(value: object) -> object:
     if isinstance(value, list):
         return tuple(freeze_parameter_value(item) for item in value)
     return value
+
+
+def load_legacy_alignment_policy_payload(raw_alignment_policy: str | None) -> dict[str, object] | None:
+    if not raw_alignment_policy:
+        return None
+    return json.loads(raw_alignment_policy)
+
+
+def build_legacy_strategy_execution_payloads(strategy: StrategySpec) -> dict[str, object]:
+    extensions = dict(strategy.extensions)
+    primary_selection_payload = {
+        "selectionKey": strategy.selection.key,
+        "strategyType": strategy.selection.strategy_type,
+        "label": strategy.selection.label,
+        "description": strategy.selection.description,
+        "scoreParameters": thaw_strategy_parameter_value(dict(strategy.selection.ranking_signal.score_parameters)),
+        "weight": float(extensions.get("selection_signal_weight", 1.0)),
+        "dataTimeframe": extensions.get("signal_data_timeframe", strategy.timeframe.key),
+        "signalTimeframe": extensions.get("signal_timeframe", strategy.timeframe.key),
+        "alignmentPolicy": load_legacy_alignment_policy_payload(extensions.get("selection_signal_alignment_policy")),
+    }
+
+    raw_additional_selection_payloads = extensions.get("additional_selection_signals")
+    additional_selection_payloads: list[dict[str, object]] = []
+    if raw_additional_selection_payloads is not None:
+        decoded_payloads = json.loads(raw_additional_selection_payloads)
+        if not isinstance(decoded_payloads, list):
+            raise ValueError("additional_selection_signals must be a JSON list")
+        additional_selection_payloads = decoded_payloads
+
+    predictor_payload = None
+    if strategy.predictor_use is not None:
+        predictor_payload = {
+            "predictorKey": strategy.predictor_use.predictor_key,
+            "signalWeight": strategy.predictor_use.signal_weight,
+            "predictorWeight": strategy.predictor_use.predictor_weight,
+            "dataTimeframe": extensions.get("predictor_signal_data_timeframe", primary_selection_payload["dataTimeframe"]),
+            "signalTimeframe": extensions.get("predictor_signal_timeframe", strategy.timeframe.key),
+            "alignmentPolicy": load_legacy_alignment_policy_payload(extensions.get("predictor_signal_alignment_policy")),
+        }
+
+    return {
+        "decisionSchedule": str(extensions.get("decision_schedule", strategy.execution_policy.rebalance_schedule)),
+        "marketDataTimeframeKey": str(primary_selection_payload["dataTimeframe"]),
+        "primarySelectionSignal": primary_selection_payload,
+        "additionalSelectionSignals": additional_selection_payloads,
+        "predictorSignal": predictor_payload,
+    }
+
+
+def resolve_decision_schedule(strategy: StrategySpec) -> str:
+    if strategy.decision_schedule is not None:
+        return str(strategy.decision_schedule)
+    return str(build_legacy_strategy_execution_payloads(strategy)["decisionSchedule"])
+
+
+def resolve_strategy_market_data_timeframe_key(strategy: StrategySpec) -> str:
+    if strategy.signal_execution_contexts:
+        return str(strategy.signal_execution_contexts[0]["dataTimeframe"])
+    return str(build_legacy_strategy_execution_payloads(strategy)["marketDataTimeframeKey"])
+
+
+def extract_additional_selection_signal_payloads(strategy: StrategySpec) -> list[dict[str, object]]:
+    if len(strategy.signal_execution_contexts) > 1:
+        return [dict(selection_context) for selection_context in strategy.signal_execution_contexts[1:]]
+    return list(build_legacy_strategy_execution_payloads(strategy)["additionalSelectionSignals"])
+
+
+def extract_primary_selection_signal_payload(strategy: StrategySpec) -> dict[str, object]:
+    if strategy.signal_execution_contexts:
+        return dict(strategy.signal_execution_contexts[0])
+    return dict(build_legacy_strategy_execution_payloads(strategy)["primarySelectionSignal"])
+
+
+def extract_predictor_signal_payload(strategy: StrategySpec) -> dict[str, object] | None:
+    if strategy.predictor_use is None:
+        return None
+    if strategy.predictor_signal_execution_context is not None:
+        return dict(strategy.predictor_signal_execution_context)
+
+    predictor_payload = build_legacy_strategy_execution_payloads(strategy)["predictorSignal"]
+    if predictor_payload is None:
+        return None
+    return dict(predictor_payload)
+
+
+def get_strategy_definition_signal_execution_contexts(
+    strategy_definition,
+) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+    if isinstance(strategy_definition, StrategyBlueprintSpec):
+        return build_strategy_signal_execution_contexts_from_blueprint(strategy_definition)
+
+    if strategy_definition.signal_execution_contexts or strategy_definition.predictor_signal_execution_context is not None:
+        return (
+            [dict(selection_context) for selection_context in strategy_definition.signal_execution_contexts],
+            None
+            if strategy_definition.predictor_signal_execution_context is None
+            else dict(strategy_definition.predictor_signal_execution_context),
+        )
+
+    selection_payloads = [
+        extract_primary_selection_signal_payload(strategy_definition),
+        *extract_additional_selection_signal_payloads(strategy_definition),
+    ]
+    normalized_selection_contexts = [
+        {
+            "signalKey": str(payload.get("selectionKey") or payload.get("strategyType")),
+            "signalLabel": str(payload.get("label") or payload.get("selectionKey") or payload.get("strategyType")),
+            "description": str(payload.get("description") or payload.get("label") or payload.get("selectionKey") or payload.get("strategyType")),
+            "sourceKind": "selection_signal",
+            "selectionKey": str(payload.get("selectionKey") or payload.get("strategyType")),
+            "strategyType": str(payload.get("strategyType")),
+            "scoreParameters": payload.get("scoreParameters"),
+            "dataTimeframe": str(payload.get("dataTimeframe", strategy_definition.timeframe.key)),
+            "signalTimeframe": str(payload.get("signalTimeframe", strategy_definition.timeframe.key)),
+            "alignmentPolicy": payload.get("alignmentPolicy"),
+            "weight": float(payload.get("weight", 1.0)),
+        }
+        for payload in selection_payloads
+    ]
+
+    normalized_predictor_context = None
+    predictor_payload = extract_predictor_signal_payload(strategy_definition)
+    if predictor_payload is not None:
+        normalized_predictor_context = {
+            "sourceKind": "predictor_overlay",
+            "predictorKey": str(predictor_payload.get("predictorKey")),
+            "signalWeight": float(predictor_payload.get("signalWeight", strategy_definition.predictor_use.signal_weight)),
+            "predictorWeight": float(
+                predictor_payload.get("predictorWeight", strategy_definition.predictor_use.predictor_weight)
+            ),
+            "dataTimeframe": str(predictor_payload.get("dataTimeframe", strategy_definition.timeframe.key)),
+            "signalTimeframe": str(predictor_payload.get("signalTimeframe", strategy_definition.timeframe.key)),
+            "alignmentPolicy": predictor_payload.get("alignmentPolicy"),
+        }
+    return normalized_selection_contexts, normalized_predictor_context
+
+
+def build_runtime_signal_execution_contexts(
+    normalized_selection_contexts: list[dict[str, object]],
+    normalized_predictor_context: dict[str, object] | None,
+) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+    selection_contexts = [
+        {
+            "source_kind": "selection_signal",
+            "selection": build_selection_spec_from_signal_payload(selection_context),
+            "weight": float(selection_context["weight"]),
+            "data_timeframe_key": str(selection_context["dataTimeframe"]),
+            "signal_timeframe_key": str(selection_context["signalTimeframe"]),
+            "alignment_policy": selection_context["alignmentPolicy"],
+        }
+        for selection_context in normalized_selection_contexts
+    ]
+
+    predictor_context = None
+    if normalized_predictor_context is not None:
+        predictor_context = {
+            "source_kind": "predictor_overlay",
+            "predictor_key": str(normalized_predictor_context["predictorKey"]),
+            "signal_weight": float(normalized_predictor_context["signalWeight"]),
+            "predictor_weight": float(normalized_predictor_context["predictorWeight"]),
+            "data_timeframe_key": str(normalized_predictor_context["dataTimeframe"]),
+            "signal_timeframe_key": str(normalized_predictor_context["signalTimeframe"]),
+            "alignment_policy": normalized_predictor_context["alignmentPolicy"],
+        }
+    return selection_contexts, predictor_context
+
+
+def get_strategy_signal_execution_contexts(
+    strategy: StrategySpec,
+) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+    normalized_selection_contexts, normalized_predictor_context = get_strategy_definition_signal_execution_contexts(strategy)
+    return build_runtime_signal_execution_contexts(
+        normalized_selection_contexts,
+        normalized_predictor_context,
+    )
+
+
+def resolve_runtime_signal_execution_contexts(
+    strategy: StrategySpec,
+    signal_execution_contexts: tuple[list[dict[str, object]], dict[str, object] | None] | None = None,
+) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+    if signal_execution_contexts is None:
+        return get_strategy_signal_execution_contexts(strategy)
+
+    selection_contexts, predictor_context = signal_execution_contexts
+    if selection_contexts and "selection" not in selection_contexts[0]:
+        return build_runtime_signal_execution_contexts(selection_contexts, predictor_context)
+    return selection_contexts, predictor_context
+
+
+def resolve_timeframe_bars_per_year(timeframe_key: str) -> float:
+    if timeframe_key == DEFAULT_DAILY_TIMEFRAME.key:
+        return DEFAULT_DAILY_TIMEFRAME.bars_per_year
+    if timeframe_key == DEFAULT_WEEKLY_TIMEFRAME.key:
+        return DEFAULT_WEEKLY_TIMEFRAME.bars_per_year
+    if timeframe_key == DEFAULT_MONTHLY_TIMEFRAME.key:
+        return DEFAULT_MONTHLY_TIMEFRAME.bars_per_year
+    raise ValueError(f"Unsupported timeframe key: {timeframe_key}")
+
+
+def build_selection_spec_from_signal_payload(payload: dict[str, object]) -> RankingSourceSpec:
+    strategy_type = str(payload.get("strategyType"))
+    score_parameters = payload.get("scoreParameters")
+    return build_selection_spec(
+        strategy_type,
+        key=str(payload.get("selectionKey") or strategy_type),
+        label=str(payload.get("label") or strategy_type),
+        description=str(payload.get("description") or strategy_type),
+        score_parameters=score_parameters if isinstance(score_parameters, dict) else None,
+    )
+
+
+def get_strategy_selection_components(
+    strategy: StrategySpec | None = None,
+    *,
+    selection_contexts: list[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    if selection_contexts is not None:
+        return selection_contexts
+    if strategy is None:
+        raise ValueError("strategy or selection_contexts is required")
+    selection_contexts, _ = get_strategy_signal_execution_contexts(strategy)
+    return selection_contexts
+
+
+def compute_strategy_selection_score_series(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy: StrategySpec,
+    *,
+    bars_per_year: float,
+    selection_contexts: list[dict[str, object]] | None = None,
+) -> pd.Series | None:
+    selection_components = get_strategy_selection_components(
+        strategy,
+        selection_contexts=selection_contexts,
+    )
+    if len(selection_components) == 1 and float(selection_components[0]["weight"]) == 1.0:
+        return compute_strategy_score_series_base(
+            returns,
+            volume_history,
+            selection_components[0]["selection"],
+            bars_per_year=bars_per_year,
+        )
+
+    blended_scores: pd.Series | None = None
+    total_weight = 0.0
+    for component in selection_components:
+        selection = component["selection"]
+        weight = float(component["weight"])
+        signal_returns, signal_volumes, signal_bars_per_year = prepare_signal_component_data(
+            history_returns=returns,
+            volume_history=volume_history,
+            data_timeframe_key=component["data_timeframe_key"],
+            signal_timeframe_key=component["signal_timeframe_key"],
+            alignment_policy=component["alignment_policy"],
+        )
+        component_scores = compute_strategy_score_series_base(
+            signal_returns,
+            signal_volumes,
+            selection,
+            bars_per_year=signal_bars_per_year,
+        )
+        if component_scores is None:
+            continue
+        aligned_scores = component_scores.reindex(returns.columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        standardized_scores = standardize_prediction_series(aligned_scores)
+        blended_scores = (
+            standardized_scores * weight
+            if blended_scores is None
+            else blended_scores.add(standardized_scores * weight, fill_value=0.0)
+        )
+        total_weight += weight
+
+    if blended_scores is None:
+        return None
+    if total_weight <= 0:
+        return blended_scores
+    return blended_scores / total_weight
+
+
+def compute_strategy_selection_trailing_total_returns(
+    returns: pd.DataFrame,
+    strategy: StrategySpec,
+    *,
+    bars_per_year: float,
+    selection_contexts: list[dict[str, object]] | None = None,
+) -> pd.Series:
+    selection_components = get_strategy_selection_components(
+        strategy,
+        selection_contexts=selection_contexts,
+    )
+    if len(selection_components) == 1 and float(selection_components[0]["weight"]) == 1.0:
+        return compute_trailing_total_returns(
+            returns,
+            selection_components[0]["selection"],
+            bars_per_year=bars_per_year,
+        )
+
+    blended_returns: pd.Series | None = None
+    total_weight = 0.0
+    for component in selection_components:
+        selection = component["selection"]
+        weight = float(component["weight"])
+        signal_returns, _, signal_bars_per_year = prepare_signal_component_data(
+            history_returns=returns,
+            volume_history=None,
+            data_timeframe_key=component["data_timeframe_key"],
+            signal_timeframe_key=component["signal_timeframe_key"],
+            alignment_policy=component["alignment_policy"],
+        )
+        component_returns = compute_trailing_total_returns(
+            signal_returns,
+            selection,
+            bars_per_year=signal_bars_per_year,
+        ).reindex(returns.columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        blended_returns = (
+            component_returns * weight
+            if blended_returns is None
+            else blended_returns.add(component_returns * weight, fill_value=0.0)
+        )
+        total_weight += weight
+
+    if blended_returns is None:
+        return pd.Series(0.0, index=returns.columns, dtype="float64")
+    if total_weight <= 0:
+        return blended_returns
+    return blended_returns / total_weight
+
+
+def resample_market_frame_to_timeframe(
+    frame: pd.DataFrame | None,
+    *,
+    target_timeframe_key: str,
+    value_kind: str,
+    alignment_method: str | None = None,
+) -> pd.DataFrame | None:
+    if frame is None or target_timeframe_key == DEFAULT_DAILY_TIMEFRAME.key:
+        return frame
+
+    resolved_alignment_method = alignment_method or "end_of_period"
+    if resolved_alignment_method not in {"asof_last", "end_of_period", "calendar_resample"}:
+        raise ValueError(f"Unsupported alignment method: {resolved_alignment_method}")
+
+    if target_timeframe_key == DEFAULT_WEEKLY_TIMEFRAME.key:
+        period_alias = "W-FRI"
+    elif target_timeframe_key == DEFAULT_MONTHLY_TIMEFRAME.key:
+        period_alias = "M"
+    else:
+        raise ValueError(f"Unsupported target timeframe for resampling: {target_timeframe_key}")
+
+    normalized_frame = frame.copy()
+    normalized_frame.index = pd.DatetimeIndex(pd.to_datetime(frame.index), name=frame.index.name)
+
+    if resolved_alignment_method == "end_of_period":
+        period_index = normalized_frame.index.to_period(period_alias)
+        if value_kind in {"close", "last"}:
+            aggregated = normalized_frame.groupby(period_index).last()
+        elif value_kind == "volume":
+            aggregated = normalized_frame.groupby(period_index).sum(min_count=1)
+        else:
+            raise ValueError(f"Unsupported market frame kind: {value_kind}")
+        last_dates = pd.Series(normalized_frame.index, index=period_index).groupby(level=0).last()
+        aggregated.index = pd.DatetimeIndex(last_dates.to_list(), name=frame.index.name)
+        return aggregated
+
+    if value_kind in {"close", "last"}:
+        aggregated = normalized_frame.resample(period_alias).last()
+    elif value_kind == "volume":
+        aggregated = normalized_frame.resample(period_alias).sum(min_count=1)
+    else:
+        raise ValueError(f"Unsupported market frame kind: {value_kind}")
+
+    aggregated = aggregated.dropna(how="all")
+    aggregated.index = pd.DatetimeIndex(aggregated.index, name=frame.index.name)
+    return aggregated
+
+
+def prepare_strategy_market_data(
+    *,
+    closes: pd.DataFrame,
+    volumes: pd.DataFrame | None,
+    strategy: StrategySpec,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    market_data_timeframe_key = resolve_strategy_market_data_timeframe_key(strategy)
+    if market_data_timeframe_key == strategy.timeframe.key:
+        return closes, volumes
+
+    resampled_closes = resample_market_frame_to_timeframe(
+        closes,
+        target_timeframe_key=strategy.timeframe.key,
+        value_kind="close",
+    )
+    resampled_volumes = resample_market_frame_to_timeframe(
+        volumes,
+        target_timeframe_key=strategy.timeframe.key,
+        value_kind="volume",
+    )
+    if resampled_volumes is not None:
+        resampled_volumes = resampled_volumes.reindex(resampled_closes.index)
+    return resampled_closes, resampled_volumes
+
+
+def resample_returns_frame_to_timeframe(
+    returns: pd.DataFrame,
+    *,
+    target_timeframe_key: str,
+    alignment_method: str | None = None,
+) -> pd.DataFrame:
+    if target_timeframe_key == DEFAULT_DAILY_TIMEFRAME.key:
+        return returns
+
+    cumulative = (1.0 + returns).cumprod()
+    resampled_closes = resample_market_frame_to_timeframe(
+        cumulative,
+        target_timeframe_key=target_timeframe_key,
+        value_kind="close",
+        alignment_method=alignment_method,
+    )
+    return resampled_closes.pct_change().dropna()
+
+
+def prepare_signal_component_data(
+    *,
+    history_returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    data_timeframe_key: str,
+    signal_timeframe_key: str,
+    alignment_policy: dict[str, object] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame | None, float]:
+    signal_bars_per_year = resolve_timeframe_bars_per_year(signal_timeframe_key)
+    if data_timeframe_key == signal_timeframe_key:
+        return history_returns, volume_history, signal_bars_per_year
+
+    alignment_method = None if alignment_policy is None else str(alignment_policy.get("method"))
+    signal_returns = resample_returns_frame_to_timeframe(
+        history_returns,
+        target_timeframe_key=signal_timeframe_key,
+        alignment_method=alignment_method,
+    )
+    signal_volumes = resample_market_frame_to_timeframe(
+        volume_history,
+        target_timeframe_key=signal_timeframe_key,
+        value_kind="volume",
+        alignment_method=alignment_method,
+    )
+    if signal_volumes is not None:
+        signal_volumes = signal_volumes.reindex(signal_returns.index)
+    return signal_returns, signal_volumes, signal_bars_per_year
+
+
+def prepare_strategy_signal_data(
+    *,
+    history_returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy: StrategySpec | None = None,
+    selection_contexts: list[dict[str, object]] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame | None, float]:
+    selection_components = get_strategy_selection_components(
+        strategy,
+        selection_contexts=selection_contexts,
+    )
+    primary_selection_context = selection_components[0]
+    return prepare_signal_component_data(
+        history_returns=history_returns,
+        volume_history=volume_history,
+        data_timeframe_key=str(primary_selection_context["data_timeframe_key"]),
+        signal_timeframe_key=str(primary_selection_context["signal_timeframe_key"]),
+        alignment_policy=primary_selection_context["alignment_policy"],
+    )
+
+
+def prepare_strategy_predictor_panel(
+    *,
+    predictor_panel: pd.DataFrame | None,
+    strategy: StrategySpec | None = None,
+    predictor_context: dict[str, object] | None = None,
+    market_data_timeframe_key: str | None = None,
+    signal_timeframe_key: str | None = None,
+) -> pd.DataFrame | None:
+    if predictor_panel is None:
+        return None
+
+    if predictor_context is None and strategy is not None:
+        _, predictor_context = get_strategy_signal_execution_contexts(strategy)
+    if market_data_timeframe_key is None:
+        if predictor_context is not None:
+            market_data_timeframe_key = str(predictor_context["data_timeframe_key"])
+        elif strategy is not None:
+            market_data_timeframe_key = resolve_strategy_market_data_timeframe_key(strategy)
+        else:
+            raise ValueError("strategy, predictor_context, or market_data_timeframe_key is required")
+    if signal_timeframe_key is None:
+        if predictor_context is not None:
+            signal_timeframe_key = str(predictor_context["signal_timeframe_key"])
+        elif strategy is not None:
+            signal_timeframe_key = strategy.timeframe.key
+        else:
+            raise ValueError("strategy, predictor_context, or signal_timeframe_key is required")
+    alignment_method = None
+    if predictor_context is not None:
+        alignment_policy = predictor_context["alignment_policy"]
+        alignment_method = None if alignment_policy is None else str(alignment_policy.get("method"))
+    if market_data_timeframe_key == signal_timeframe_key:
+        return predictor_panel
+
+    return resample_market_frame_to_timeframe(
+        predictor_panel,
+        target_timeframe_key=signal_timeframe_key,
+        value_kind="last",
+        alignment_method=alignment_method,
+    )
+
+
+def resolve_predictor_snapshot(
+    predictor_panel: pd.DataFrame | None,
+    *,
+    current_date: str | None,
+) -> pd.Series | None:
+    if predictor_panel is None or current_date is None or predictor_panel.empty:
+        return None
+
+    panel = predictor_panel.copy()
+    panel.index = pd.to_datetime(panel.index)
+    eligible_panel = panel.loc[panel.index <= pd.Timestamp(current_date)]
+    if eligible_panel.empty:
+        return None
+    return eligible_panel.iloc[-1]
 
 
 def build_asset_ranking_specs(
@@ -468,6 +999,7 @@ def compare_portfolio_runs(
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
     predictor_panels_by_strategy: dict[str, pd.DataFrame] | None = None,
+    strategy_signal_execution_contexts_by_key: dict[str, tuple[list[dict[str, object]], dict[str, object] | None]] | None = None,
 ) -> list[dict]:
     if not strategies:
         raise ValueError("At least one strategy is required.")
@@ -491,9 +1023,18 @@ def compare_portfolio_runs(
             raise ValueError("Transaction cost must be between 0 and 1.")
         cost_model = build_flat_cost_model(commission_pct=transaction_cost * 100, slippage_pct=0.0)
 
+    if strategy_signal_execution_contexts_by_key is None:
+        strategy_signal_execution_contexts_by_key = {}
+
     runs: list[dict] = []
     for strategy in strategies:
+        signal_execution_contexts = resolve_runtime_signal_execution_contexts(
+            strategy,
+            strategy_signal_execution_contexts_by_key.get(strategy.key),
+        )
+        selection_contexts, predictor_context = signal_execution_contexts
         rebalance_schedule = strategy.execution_policy.rebalance_schedule
+        decision_schedule = resolve_decision_schedule(strategy)
         strategy_universe = [
             asset
             for asset in strategy.investment_universe.tickers
@@ -539,6 +1080,8 @@ def compare_portfolio_runs(
             transaction_cost=default_transaction_cost,
             current_date=str(returns.index[split_index]) if split_index < len(returns.index) else None,
             predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
+            selection_contexts=selection_contexts,
+            predictor_context=predictor_context,
         )
         backtest = run_portfolio_backtest(
             closes=strategy_closes,
@@ -559,8 +1102,11 @@ def compare_portfolio_runs(
             adv_window_bars=adv_window_bars,
             min_adv_notional=min_adv_notional,
             max_weight=risk_controls.max_weight,
+            decision_schedule=decision_schedule,
             rebalance_schedule=rebalance_schedule,
             predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
+            selection_contexts=selection_contexts,
+            predictor_context=predictor_context,
         )
 
         runs.append(
@@ -596,6 +1142,7 @@ def evaluate_strategy_run(
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
     predictor_panel: pd.DataFrame | None = None,
+    signal_execution_contexts: tuple[list[dict[str, object]], dict[str, object] | None] | None = None,
 ) -> dict:
     return compare_portfolio_runs(
         closes=closes,
@@ -609,6 +1156,11 @@ def evaluate_strategy_run(
         transaction_cost=transaction_cost,
         portfolio_state=portfolio_state,
         predictor_panels_by_strategy=None if predictor_panel is None else {strategy.key: predictor_panel},
+        strategy_signal_execution_contexts_by_key=(
+            None
+            if signal_execution_contexts is None
+            else {strategy.key: signal_execution_contexts}
+        ),
     )[0]
 
 
@@ -669,34 +1221,50 @@ def compare_portfolio_models(
 def select_assets(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: RankingSourceSpec,
+    selection: StrategySpec | RankingSourceSpec,
     *,
     bars_per_year: float,
+    selection_contexts: list[dict[str, object]] | None = None,
 ) -> list[str]:
-    trailing_total_returns = compute_trailing_total_returns(
-        returns,
-        selection,
-        bars_per_year=bars_per_year,
-    )
+    if isinstance(selection, StrategySpec):
+        strategy = selection
+        base_selection = resolve_primary_selection_spec(
+            strategy,
+            selection_contexts=selection_contexts,
+        )
+        trailing_total_returns = compute_strategy_selection_trailing_total_returns(
+            returns,
+            strategy,
+            bars_per_year=bars_per_year,
+            selection_contexts=selection_contexts,
+        )
+    else:
+        strategy = None
+        base_selection = selection
+        trailing_total_returns = compute_trailing_total_returns(
+            returns,
+            selection,
+            bars_per_year=bars_per_year,
+        )
 
-    if selection.strategy_type == "full_universe":
+    if base_selection.strategy_type == "full_universe":
         return list(returns.columns)
-    if selection.strategy_type == "full_universe_momentum_tilt":
+    if base_selection.strategy_type == "full_universe_momentum_tilt":
         return list(returns.columns)
-    if selection.strategy_type == "full_universe_momentum_low_vol_tilt":
+    if base_selection.strategy_type == "full_universe_momentum_low_vol_tilt":
         return list(returns.columns)
-    if selection.strategy_type == "full_universe_momentum_macro_tilt":
+    if base_selection.strategy_type == "full_universe_momentum_macro_tilt":
         return list(returns.columns)
-    if selection.strategy_type == "momentum_top3":
+    if base_selection.strategy_type == "momentum_top3":
         selected = trailing_total_returns.sort_values(ascending=False).head(min(3, len(trailing_total_returns)))
         return list(selected.index)
-    if selection.strategy_type == "dual_momentum_top3":
+    if base_selection.strategy_type == "dual_momentum_top3":
         positive_returns = trailing_total_returns[trailing_total_returns > 0]
         if positive_returns.empty:
             return []
         selected = positive_returns.sort_values(ascending=False).head(min(3, len(positive_returns)))
         return list(selected.index)
-    if selection.strategy_type == "trailing_momentum_low_vol_universe":
+    if base_selection.strategy_type == "trailing_momentum_low_vol_universe":
         positive_assets = trailing_total_returns[trailing_total_returns > 0].sort_values(ascending=False)
         if positive_assets.empty:
             return []
@@ -706,12 +1274,12 @@ def select_assets(
         if selected.empty:
             return [str(volatilities.idxmin())]
         return list(selected.index)
-    if selection.strategy_type == "positive_momentum_universe":
+    if base_selection.strategy_type == "positive_momentum_universe":
         positive_returns = trailing_total_returns[trailing_total_returns > 0]
         if positive_returns.empty:
             return []
         return list(positive_returns.sort_values(ascending=False).index)
-    if selection.strategy_type == "positive_momentum_low_vol_universe":
+    if base_selection.strategy_type == "positive_momentum_low_vol_universe":
         positive_assets = trailing_total_returns[trailing_total_returns > 0].sort_values(ascending=False)
         if positive_assets.empty:
             return []
@@ -721,7 +1289,7 @@ def select_assets(
         if selected.empty:
             return [str(volatilities.idxmin())]
         return list(selected.index)
-    if selection.strategy_type == "positive_momentum_high_volume_universe":
+    if base_selection.strategy_type == "positive_momentum_high_volume_universe":
         if volume_history is None:
             raise ValueError("Volume history is required for the selected portfolio strategy.")
         total_returns = (1 + returns).prod() - 1
@@ -1044,6 +1612,34 @@ def compute_predictor_panel(
     return prediction_panel
 
 
+def resolve_primary_selection_spec(
+    strategy_or_selection: StrategySpec | RankingSourceSpec,
+    *,
+    selection_contexts: list[dict[str, object]] | None = None,
+) -> RankingSourceSpec:
+    if selection_contexts is not None and len(selection_contexts) > 0:
+        return selection_contexts[0]["selection"]
+    if isinstance(strategy_or_selection, StrategySpec):
+        return strategy_or_selection.selection
+    return strategy_or_selection
+
+
+def resolve_predictor_use_spec(
+    strategy_or_selection: StrategySpec | RankingSourceSpec,
+    *,
+    predictor_context: dict[str, object] | None = None,
+) -> PredictorUseSpec | None:
+    if predictor_context is not None:
+        return build_predictor_use_spec(
+            predictor_key=str(predictor_context["predictor_key"]),
+            signal_weight=float(predictor_context["signal_weight"]),
+            predictor_weight=float(predictor_context["predictor_weight"]),
+        )
+    if isinstance(strategy_or_selection, StrategySpec):
+        return strategy_or_selection.predictor_use
+    return None
+
+
 def compute_prediction_supplemented_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
@@ -1052,13 +1648,9 @@ def compute_prediction_supplemented_score_series(
     bars_per_year: float,
     base_score_series: pd.Series,
     predictor_snapshot: pd.Series | None = None,
+    predictor_use: PredictorUseSpec | None = None,
 ) -> pd.Series:
-    if isinstance(strategy_or_selection, StrategySpec):
-        selection = strategy_or_selection.selection
-        predictor_use = strategy_or_selection.predictor_use
-    else:
-        selection = strategy_or_selection
-        predictor_use = None
+    predictor_use = predictor_use or resolve_predictor_use_spec(strategy_or_selection)
     if predictor_use is None:
         return base_score_series
 
@@ -1090,23 +1682,34 @@ def compute_strategy_score_series(
     bars_per_year: float,
     current_date: str | None = None,
     predictor_panel: pd.DataFrame | None = None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
 ) -> pd.Series | None:
-    selection = (
-        strategy_or_selection.selection
-        if isinstance(strategy_or_selection, StrategySpec)
-        else strategy_or_selection
+    selection = resolve_primary_selection_spec(
+        strategy_or_selection,
+        selection_contexts=selection_contexts,
     )
-    base_score_series = compute_strategy_score_series_base(
-        returns,
-        volume_history,
-        selection,
-        bars_per_year=bars_per_year,
-    )
+    if isinstance(strategy_or_selection, StrategySpec):
+        base_score_series = compute_strategy_selection_score_series(
+            returns,
+            volume_history,
+            strategy_or_selection,
+            bars_per_year=bars_per_year,
+            selection_contexts=selection_contexts,
+        )
+    else:
+        base_score_series = compute_strategy_score_series_base(
+            returns,
+            volume_history,
+            selection,
+            bars_per_year=bars_per_year,
+        )
     if base_score_series is None:
         return None
-    predictor_snapshot = None
-    if predictor_panel is not None and current_date is not None and current_date in predictor_panel.index:
-        predictor_snapshot = predictor_panel.loc[current_date]
+    predictor_snapshot = resolve_predictor_snapshot(
+        predictor_panel,
+        current_date=current_date,
+    )
     return compute_prediction_supplemented_score_series(
         returns,
         volume_history,
@@ -1114,6 +1717,10 @@ def compute_strategy_score_series(
         bars_per_year=bars_per_year,
         base_score_series=base_score_series,
         predictor_snapshot=predictor_snapshot,
+        predictor_use=resolve_predictor_use_spec(
+            strategy_or_selection,
+            predictor_context=predictor_context,
+        ),
     )
 
 
@@ -1397,16 +2004,25 @@ def compute_portfolio_allocation(
     transaction_cost: float,
     current_date: str | None,
     predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
 ) -> tuple[list[str], np.ndarray]:
+    signal_returns, signal_volumes, signal_bars_per_year = prepare_strategy_signal_data(
+        history_returns=history_returns,
+        volume_history=volume_history,
+        strategy=strategy,
+        selection_contexts=selection_contexts,
+    )
     selected_assets = select_assets(
-        history_returns,
-        volume_history,
-        strategy.selection,
-        bars_per_year=bars_per_year,
+        signal_returns,
+        signal_volumes,
+        strategy,
+        bars_per_year=signal_bars_per_year,
+        selection_contexts=selection_contexts,
     )
     if not selected_assets:
         return [], np.zeros(len(universe_columns), dtype="float64")
-    strategy_returns = filter_positive_variance_assets(history_returns[selected_assets])
+    strategy_returns = filter_positive_variance_assets(signal_returns[selected_assets])
     selected_assets = list(strategy_returns.columns)
     selected_previous_weights = None
     if previous_weights is not None:
@@ -1418,13 +2034,20 @@ def compute_portfolio_allocation(
             [previous_weight_map.get(asset, 0.0) for asset in selected_assets],
             dtype="float64",
         )
+    prepared_predictor_panel = prepare_strategy_predictor_panel(
+        predictor_panel=predictor_panel,
+        strategy=strategy,
+        predictor_context=predictor_context,
+    )
     expected_return_proxy = compute_expected_return_proxy(
         returns=strategy_returns,
-        volume_history=volume_history[selected_assets] if volume_history is not None else None,
+        volume_history=signal_volumes[selected_assets] if signal_volumes is not None else None,
         strategy=strategy,
-        bars_per_year=bars_per_year,
+        bars_per_year=signal_bars_per_year,
         current_date=current_date,
-        predictor_panel=predictor_panel,
+        predictor_panel=prepared_predictor_panel,
+        selection_contexts=selection_contexts,
+        predictor_context=predictor_context,
     )
     weights = fit_portfolio_model(
         strategy_returns,
@@ -1440,11 +2063,13 @@ def compute_portfolio_allocation(
             weights=weights,
             history_returns=strategy_returns,
             strategy=strategy,
-            bars_per_year=bars_per_year,
+            bars_per_year=signal_bars_per_year,
             max_investment_ratio=max_investment_ratio,
             max_weight=max_weight,
             current_date=current_date,
-            predictor_panel=predictor_panel,
+            predictor_panel=prepared_predictor_panel,
+            selection_contexts=selection_contexts,
+            predictor_context=predictor_context,
         )
     expanded_weights = expand_weights(
         universe_columns=universe_columns,
@@ -1464,8 +2089,14 @@ def apply_strategy_weight_tilt(
     max_weight: float | None,
     current_date: str | None,
     predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
 ) -> np.ndarray:
-    score_parameters = dict(strategy.selection.ranking_signal.score_parameters)
+    primary_selection = resolve_primary_selection_spec(
+        strategy,
+        selection_contexts=selection_contexts,
+    )
+    score_parameters = dict(primary_selection.ranking_signal.score_parameters)
     if "tilt_strength" not in score_parameters:
         return weights
 
@@ -1476,6 +2107,8 @@ def apply_strategy_weight_tilt(
         bars_per_year=bars_per_year,
         current_date=current_date,
         predictor_panel=predictor_panel,
+        selection_contexts=selection_contexts,
+        predictor_context=predictor_context,
     )
     if score_series is None:
         return weights
@@ -1518,6 +2151,8 @@ def compute_expected_return_proxy(
     bars_per_year: float,
     current_date: str | None,
     predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
 ) -> np.ndarray | None:
     score_series = compute_strategy_score_series(
         returns,
@@ -1526,6 +2161,8 @@ def compute_expected_return_proxy(
         bars_per_year=bars_per_year,
         current_date=current_date,
         predictor_panel=predictor_panel,
+        selection_contexts=selection_contexts,
+        predictor_context=predictor_context,
     )
     if score_series is None:
         return None
@@ -1696,8 +2333,11 @@ def run_portfolio_backtest(
     adv_window_bars: int,
     min_adv_notional: float,
     max_weight: float | None,
+    decision_schedule: str,
     rebalance_schedule: str,
     predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
 ) -> dict:
     portfolio_equity = initial_capital
     portfolio_returns: list[float] = []
@@ -1710,6 +2350,8 @@ def run_portfolio_backtest(
     test_turnover = 0.0
     current_weights = initial_weights.copy()
     current_selected_assets = list(initial_selected_assets)
+    pending_weights = initial_weights.copy()
+    pending_selected_assets = list(initial_selected_assets)
     latest_weights = initial_weights.copy()
     latest_selected_assets = list(initial_selected_assets)
 
@@ -1728,40 +2370,50 @@ def run_portfolio_backtest(
                 adv_window_bars=adv_window_bars,
                 min_adv_notional=min_adv_notional,
             )
-        elif index > split_index and should_rebalance(
-            previous_date=returns.index[index - 1],
-            current_date=date,
-            rebalance_schedule=rebalance_schedule,
-        ):
-            current_selected_assets, rebalanced_weights = compute_portfolio_allocation(
-                history_returns=returns.iloc[:index],
-                volume_history=volumes.iloc[:index] if volumes is not None else None,
-                strategy=strategy,
-                portfolio_model=portfolio_model,
-                bars_per_year=bars_per_year,
-                universe_columns=returns.columns,
-                max_investment_ratio=max_investment_ratio,
-                max_weight=max_weight,
-                previous_weights=current_weights,
-                transaction_cost=transaction_cost,
-                current_date=str(date),
-                predictor_panel=predictor_panel,
-            )
-            weight_delta = np.abs(rebalanced_weights - current_weights)
-            trade_turnover = float(weight_delta.sum())
-            trade_cost = compute_trade_cost(
-                weight_delta=weight_delta,
-                linear_cost_rates=asset_transaction_costs,
-                impact_cost_rates=asset_impact_costs,
-                portfolio_equity=portfolio_equity,
-                price_snapshot=closes.iloc[index - 1],
-                volume_history=volumes.iloc[:index] if volumes is not None else None,
-                adv_window_bars=adv_window_bars,
-                min_adv_notional=min_adv_notional,
-            )
-            current_weights = rebalanced_weights
-            latest_weights = rebalanced_weights.copy()
-            latest_selected_assets = list(current_selected_assets)
+        elif index > split_index:
+            if should_rebalance(
+                previous_date=returns.index[index - 1],
+                current_date=date,
+                rebalance_schedule=decision_schedule,
+            ):
+                pending_selected_assets, pending_weights = compute_portfolio_allocation(
+                    history_returns=returns.iloc[:index],
+                    volume_history=volumes.iloc[:index] if volumes is not None else None,
+                    strategy=strategy,
+                    portfolio_model=portfolio_model,
+                    bars_per_year=bars_per_year,
+                    universe_columns=returns.columns,
+                    max_investment_ratio=max_investment_ratio,
+                    max_weight=max_weight,
+                    previous_weights=current_weights,
+                    transaction_cost=transaction_cost,
+                    current_date=str(date),
+                    predictor_panel=predictor_panel,
+                    selection_contexts=selection_contexts,
+                    predictor_context=predictor_context,
+                )
+            if should_rebalance(
+                previous_date=returns.index[index - 1],
+                current_date=date,
+                rebalance_schedule=rebalance_schedule,
+            ):
+                rebalanced_weights = pending_weights
+                current_selected_assets = list(pending_selected_assets)
+                weight_delta = np.abs(rebalanced_weights - current_weights)
+                trade_turnover = float(weight_delta.sum())
+                trade_cost = compute_trade_cost(
+                    weight_delta=weight_delta,
+                    linear_cost_rates=asset_transaction_costs,
+                    impact_cost_rates=asset_impact_costs,
+                    portfolio_equity=portfolio_equity,
+                    price_snapshot=closes.iloc[index - 1],
+                    volume_history=volumes.iloc[:index] if volumes is not None else None,
+                    adv_window_bars=adv_window_bars,
+                    min_adv_notional=min_adv_notional,
+                )
+                current_weights = rebalanced_weights
+                latest_weights = rebalanced_weights.copy()
+                latest_selected_assets = list(current_selected_assets)
 
         portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), current_weights))
         portfolio_return -= trade_cost

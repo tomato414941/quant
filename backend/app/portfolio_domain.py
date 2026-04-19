@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import math
 import statistics
 
 import numpy as np
 import pandas as pd
 from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
-from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, TimeframeSpec
+from app.timeframe_models import (
+    DEFAULT_DAILY_TIMEFRAME,
+    DEFAULT_MONTHLY_TIMEFRAME,
+    DEFAULT_WEEKLY_TIMEFRAME,
+    TimeframeSpec,
+)
 
 
 SUPPORTED_PORTFOLIO_MODELS = {
@@ -27,6 +33,17 @@ PORTFOLIO_MODEL_LABELS = {
     "mean_risk_utility_conservative": "MeanRisk効用最大化 弱",
 }
 SUPPORTED_REBALANCE_SCHEDULES = {"hold", "every_bar", "month_end", "quarter_end", "year_end"}
+DIRECT_EXECUTION_MULTI_SELECTION_STRATEGY_TYPES = {
+    "full_universe_momentum_tilt",
+    "full_universe_momentum_low_vol_tilt",
+    "full_universe_momentum_macro_tilt",
+    "momentum_top3",
+    "dual_momentum_top3",
+    "trailing_momentum_low_vol_universe",
+    "positive_momentum_universe",
+    "positive_momentum_low_vol_universe",
+    "positive_momentum_high_volume_universe",
+}
 PREDICTION_FEATURE_NAMES = ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength")
 SUPPORTED_PORTFOLIO_STRATEGIES = {
     "full_universe",
@@ -94,6 +111,30 @@ class ObservationSpec:
     label: str
     tickers: tuple[str, ...]
     fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StrategyDataSourceSpec:
+    key: str
+    label: str
+    kind: str
+    observation_spec: ObservationSpec
+
+
+@dataclass(frozen=True)
+class StrategyFeatureDefinitionSpec:
+    key: str
+    label: str
+    source_field_keys: tuple[str, ...]
+    derived_feature_keys: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AlignmentPolicySpec:
+    key: str
+    label: str
+    method: str
+    parameters: tuple[tuple[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -165,6 +206,14 @@ class ExecutionPolicySpec:
 
 
 @dataclass(frozen=True)
+class StrategyExecutionPlanSpec:
+    key: str
+    label: str
+    decision_schedule: str
+    rebalance_schedule: str
+
+
+@dataclass(frozen=True)
 class RiskControlsSpec:
     max_investment_ratio: float
     max_weight: float | None = None
@@ -175,6 +224,23 @@ class PredictorUseSpec:
     predictor_key: str
     signal_weight: float
     predictor_weight: float
+
+
+@dataclass(frozen=True)
+class StrategySignalSpec:
+    key: str
+    label: str
+    description: str
+    observation_spec: ObservationSpec
+    data_source_spec: StrategyDataSourceSpec | None
+    feature_definition_spec: StrategyFeatureDefinitionSpec | None
+    alignment_policy: AlignmentPolicySpec | None
+    data_timeframe: TimeframeSpec
+    signal_timeframe: TimeframeSpec
+    source_kind: str
+    weight: float
+    signal_parameters: tuple[tuple[str, object], ...]
+    predictor_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +257,29 @@ class StrategySpec:
     execution_policy: ExecutionPolicySpec
     risk_controls: RiskControlsSpec
     predictor_use: PredictorUseSpec | None = None
+    signal_execution_contexts: tuple[dict[str, object], ...] = ()
+    predictor_signal_execution_context: dict[str, object] | None = None
+    decision_schedule: str | None = None
+    execution_mode: str | None = None
+    extensions: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def key(self) -> str:
+        return self.strategy_id
+
+
+@dataclass(frozen=True)
+class StrategyBlueprintSpec:
+    strategy_id: str
+    version: str
+    label: str
+    hypothesis: str | None
+    description: str
+    investment_universe: InvestmentUniverseSpec
+    signals: tuple[StrategySignalSpec, ...]
+    portfolio_model: PortfolioModelSpec
+    execution_plan: StrategyExecutionPlanSpec
+    risk_controls: RiskControlsSpec
     extensions: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -681,6 +770,34 @@ def serialize_execution_policy_spec(execution_policy: ExecutionPolicySpec) -> di
     }
 
 
+def build_strategy_execution_plan_spec(
+    *,
+    key: str,
+    label: str,
+    decision_schedule: str,
+    rebalance_schedule: str,
+) -> StrategyExecutionPlanSpec:
+    if decision_schedule not in SUPPORTED_REBALANCE_SCHEDULES:
+        raise ValueError("Unsupported decision schedule.")
+    if rebalance_schedule not in SUPPORTED_REBALANCE_SCHEDULES:
+        raise ValueError("Unsupported execution policy rebalance schedule.")
+    return StrategyExecutionPlanSpec(
+        key=key,
+        label=label,
+        decision_schedule=decision_schedule,
+        rebalance_schedule=rebalance_schedule,
+    )
+
+
+def serialize_strategy_execution_plan_spec(execution_plan: StrategyExecutionPlanSpec) -> dict:
+    return {
+        "key": execution_plan.key,
+        "label": execution_plan.label,
+        "decisionSchedule": execution_plan.decision_schedule,
+        "rebalanceSchedule": execution_plan.rebalance_schedule,
+    }
+
+
 def build_risk_controls_spec(
     *,
     max_investment_ratio: float,
@@ -709,6 +826,766 @@ def build_predictor_use_spec(
     )
 
 
+def freeze_strategy_parameter_value(value: object) -> object:
+    if isinstance(value, dict):
+        return tuple(
+            (str(key), freeze_strategy_parameter_value(nested_value))
+            for key, nested_value in sorted(value.items())
+        )
+    if isinstance(value, list):
+        return tuple(freeze_strategy_parameter_value(item) for item in value)
+    return value
+
+
+def build_strategy_data_source_spec(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    observation_spec: ObservationSpec,
+) -> StrategyDataSourceSpec:
+    if not key.strip():
+        raise ValueError("Strategy data source key is required.")
+    if not kind.strip():
+        raise ValueError("Strategy data source kind is required.")
+    return StrategyDataSourceSpec(
+        key=key,
+        label=label,
+        kind=kind,
+        observation_spec=observation_spec,
+    )
+
+
+
+def build_strategy_feature_definition_spec(
+    *,
+    key: str,
+    label: str,
+    source_field_keys: list[str] | tuple[str, ...],
+    derived_feature_keys: list[str] | tuple[str, ...] = (),
+) -> StrategyFeatureDefinitionSpec:
+    if not key.strip():
+        raise ValueError("Strategy feature definition key is required.")
+    return StrategyFeatureDefinitionSpec(
+        key=key,
+        label=label,
+        source_field_keys=tuple(str(field_key) for field_key in source_field_keys),
+        derived_feature_keys=tuple(str(feature_key) for feature_key in derived_feature_keys),
+    )
+
+
+
+def build_alignment_policy_spec(
+    *,
+    key: str,
+    label: str,
+    method: str,
+    parameters: dict[str, object] | None = None,
+) -> AlignmentPolicySpec:
+    if not key.strip():
+        raise ValueError("Alignment policy key is required.")
+    if not method.strip():
+        raise ValueError("Alignment policy method is required.")
+    return AlignmentPolicySpec(
+        key=key,
+        label=label,
+        method=method,
+        parameters=tuple(
+            (str(parameter_key), freeze_strategy_parameter_value(parameter_value))
+            for parameter_key, parameter_value in sorted((parameters or {}).items())
+        ),
+    )
+
+
+def build_strategy_signal_spec(
+    *,
+    key: str,
+    label: str,
+    description: str,
+    observation_spec: ObservationSpec,
+    data_timeframe: TimeframeSpec,
+    signal_timeframe: TimeframeSpec | None = None,
+    source_kind: str,
+    data_source_spec: StrategyDataSourceSpec | None = None,
+    feature_definition_spec: StrategyFeatureDefinitionSpec | None = None,
+    alignment_policy: AlignmentPolicySpec | None = None,
+    weight: float = 1.0,
+    signal_parameters: dict[str, object] | None = None,
+    predictor_key: str | None = None,
+) -> StrategySignalSpec:
+    if not key.strip():
+        raise ValueError("Strategy signal key is required.")
+    if not source_kind.strip():
+        raise ValueError("Strategy signal source kind is required.")
+    if weight <= 0:
+        raise ValueError("Strategy signal weight must be positive.")
+    resolved_signal_timeframe = signal_timeframe or data_timeframe
+    resolved_data_source_spec = data_source_spec or build_strategy_data_source_spec(
+        key=f"data_source__{key}",
+        label=f"{label} data source",
+        kind="market_observation",
+        observation_spec=observation_spec,
+    )
+    resolved_feature_definition_spec = feature_definition_spec or build_strategy_feature_definition_spec(
+        key=f"feature_definition__{key}",
+        label=f"{label} features",
+        source_field_keys=observation_spec.fields,
+    )
+    resolved_alignment_policy = alignment_policy
+    if resolved_alignment_policy is None and resolved_signal_timeframe.key != data_timeframe.key:
+        resolved_alignment_policy = build_alignment_policy_spec(
+            key=f"alignment_policy__{key}",
+            label=f"{label} alignment",
+            method="asof_last",
+            parameters={
+                "fromTimeframe": data_timeframe.key,
+                "toTimeframe": resolved_signal_timeframe.key,
+            },
+        )
+    return StrategySignalSpec(
+        key=key,
+        label=label,
+        description=description,
+        observation_spec=observation_spec,
+        data_source_spec=resolved_data_source_spec,
+        feature_definition_spec=resolved_feature_definition_spec,
+        alignment_policy=resolved_alignment_policy,
+        data_timeframe=data_timeframe,
+        signal_timeframe=resolved_signal_timeframe,
+        source_kind=source_kind,
+        weight=float(weight),
+        signal_parameters=tuple(
+            (str(parameter_key), freeze_strategy_parameter_value(parameter_value))
+            for parameter_key, parameter_value in sorted((signal_parameters or {}).items())
+        ),
+        predictor_key=predictor_key,
+    )
+
+
+def serialize_strategy_signal_spec(signal: StrategySignalSpec) -> dict:
+    return {
+        "key": signal.key,
+        "label": signal.label,
+        "description": signal.description,
+        "sourceKind": signal.source_kind,
+        "weight": signal.weight,
+        "predictorKey": signal.predictor_key,
+        "signalParameters": {key: value for key, value in signal.signal_parameters},
+        "observationSpec": serialize_observation_spec(signal.observation_spec),
+        "dataSource": None if signal.data_source_spec is None else {
+            "key": signal.data_source_spec.key,
+            "label": signal.data_source_spec.label,
+            "kind": signal.data_source_spec.kind,
+            "observationSpec": serialize_observation_spec(signal.data_source_spec.observation_spec),
+        },
+        "featureDefinition": None if signal.feature_definition_spec is None else {
+            "key": signal.feature_definition_spec.key,
+            "label": signal.feature_definition_spec.label,
+            "sourceFieldKeys": list(signal.feature_definition_spec.source_field_keys),
+            "derivedFeatureKeys": list(signal.feature_definition_spec.derived_feature_keys),
+        },
+        "alignmentPolicy": None if signal.alignment_policy is None else {
+            "key": signal.alignment_policy.key,
+            "label": signal.alignment_policy.label,
+            "method": signal.alignment_policy.method,
+            "parameters": {key: value for key, value in signal.alignment_policy.parameters},
+        },
+        "dataTimeframe": {
+            "key": signal.data_timeframe.key,
+            "label": signal.data_timeframe.label,
+            "yfinanceInterval": signal.data_timeframe.yfinance_interval,
+            "barsPerYear": signal.data_timeframe.bars_per_year,
+            "barSeconds": signal.data_timeframe.bar_seconds,
+        },
+        "signalTimeframe": {
+            "key": signal.signal_timeframe.key,
+            "label": signal.signal_timeframe.label,
+            "yfinanceInterval": signal.signal_timeframe.yfinance_interval,
+            "barsPerYear": signal.signal_timeframe.bars_per_year,
+            "barSeconds": signal.signal_timeframe.bar_seconds,
+        },
+    }
+
+
+def build_strategy_blueprint_spec(
+    *,
+    investment_universe: InvestmentUniverseSpec,
+    signals: list[StrategySignalSpec] | tuple[StrategySignalSpec, ...],
+    portfolio_model: PortfolioModelSpec,
+    execution_plan: StrategyExecutionPlanSpec,
+    risk_controls: RiskControlsSpec,
+    strategy_id: str | None = None,
+    version: str = "v1",
+    hypothesis: str | None = None,
+    extensions: dict[str, str] | None = None,
+    key: str | None = None,
+    label: str | None = None,
+    description: str | None = None,
+) -> StrategyBlueprintSpec:
+    resolved_strategy_id = strategy_id or key or portfolio_model.key
+    if strategy_id is not None and key is not None and strategy_id != key:
+        raise ValueError("strategy_id and key must match when both are provided.")
+    resolved_signals = tuple(signals)
+    if len(resolved_signals) < 1:
+        raise ValueError("Strategy blueprint must contain at least one signal.")
+    universe_tickers = set(investment_universe.tickers)
+    for signal in resolved_signals:
+        unknown_tickers = set(signal.observation_spec.tickers) - universe_tickers
+        if unknown_tickers:
+            raise ValueError("Strategy signal observation tickers must be contained in the investment universe.")
+    strategy_label = label or " + ".join(signal.label for signal in resolved_signals)
+    strategy_description = description or " / ".join(signal.description for signal in resolved_signals)
+    return StrategyBlueprintSpec(
+        strategy_id=resolved_strategy_id,
+        version=version,
+        label=strategy_label,
+        hypothesis=hypothesis,
+        description=strategy_description,
+        investment_universe=investment_universe,
+        signals=resolved_signals,
+        portfolio_model=portfolio_model,
+        execution_plan=execution_plan,
+        risk_controls=risk_controls,
+        extensions=tuple(sorted((extensions or {}).items())),
+    )
+
+
+def serialize_strategy_blueprint_spec(strategy: StrategyBlueprintSpec) -> dict:
+    compatibility_issues = get_legacy_strategy_blueprint_compatibility_issues(strategy)
+    direct_execution_issues = get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+    return {
+        "kind": "strategy_blueprint_spec",
+        "schemaVersion": "v1",
+        "strategyId": strategy.strategy_id,
+        "version": strategy.version,
+        "label": strategy.label,
+        "hypothesis": strategy.hypothesis,
+        "description": strategy.description,
+        "components": {
+            "core": {
+                "investmentUniverse": {
+                    "key": strategy.investment_universe.key,
+                    "label": strategy.investment_universe.label,
+                    "assetCount": len(strategy.investment_universe.tickers),
+                    "tickers": list(strategy.investment_universe.tickers),
+                },
+                "portfolioModel": serialize_portfolio_model_spec(strategy.portfolio_model),
+                "executionPlan": serialize_strategy_execution_plan_spec(strategy.execution_plan),
+            },
+            "optional": {
+                "signals": [serialize_strategy_signal_spec(signal) for signal in strategy.signals],
+                "riskControls": serialize_risk_controls_spec(strategy.risk_controls),
+            },
+        },
+        "executionSupport": {
+            "legacyAdapterCompatible": not compatibility_issues,
+            "legacyAdapterIssues": compatibility_issues,
+            "directExecutionCompatible": not direct_execution_issues,
+            "directExecutionIssues": direct_execution_issues,
+        },
+        "extensions": {key: value for key, value in strategy.extensions},
+    }
+
+
+def resolve_timeframe_spec_from_key(timeframe_key: str, fallback: TimeframeSpec) -> TimeframeSpec:
+    if timeframe_key == fallback.key:
+        return fallback
+    if timeframe_key == DEFAULT_DAILY_TIMEFRAME.key:
+        return DEFAULT_DAILY_TIMEFRAME
+    if timeframe_key == DEFAULT_WEEKLY_TIMEFRAME.key:
+        return DEFAULT_WEEKLY_TIMEFRAME
+    if timeframe_key == DEFAULT_MONTHLY_TIMEFRAME.key:
+        return DEFAULT_MONTHLY_TIMEFRAME
+    raise ValueError(f"Unsupported timeframe key: {timeframe_key}")
+
+
+def build_alignment_policy_spec_from_payload(
+    alignment_policy_payload: dict[str, object] | None,
+) -> AlignmentPolicySpec | None:
+    if alignment_policy_payload is None:
+        return None
+    parameters = alignment_policy_payload.get("parameters")
+    return build_alignment_policy_spec(
+        key=str(alignment_policy_payload.get("key") or alignment_policy_payload.get("method") or "alignment_policy"),
+        label=str(alignment_policy_payload.get("label") or alignment_policy_payload.get("method") or "Alignment policy"),
+        method=str(alignment_policy_payload.get("method") or "asof_last"),
+        parameters=parameters if isinstance(parameters, dict) else None,
+    )
+
+
+def build_strategy_blueprint_from_strategy_spec(strategy: StrategySpec) -> StrategyBlueprintSpec:
+    selection_contexts = [dict(context) for context in strategy.signal_execution_contexts]
+    predictor_context = (
+        None
+        if strategy.predictor_signal_execution_context is None
+        else dict(strategy.predictor_signal_execution_context)
+    )
+
+    if not selection_contexts:
+        selection_contexts = [{
+            "signalKey": f"signal__{strategy.strategy_id}__selection",
+            "signalLabel": strategy.selection.label,
+            "description": strategy.selection.description,
+            "sourceKind": "selection_signal",
+            "selectionKey": strategy.selection.key,
+            "strategyType": strategy.selection.strategy_type,
+            "scoreParameters": thaw_strategy_parameter_value(dict(strategy.selection.ranking_signal.score_parameters)),
+            "dataTimeframe": strategy.timeframe.key,
+            "signalTimeframe": strategy.timeframe.key,
+            "alignmentPolicy": None,
+            "weight": 1.0 if strategy.predictor_use is None else strategy.predictor_use.signal_weight,
+        }]
+    if predictor_context is None and strategy.predictor_use is not None:
+        predictor_context = {
+            "signalKey": f"signal__{strategy.strategy_id}__predictor",
+            "signalLabel": f"{strategy.label} predictor overlay",
+            "description": "Legacy predictor overlay translated from predictor_use.",
+            "sourceKind": "predictor_overlay",
+            "predictorKey": strategy.predictor_use.predictor_key,
+            "signalWeight": strategy.predictor_use.signal_weight,
+            "predictorWeight": strategy.predictor_use.predictor_weight,
+            "dataTimeframe": strategy.timeframe.key,
+            "signalTimeframe": strategy.timeframe.key,
+            "alignmentPolicy": None,
+            "weight": strategy.predictor_use.predictor_weight,
+        }
+
+    signals = []
+    selection_observation_spec = build_observation_spec(
+        key=f"observation__{strategy.strategy_id}__selection",
+        label=f"{strategy.selection.label} observation",
+        tickers=strategy.investment_universe.tickers,
+        fields=strategy.selection.ranking_signal.feature_inputs,
+    )
+    for index, selection_context in enumerate(selection_contexts):
+        selection_parameters = {
+            "selectionKey": str(selection_context.get("selectionKey") or strategy.selection.key),
+            "strategyType": str(selection_context.get("strategyType") or strategy.selection.strategy_type),
+            "scoreModelKind": strategy.selection.ranking_signal.score_model.kind,
+            "scoreParameters": thaw_strategy_parameter_value(
+                selection_context.get("scoreParameters")
+                if selection_context.get("scoreParameters") is not None
+                else dict(strategy.selection.ranking_signal.score_parameters)
+            ),
+            "featureInputs": list(strategy.selection.ranking_signal.feature_inputs),
+            "universePolicyKey": strategy.selection.universe_policy.key,
+            "filterRuleKeys": [filter_rule.key for filter_rule in strategy.selection.filter_rules],
+            "fallbackRuleKey": strategy.selection.fallback_rule.key,
+        }
+        signals.append(
+            build_strategy_signal_spec(
+                key=str(selection_context.get("signalKey") or f"signal__{strategy.strategy_id}__selection__{index}"),
+                label=str(selection_context.get("signalLabel") or strategy.selection.label),
+                description=str(selection_context.get("description") or strategy.selection.description),
+                observation_spec=selection_observation_spec,
+                data_timeframe=resolve_timeframe_spec_from_key(
+                    str(selection_context.get("dataTimeframe") or strategy.timeframe.key),
+                    strategy.timeframe,
+                ),
+                signal_timeframe=resolve_timeframe_spec_from_key(
+                    str(selection_context.get("signalTimeframe") or strategy.timeframe.key),
+                    strategy.timeframe,
+                ),
+                source_kind="selection_signal",
+                weight=float(selection_context.get("weight", 1.0 if strategy.predictor_use is None else strategy.predictor_use.signal_weight)),
+                alignment_policy=build_alignment_policy_spec_from_payload(selection_context.get("alignmentPolicy")),
+                signal_parameters=selection_parameters,
+            )
+        )
+
+    if strategy.predictor_use is not None or predictor_context is not None:
+        predictor_payload = predictor_context or {}
+        signals.append(
+            build_strategy_signal_spec(
+                key=str(predictor_payload.get("signalKey") or f"signal__{strategy.strategy_id}__predictor"),
+                label=str(predictor_payload.get("signalLabel") or f"{strategy.label} predictor overlay"),
+                description=str(predictor_payload.get("description") or "Legacy predictor overlay translated from predictor_use."),
+                observation_spec=build_observation_spec(
+                    key=f"observation__{strategy.strategy_id}__predictor",
+                    label=f"{strategy.label} predictor observation",
+                    tickers=strategy.investment_universe.tickers,
+                    fields=strategy.selection.ranking_signal.feature_inputs,
+                ),
+                data_timeframe=resolve_timeframe_spec_from_key(
+                    str(predictor_payload.get("dataTimeframe") or strategy.timeframe.key),
+                    strategy.timeframe,
+                ),
+                signal_timeframe=resolve_timeframe_spec_from_key(
+                    str(predictor_payload.get("signalTimeframe") or strategy.timeframe.key),
+                    strategy.timeframe,
+                ),
+                source_kind="predictor_overlay",
+                weight=float(predictor_payload.get("weight", strategy.predictor_use.predictor_weight if strategy.predictor_use is not None else 1.0)),
+                alignment_policy=build_alignment_policy_spec_from_payload(predictor_payload.get("alignmentPolicy")),
+                signal_parameters=serialize_predictor_use_spec(
+                    strategy.predictor_use
+                    or build_predictor_use_spec(
+                        predictor_key=str(predictor_payload.get("predictorKey")),
+                        signal_weight=float(predictor_payload.get("signalWeight", 1.0)),
+                        predictor_weight=float(predictor_payload.get("predictorWeight", predictor_payload.get("weight", 1.0))),
+                    )
+                ),
+                predictor_key=(
+                    None
+                    if predictor_payload.get("predictorKey") is None
+                    else str(predictor_payload.get("predictorKey"))
+                ) or (None if strategy.predictor_use is None else strategy.predictor_use.predictor_key),
+            )
+        )
+    return build_strategy_blueprint_spec(
+        strategy_id=strategy.strategy_id,
+        version=strategy.version,
+        hypothesis=strategy.hypothesis,
+        label=strategy.label,
+        description=strategy.description,
+        investment_universe=strategy.investment_universe,
+        signals=signals,
+        portfolio_model=strategy.portfolio_model,
+        execution_plan=build_strategy_execution_plan_spec(
+            key=f"execution_plan__{strategy.execution_policy.key}",
+            label=strategy.execution_policy.label,
+            decision_schedule=strategy.decision_schedule or strategy.execution_policy.rebalance_schedule,
+            rebalance_schedule=strategy.execution_policy.rebalance_schedule,
+        ),
+        risk_controls=strategy.risk_controls,
+        extensions=dict(strategy.extensions),
+    )
+
+
+def serialize_alignment_policy_spec(
+    alignment_policy: AlignmentPolicySpec | None,
+) -> dict[str, object] | None:
+    if alignment_policy is None:
+        return None
+    return {
+        "key": alignment_policy.key,
+        "label": alignment_policy.label,
+        "method": alignment_policy.method,
+        "parameters": {key: value for key, value in alignment_policy.parameters},
+    }
+
+
+def build_strategy_signal_execution_contexts_from_blueprint(
+    strategy: StrategyBlueprintSpec,
+) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+    selection_contexts: list[dict[str, object]] = []
+    predictor_context: dict[str, object] | None = None
+    for signal in strategy.signals:
+        signal_parameters = thaw_strategy_parameter_value(dict(signal.signal_parameters))
+        base_context = {
+            "signalKey": signal.key,
+            "signalLabel": signal.label,
+            "description": signal.description,
+            "dataTimeframe": signal.data_timeframe.key,
+            "signalTimeframe": signal.signal_timeframe.key,
+            "alignmentPolicy": serialize_alignment_policy_spec(signal.alignment_policy),
+            "weight": float(signal.weight),
+        }
+        if signal.source_kind == "selection_signal":
+            selection_contexts.append(
+                {
+                    **base_context,
+                    "sourceKind": signal.source_kind,
+                    "selectionKey": str(signal_parameters.get("selectionKey") or signal_parameters.get("strategyType")),
+                    "strategyType": str(signal_parameters.get("strategyType")),
+                    "scoreParameters": signal_parameters.get("scoreParameters"),
+                }
+            )
+        elif signal.source_kind == "predictor_overlay":
+            predictor_context = {
+                **base_context,
+                "sourceKind": signal.source_kind,
+                "predictorKey": str(signal.predictor_key or signal_parameters.get("predictorKey")),
+                "signalWeight": float(signal_parameters.get("signalWeight", 1.0)),
+                "predictorWeight": float(signal_parameters.get("predictorWeight", signal.weight)),
+            }
+    return selection_contexts, predictor_context
+
+
+def thaw_strategy_parameter_value(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: thaw_strategy_parameter_value(nested_value)
+            for key, nested_value in value.items()
+        }
+    if isinstance(value, tuple):
+        if all(
+            isinstance(item, tuple)
+            and len(item) == 2
+            and isinstance(item[0], str)
+            for item in value
+        ):
+            return {
+                key: thaw_strategy_parameter_value(nested_value)
+                for key, nested_value in value
+            }
+        return [thaw_strategy_parameter_value(item) for item in value]
+    return value
+
+
+def get_legacy_strategy_blueprint_compatibility_issues(
+    strategy: StrategyBlueprintSpec,
+) -> list[str]:
+    issues: list[str] = []
+    selection_signals = [
+        signal for signal in strategy.signals if signal.source_kind == "selection_signal"
+    ]
+    predictor_signals = [
+        signal for signal in strategy.signals if signal.source_kind == "predictor_overlay"
+    ]
+    if len(selection_signals) != 1:
+        issues.append("requires exactly one selection_signal")
+    if len(predictor_signals) > 1:
+        issues.append("supports at most one predictor_overlay")
+    if strategy.execution_plan.decision_schedule != strategy.execution_plan.rebalance_schedule:
+        issues.append("requires matching decision and rebalance schedules")
+    if len(selection_signals) != 1:
+        return issues
+
+    selection_signal = selection_signals[0]
+    if selection_signal.data_timeframe.key != selection_signal.signal_timeframe.key:
+        issues.append("requires matching selection data and signal timeframes")
+
+    signal_parameters = thaw_strategy_parameter_value(dict(selection_signal.signal_parameters))
+    score_parameters = signal_parameters.get("scoreParameters")
+    if not isinstance(score_parameters, dict):
+        issues.append("requires scoreParameters in the selection signal")
+
+    if predictor_signals:
+        predictor_signal = predictor_signals[0]
+        if predictor_signal.data_timeframe.key != selection_signal.data_timeframe.key:
+            issues.append("requires predictor and selection signals to share the same data timeframe")
+        if predictor_signal.signal_timeframe.key != selection_signal.signal_timeframe.key:
+            issues.append("requires predictor and selection signals to share the same signal timeframe")
+        predictor_parameters = thaw_strategy_parameter_value(dict(predictor_signal.signal_parameters))
+        predictor_key = predictor_signal.predictor_key or predictor_parameters.get("predictorKey")
+        if predictor_key is None:
+            issues.append("requires predictorKey for predictor overlays")
+
+    return issues
+
+
+
+def is_legacy_compatible_strategy_blueprint(
+    strategy: StrategyBlueprintSpec,
+) -> bool:
+    return not get_legacy_strategy_blueprint_compatibility_issues(strategy)
+
+
+
+def get_direct_execution_strategy_blueprint_compatibility_issues(
+    strategy: StrategyBlueprintSpec,
+) -> list[str]:
+    issues: list[str] = []
+    selection_signals = [
+        signal for signal in strategy.signals if signal.source_kind == "selection_signal"
+    ]
+    predictor_signals = [
+        signal for signal in strategy.signals if signal.source_kind == "predictor_overlay"
+    ]
+    if not selection_signals:
+        issues.append("direct execution requires at least one selection_signal")
+    if len(predictor_signals) > 1:
+        issues.append("direct execution supports at most one predictor_overlay")
+    if strategy.execution_plan.decision_schedule not in {
+        strategy.execution_plan.rebalance_schedule,
+        "every_bar",
+    }:
+        issues.append("direct execution requires decision_schedule to match rebalance_schedule or be every_bar")
+    if not selection_signals:
+        return issues
+
+    selection_signal = selection_signals[0]
+    selection_parameters = thaw_strategy_parameter_value(dict(selection_signal.signal_parameters))
+    strategy_type = str(selection_parameters.get("strategyType"))
+    if selection_signal.signal_timeframe.bar_seconds < selection_signal.data_timeframe.bar_seconds:
+        issues.append("direct execution requires signal_timeframe to be coarser than or equal to data_timeframe")
+
+    score_parameters = selection_parameters.get("scoreParameters")
+    if not isinstance(score_parameters, dict):
+        issues.append("direct execution requires scoreParameters in the selection signal")
+
+    if selection_signal.alignment_policy is not None and selection_signal.alignment_policy.method not in {
+        "asof_last",
+        "end_of_period",
+        "calendar_resample",
+    }:
+        issues.append("direct execution only supports asof_last, end_of_period, or calendar_resample alignment")
+
+    if len(selection_signals) > 1:
+        if strategy_type not in DIRECT_EXECUTION_MULTI_SELECTION_STRATEGY_TYPES:
+            issues.append("direct execution only supports multi-selection blending for full_universe scoring strategies")
+        for additional_signal in selection_signals[1:]:
+            additional_parameters = thaw_strategy_parameter_value(dict(additional_signal.signal_parameters))
+            additional_strategy_type = str(additional_parameters.get("strategyType"))
+            if additional_strategy_type != strategy_type:
+                issues.append("direct execution requires blended selection signals to share the same strategyType")
+            additional_score_parameters = additional_parameters.get("scoreParameters")
+            if not isinstance(additional_score_parameters, dict):
+                issues.append("direct execution requires scoreParameters in all blended selection signals")
+            if additional_signal.data_timeframe.key != selection_signal.data_timeframe.key:
+                issues.append("direct execution requires blended selection signals to share the same data timeframe")
+            if additional_signal.signal_timeframe.key != selection_signal.signal_timeframe.key:
+                issues.append("direct execution requires blended selection signals to share the same signal timeframe")
+            if additional_signal.alignment_policy is not None and additional_signal.alignment_policy.method not in {
+                "asof_last",
+                "end_of_period",
+                "calendar_resample",
+            }:
+                issues.append("direct execution only supports asof_last, end_of_period, or calendar_resample alignment")
+
+    if predictor_signals:
+        predictor_signal = predictor_signals[0]
+        if predictor_signal.data_timeframe.key != selection_signal.data_timeframe.key:
+            issues.append("direct execution requires predictor and selection signals to share the same data timeframe")
+        if predictor_signal.signal_timeframe.key != selection_signal.signal_timeframe.key:
+            issues.append("direct execution requires predictor and selection signals to share the same signal timeframe")
+        predictor_parameters = thaw_strategy_parameter_value(dict(predictor_signal.signal_parameters))
+        predictor_key = predictor_signal.predictor_key or predictor_parameters.get("predictorKey")
+        if predictor_key is None:
+            issues.append("direct execution requires predictorKey for predictor overlays")
+
+    return issues
+
+
+def is_direct_execution_compatible_strategy_blueprint(
+    strategy: StrategyBlueprintSpec,
+) -> bool:
+    return not get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+
+
+def build_direct_execution_strategy_spec_from_blueprint(
+    strategy: StrategyBlueprintSpec,
+) -> StrategySpec:
+    issues = get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+    if issues:
+        raise ValueError(
+            "Direct execution incompatibilities: " + "; ".join(issues)
+        )
+
+    selection_signals = [signal for signal in strategy.signals if signal.source_kind == "selection_signal"]
+    selection_signal = selection_signals[0]
+    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_blueprint(strategy)
+    primary_selection_context = selection_contexts[0]
+    strategy_type = str(primary_selection_context["strategyType"])
+    score_parameters = primary_selection_context["scoreParameters"]
+
+    predictor_use = None
+    if predictor_context is not None:
+        predictor_use = build_predictor_use_spec(
+            predictor_key=str(predictor_context["predictorKey"]),
+            signal_weight=float(predictor_context["signalWeight"]),
+            predictor_weight=float(predictor_context["predictorWeight"]),
+        )
+
+    return build_strategy_spec(
+        strategy_id=strategy.strategy_id,
+        version=strategy.version,
+        hypothesis=strategy.hypothesis,
+        label=strategy.label,
+        description=strategy.description,
+        timeframe=selection_signal.signal_timeframe,
+        investment_universe=strategy.investment_universe,
+        selection=build_selection_spec(
+            strategy_type,
+            key=str(primary_selection_context["selectionKey"]),
+            label=selection_signal.label,
+            description=selection_signal.description,
+            score_parameters=score_parameters,
+        ),
+        portfolio_model=strategy.portfolio_model,
+        execution_policy=build_execution_policy_spec(
+            key=strategy.execution_plan.key,
+            label=strategy.execution_plan.label,
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule=strategy.execution_plan.rebalance_schedule,
+        ),
+        risk_controls=strategy.risk_controls,
+        predictor_use=predictor_use,
+        signal_execution_contexts=selection_contexts,
+        predictor_signal_execution_context=predictor_context,
+        decision_schedule=strategy.execution_plan.decision_schedule,
+        execution_mode="direct_signal_timeframe",
+        extensions=dict(strategy.extensions),
+    )
+
+
+def build_executable_strategy_spec_from_blueprint(strategy: StrategyBlueprintSpec) -> StrategySpec:
+    legacy_issues = get_legacy_strategy_blueprint_compatibility_issues(strategy)
+    if not legacy_issues:
+        return build_strategy_spec_from_blueprint(strategy)
+
+    direct_execution_issues = get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+    if not direct_execution_issues:
+        return build_direct_execution_strategy_spec_from_blueprint(strategy)
+
+    raise ValueError(
+        "Strategy blueprint is not executable: "
+        + "legacy adapter incompatibilities: "
+        + "; ".join(legacy_issues)
+        + " | direct execution incompatibilities: "
+        + "; ".join(direct_execution_issues)
+    )
+
+
+def build_strategy_spec_from_blueprint(strategy: StrategyBlueprintSpec) -> StrategySpec:
+    issues = get_legacy_strategy_blueprint_compatibility_issues(strategy)
+    if issues:
+        raise ValueError(
+            "Legacy strategy adapter incompatibilities: " + "; ".join(issues)
+        )
+
+    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_blueprint(strategy)
+    selection_signals = [signal for signal in strategy.signals if signal.source_kind == "selection_signal"]
+    predictor_signals = [signal for signal in strategy.signals if signal.source_kind == "predictor_overlay"]
+    selection_signal = selection_signals[0]
+
+    signal_parameters = thaw_strategy_parameter_value(dict(selection_signal.signal_parameters))
+    strategy_type = str(signal_parameters.get("strategyType"))
+    score_parameters = signal_parameters.get("scoreParameters")
+
+    predictor_use = None
+    if predictor_signals:
+        predictor_signal = predictor_signals[0]
+        predictor_parameters = thaw_strategy_parameter_value(dict(predictor_signal.signal_parameters))
+        predictor_key = predictor_signal.predictor_key or predictor_parameters.get("predictorKey")
+        predictor_use = build_predictor_use_spec(
+            predictor_key=str(predictor_key),
+            signal_weight=float(predictor_parameters.get("signalWeight", selection_signal.weight)),
+            predictor_weight=float(predictor_parameters.get("predictorWeight", predictor_signal.weight)),
+        )
+
+    return build_strategy_spec(
+        strategy_id=strategy.strategy_id,
+        version=strategy.version,
+        hypothesis=strategy.hypothesis,
+        label=strategy.label,
+        description=strategy.description,
+        timeframe=selection_signal.data_timeframe,
+        investment_universe=strategy.investment_universe,
+        selection=build_selection_spec(
+            strategy_type,
+            key=str(signal_parameters.get("selectionKey") or strategy_type),
+            label=selection_signal.label,
+            description=selection_signal.description,
+            score_parameters=score_parameters,
+        ),
+        portfolio_model=strategy.portfolio_model,
+        execution_policy=build_execution_policy_spec(
+            key=strategy.execution_plan.key,
+            label=strategy.execution_plan.label,
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule=strategy.execution_plan.rebalance_schedule,
+        ),
+        risk_controls=strategy.risk_controls,
+        predictor_use=predictor_use,
+        signal_execution_contexts=selection_contexts,
+        predictor_signal_execution_context=predictor_context,
+        decision_schedule=strategy.execution_plan.decision_schedule,
+        extensions=dict(strategy.extensions),
+    )
+
+
 def build_strategy_spec(
     *,
     timeframe: TimeframeSpec | None = None,
@@ -718,6 +1595,10 @@ def build_strategy_spec(
     execution_policy: ExecutionPolicySpec | None = None,
     risk_controls: RiskControlsSpec,
     predictor_use: PredictorUseSpec | None = None,
+    signal_execution_contexts: list[dict[str, object]] | tuple[dict[str, object], ...] | None = None,
+    predictor_signal_execution_context: dict[str, object] | None = None,
+    decision_schedule: str | None = None,
+    execution_mode: str | None = None,
     strategy_id: str | None = None,
     version: str = "v1",
     hypothesis: str | None = None,
@@ -759,6 +1640,10 @@ def build_strategy_spec(
         ),
         risk_controls=risk_controls,
         predictor_use=predictor_use,
+        signal_execution_contexts=tuple(signal_execution_contexts or ()),
+        predictor_signal_execution_context=predictor_signal_execution_context,
+        decision_schedule=decision_schedule,
+        execution_mode=execution_mode,
         extensions=tuple(sorted((extensions or {}).items())),
     )
 
@@ -1029,6 +1914,30 @@ def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str
     return serialized
 
 
+def serialize_strategy_execution_context_payload(context: dict[str, object]) -> dict[str, object]:
+    payload = {
+        "sourceKind": str(context.get("sourceKind", context.get("source_kind", ""))),
+        "dataTimeframe": str(context.get("dataTimeframe", context.get("data_timeframe_key", ""))),
+        "signalTimeframe": str(context.get("signalTimeframe", context.get("signal_timeframe_key", ""))),
+        "alignmentPolicy": context.get("alignmentPolicy", context.get("alignment_policy")),
+    }
+    if "selectionKey" in context:
+        payload["selectionKey"] = str(context["selectionKey"])
+    if "strategyType" in context:
+        payload["strategyType"] = str(context["strategyType"])
+    if "scoreParameters" in context:
+        payload["scoreParameters"] = context["scoreParameters"]
+    if "weight" in context:
+        payload["weight"] = float(context["weight"])
+    if "predictorKey" in context:
+        payload["predictorKey"] = str(context["predictorKey"])
+    if "signalWeight" in context:
+        payload["signalWeight"] = float(context["signalWeight"])
+    if "predictorWeight" in context:
+        payload["predictorWeight"] = float(context["predictorWeight"])
+    return payload
+
+
 def serialize_predictor_use_spec(predictor_use: PredictorUseSpec) -> dict[str, object]:
     return {
         "predictorKey": predictor_use.predictor_key,
@@ -1098,6 +2007,8 @@ def serialize_strategy_spec(strategy: StrategySpec) -> dict:
                 },
                 "portfolioModel": serialize_portfolio_model_spec(strategy.portfolio_model),
                 "executionPolicy": serialize_execution_policy_spec(strategy.execution_policy),
+                "decisionSchedule": strategy.decision_schedule or strategy.execution_policy.rebalance_schedule,
+                "executionMode": strategy.execution_mode,
             },
             "optional": {
                 "assetRankingModel": ranking_model,
@@ -1115,6 +2026,17 @@ def serialize_strategy_spec(strategy: StrategySpec) -> dict:
                 "fallbackRule": fallback_rule,
                 "riskControls": serialize_risk_controls_spec(strategy.risk_controls),
                 "tiltRule": serialize_tilt_rule(strategy),
+                "signalExecutionContexts": {
+                    "selectionSignals": [
+                        serialize_strategy_execution_context_payload(context)
+                        for context in strategy.signal_execution_contexts
+                    ],
+                    "predictorSignal": None
+                    if strategy.predictor_signal_execution_context is None
+                    else serialize_strategy_execution_context_payload(
+                        strategy.predictor_signal_execution_context
+                    ),
+                },
             },
         },
         "extensions": {

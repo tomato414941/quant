@@ -1,3 +1,7 @@
+import json
+from dataclasses import replace
+from unittest.mock import patch
+
 import pandas as pd
 
 from app.portfolio import (
@@ -8,6 +12,7 @@ from app.portfolio import (
     build_feature_spec,
     build_feature_input_spec,
     build_prediction_output_spec,
+    build_alignment_policy_spec,
     build_decision_use_spec,
     build_prediction_engine_spec,
     build_prediction_learner_spec,
@@ -18,12 +23,23 @@ from app.portfolio import (
     build_predictor_spec,
     build_predictor_use_spec,
     build_ranking_feature_recipe_spec,
+    build_strategy_blueprint_from_strategy_spec,
+    build_strategy_signal_execution_contexts_from_blueprint,
+    build_strategy_blueprint_spec,
+    build_strategy_execution_plan_spec,
+    build_strategy_signal_spec,
     build_training_spec,
     build_investment_universe_spec,
     build_portfolio_model_spec,
     build_portfolio_state,
+    build_strategy_data_source_spec,
+    build_strategy_feature_definition_spec,
+    build_direct_execution_strategy_spec_from_blueprint,
+    build_executable_strategy_spec_from_blueprint,
+    build_execution_policy_spec,
     build_risk_controls_spec,
     build_selection_spec,
+    build_strategy_spec_from_blueprint,
     build_strategy_spec,
     compare_portfolio_runs,
     compute_predictor_panel,
@@ -31,8 +47,60 @@ from app.portfolio import (
     compute_trade_cost,
     compute_strategy_score_series,
     evaluate_predictor_spec,
+    get_direct_execution_strategy_blueprint_compatibility_issues,
+    get_legacy_strategy_blueprint_compatibility_issues,
+    get_strategy_definition_signal_execution_contexts,
+    get_strategy_signal_execution_contexts,
+    is_direct_execution_compatible_strategy_blueprint,
+    is_legacy_compatible_strategy_blueprint,
+    prepare_strategy_market_data,
+    prepare_strategy_predictor_panel,
+    prepare_strategy_signal_data,
+    extract_predictor_signal_payload,
+    prepare_signal_component_data,
+    resample_market_frame_to_timeframe,
+    resample_returns_frame_to_timeframe,
+    resolve_decision_schedule,
+    resolve_strategy_market_data_timeframe_key,
+    serialize_strategy_spec,
+    serialize_strategy_signal_spec,
+    select_assets,
     should_rebalance,
 )
+from app.strategy_blueprint_builder import (
+    ExecutionVariantDefinition,
+    PortfolioModelVariantDefinition,
+    PredictorBlueprintDefinition,
+    PredictorVariantDefinition,
+    SelectionBlueprintDefinition,
+    SelectionVariantDefinition,
+    build_predictor_strategy_blueprint,
+    build_predictor_strategy_blueprint_product,
+    build_selection_strategy_blueprint,
+    build_selection_strategy_blueprint_product,
+    build_strategy_specs_from_blueprints,
+)
+from app.strategy_candidate_baselines import (
+    BASELINE_CANDIDATE_BLUEPRINTS,
+)
+from app.strategy_candidate_filtered import (
+    FILTERED_CANDIDATE_BLUEPRINTS,
+)
+from app.strategy_candidate_predictors import (
+    PREDICTOR_CANDIDATE_BLUEPRINTS,
+)
+from app.strategy_candidate_full_universe import (
+    FULL_UNIVERSE_CANDIDATE_BLUEPRINTS,
+)
+from app.strategy_candidate_timeframes import (
+    TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS,
+)
+from app.strategy_candidate_universe_variants import (
+    UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS,
+)
+from app.strategy_catalog import CANONICAL_CANDIDATE_BLUEPRINTS
+from app.strategy_presets import FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M
+from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
 
 
 def make_execution_assumptions() -> dict:
@@ -190,6 +258,1931 @@ def make_predictor_spec(
             min_train_samples=min_train_samples,
         ),
     )
+
+
+def test_build_strategy_blueprint_supports_multiple_signal_timeframes() -> None:
+    universe = build_investment_universe_spec(
+        tickers=["SPY", "QQQ", "TLT"],
+        key="multi_tf_universe",
+        label="Multi timeframe universe",
+    )
+    daily_signal = build_strategy_signal_spec(
+        key="signal__daily_momentum",
+        label="Daily momentum",
+        description="Use daily prices for short-term momentum.",
+        observation_spec=build_observation_spec(
+            key="observation__daily",
+            label="Daily observation",
+            tickers=universe.tickers,
+            fields=("close",),
+        ),
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        source_kind="ranking_signal",
+        signal_parameters={"window": {"unit": "months", "value": 2}},
+    )
+    monthly_signal = build_strategy_signal_spec(
+        key="signal__monthly_macro",
+        label="Monthly macro",
+        description="Use monthly regime data as a slower overlay.",
+        observation_spec=build_observation_spec(
+            key="observation__monthly",
+            label="Monthly observation",
+            tickers=universe.tickers,
+            fields=("close",),
+        ),
+        data_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+        signal_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+        source_kind="macro_signal",
+        weight=0.3,
+        signal_parameters={"overlay": "regime"},
+    )
+
+    blueprint = build_strategy_blueprint_spec(
+        strategy_id="blueprint__multi_timeframe",
+        label="Daily plus monthly blueprint",
+        description="Combine fast and slow signals in one strategy blueprint.",
+        investment_universe=universe,
+        signals=[daily_signal, monthly_signal],
+        portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+        execution_plan=build_strategy_execution_plan_spec(
+            key="execution__daily_month_end",
+            label="Daily decisions / month-end trades",
+            decision_schedule="every_bar",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+    )
+
+    assert blueprint.strategy_id == "blueprint__multi_timeframe"
+    assert len(blueprint.signals) == 2
+    assert blueprint.signals[0].data_timeframe.key == "1d"
+    assert blueprint.signals[1].data_timeframe.key == "1mo"
+    assert blueprint.execution_plan.decision_schedule == "every_bar"
+    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+
+
+def test_build_strategy_blueprint_rejects_signal_outside_universe() -> None:
+    universe = build_investment_universe_spec(
+        tickers=["SPY", "QQQ"],
+        key="small_universe",
+        label="Small universe",
+    )
+    foreign_signal = build_strategy_signal_spec(
+        key="signal__foreign",
+        label="Foreign signal",
+        description="Signal that references an out-of-universe ticker.",
+        observation_spec=build_observation_spec(
+            key="observation__foreign",
+            label="Foreign observation",
+            tickers=("SPY", "TLT"),
+            fields=("close",),
+        ),
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        source_kind="ranking_signal",
+    )
+
+    try:
+        build_strategy_blueprint_spec(
+            strategy_id="blueprint__invalid",
+            investment_universe=universe,
+            signals=[foreign_signal],
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            execution_plan=build_strategy_execution_plan_spec(
+                key="execution__month_end",
+                label="Month-end execution",
+                decision_schedule="month_end",
+                rebalance_schedule="month_end",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        )
+    except ValueError as exc:
+        assert "investment universe" in str(exc)
+    else:
+        raise AssertionError("Expected build_strategy_blueprint_spec to reject out-of-universe tickers.")
+
+
+def test_build_strategy_blueprint_from_strategy_spec_maps_predictor_overlay() -> None:
+    predictor_use = build_predictor_use_spec(
+        predictor_key="pred__overlay",
+        signal_weight=0.6,
+        predictor_weight=0.4,
+    )
+    strategy = build_strategy_spec(
+        strategy_id="strategy__with_predictor",
+        label="Strategy with predictor",
+        description="Legacy strategy with predictor overlay.",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY", "QQQ", "TLT"],
+            key="adapter_universe",
+            label="Adapter universe",
+        ),
+        selection=build_selection_spec(
+            "full_universe_momentum_tilt",
+            key="adapter_selection",
+            score_parameters={
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 8},
+            },
+        ),
+        portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+        predictor_use=predictor_use,
+        signal_execution_contexts=[
+            {
+                "signalKey": "selection_signal",
+                "signalLabel": "Adapter selection signal",
+                "description": "Adapter selection signal.",
+                "sourceKind": "selection_signal",
+                "selectionKey": "adapter_selection",
+                "strategyType": "full_universe_momentum_tilt",
+                "scoreParameters": {
+                    "tilt_strength": 0.35,
+                    "tilt_shape": 1.0,
+                    "windowSpec": {"unit": "months", "value": 8},
+                },
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "asof_last", "parameters": {}},
+                "weight": 0.6,
+            }
+        ],
+        predictor_signal_execution_context={
+            "signalKey": "predictor_signal",
+            "signalLabel": "Adapter predictor signal",
+            "description": "Adapter predictor signal.",
+            "sourceKind": "predictor_overlay",
+            "predictorKey": "pred__overlay",
+            "signalWeight": 0.6,
+            "predictorWeight": 0.4,
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "calendar_resample", "parameters": {}},
+            "weight": 0.4,
+        },
+        decision_schedule="every_bar",
+    )
+
+    blueprint = build_strategy_blueprint_from_strategy_spec(strategy)
+
+    assert blueprint.strategy_id == strategy.strategy_id
+    assert blueprint.execution_plan.decision_schedule == "every_bar"
+    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+    assert len(blueprint.signals) == 2
+    assert blueprint.signals[0].source_kind == "selection_signal"
+    assert blueprint.signals[0].weight == 0.6
+    assert blueprint.signals[0].data_timeframe.key == "1d"
+    assert blueprint.signals[0].signal_timeframe.key == "1w"
+    assert blueprint.signals[0].alignment_policy is not None
+    assert blueprint.signals[0].alignment_policy.method == "asof_last"
+    assert blueprint.signals[1].source_kind == "predictor_overlay"
+    assert blueprint.signals[1].predictor_key == "pred__overlay"
+    assert blueprint.signals[1].weight == 0.4
+    assert blueprint.signals[1].data_timeframe.key == "1d"
+    assert blueprint.signals[1].signal_timeframe.key == "1w"
+    assert blueprint.signals[1].alignment_policy is not None
+    assert blueprint.signals[1].alignment_policy.method == "calendar_resample"
+
+
+def test_build_strategy_blueprint_from_strategy_spec_without_predictor_keeps_single_signal() -> None:
+    strategy = make_strategy(
+        "full_universe",
+        "equal_weight",
+        max_investment_ratio=0.8,
+    )
+
+    blueprint = build_strategy_blueprint_from_strategy_spec(strategy)
+
+    assert blueprint.strategy_id == strategy.strategy_id
+    assert len(blueprint.signals) == 1
+    assert blueprint.signals[0].source_kind == "selection_signal"
+    assert blueprint.signals[0].weight == 1.0
+    assert blueprint.execution_plan.rebalance_schedule == strategy.execution_policy.rebalance_schedule
+
+
+def test_build_strategy_spec_from_blueprint_round_trips_legacy_strategy() -> None:
+    predictor_use = build_predictor_use_spec(
+        predictor_key="pred__overlay",
+        signal_weight=0.6,
+        predictor_weight=0.4,
+    )
+    strategy = build_strategy_spec(
+        strategy_id="strategy__round_trip",
+        version="v7",
+        hypothesis="Round-trip legacy adapter.",
+        label="Round trip strategy",
+        description="Legacy strategy for blueprint round-trip tests.",
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY", "QQQ", "TLT"],
+            key="round_trip_universe",
+            label="Round-trip universe",
+        ),
+        selection=build_selection_spec(
+            "full_universe_momentum_tilt",
+            key="round_trip_selection",
+            score_parameters={
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 8},
+            },
+        ),
+        portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+        predictor_use=predictor_use,
+        extensions={"source": "test"},
+    )
+
+    rebuilt = build_strategy_spec_from_blueprint(
+        build_strategy_blueprint_from_strategy_spec(strategy)
+    )
+
+    assert rebuilt.strategy_id == strategy.strategy_id
+    assert rebuilt.version == strategy.version
+    assert rebuilt.hypothesis == strategy.hypothesis
+    assert rebuilt.timeframe.key == strategy.timeframe.key
+    assert rebuilt.selection.strategy_type == strategy.selection.strategy_type
+    assert rebuilt.selection.key == strategy.selection.key
+    assert dict(rebuilt.selection.ranking_signal.score_parameters) == dict(
+        strategy.selection.ranking_signal.score_parameters
+    )
+    assert rebuilt.execution_policy.rebalance_schedule == strategy.execution_policy.rebalance_schedule
+    assert rebuilt.predictor_use is not None
+    assert rebuilt.predictor_use.predictor_key == predictor_use.predictor_key
+    assert rebuilt.predictor_use.signal_weight == predictor_use.signal_weight
+    assert rebuilt.predictor_use.predictor_weight == predictor_use.predictor_weight
+    assert rebuilt.decision_schedule == strategy.execution_policy.rebalance_schedule
+    assert rebuilt.signal_execution_contexts[0]["dataTimeframe"] == strategy.timeframe.key
+    assert rebuilt.signal_execution_contexts[0]["signalTimeframe"] == strategy.timeframe.key
+    assert rebuilt.predictor_signal_execution_context is not None
+    assert rebuilt.predictor_signal_execution_context["predictorKey"] == predictor_use.predictor_key
+    assert dict(rebuilt.extensions) == dict(strategy.extensions)
+
+
+def test_build_strategy_spec_from_blueprint_rejects_split_execution_plan() -> None:
+    blueprint = build_strategy_blueprint_spec(
+        strategy_id="blueprint__split_execution",
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY", "QQQ"],
+            key="split_execution_universe",
+            label="Split execution universe",
+        ),
+        signals=[
+            build_strategy_signal_spec(
+                key="signal__selection",
+                label="Selection signal",
+                description="Legacy-compatible selection signal.",
+                observation_spec=build_observation_spec(
+                    key="observation__selection",
+                    label="Selection observation",
+                    tickers=("SPY", "QQQ"),
+                    fields=("close",),
+                ),
+                data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+                source_kind="selection_signal",
+                signal_parameters={
+                    "selectionKey": "full_universe",
+                    "strategyType": "full_universe",
+                    "scoreParameters": {},
+                },
+            )
+        ],
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_plan=build_strategy_execution_plan_spec(
+            key="execution__split",
+            label="Split execution",
+            decision_schedule="every_bar",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    try:
+        build_strategy_spec_from_blueprint(blueprint)
+    except ValueError as exc:
+        assert "matching decision and rebalance schedules" in str(exc)
+    else:
+        raise AssertionError("Expected split execution plan to be rejected.")
+
+
+def test_build_strategy_spec_from_blueprint_rejects_mismatched_signal_timeframe() -> None:
+    blueprint = build_strategy_blueprint_spec(
+        strategy_id="blueprint__mismatched_signal_timeframe",
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY", "QQQ"],
+            key="mismatched_signal_timeframe_universe",
+            label="Mismatched signal timeframe universe",
+        ),
+        signals=[
+            build_strategy_signal_spec(
+                key="signal__selection",
+                label="Selection signal",
+                description="Legacy-compatible selection signal.",
+                observation_spec=build_observation_spec(
+                    key="observation__selection",
+                    label="Selection observation",
+                    tickers=("SPY", "QQQ"),
+                    fields=("close",),
+                ),
+                data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+                signal_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+                source_kind="selection_signal",
+                signal_parameters={
+                    "selectionKey": "full_universe",
+                    "strategyType": "full_universe",
+                    "scoreParameters": {},
+                },
+            )
+        ],
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_plan=build_strategy_execution_plan_spec(
+            key="execution__month_end",
+            label="Month end",
+            decision_schedule="month_end",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    try:
+        build_strategy_spec_from_blueprint(blueprint)
+    except ValueError as exc:
+        assert "requires matching selection data and signal timeframes" in str(exc)
+    else:
+        raise AssertionError("Expected mismatched signal timeframe to be rejected.")
+
+
+def test_full_universe_candidates_are_derived_from_blueprints() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(FULL_UNIVERSE_CANDIDATE_BLUEPRINTS)
+    assert len(FULL_UNIVERSE_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        strategy.strategy_id for strategy in derived_strategies
+    ] == [
+        blueprint.strategy_id for blueprint in FULL_UNIVERSE_CANDIDATE_BLUEPRINTS
+    ]
+
+    core_candidate = FULL_UNIVERSE_CANDIDATE_BLUEPRINTS[8]
+    assert core_candidate.execution_plan.decision_schedule == "year_end"
+    assert core_candidate.execution_plan.rebalance_schedule == "year_end"
+    assert core_candidate.signals[0].data_timeframe.key == "1d"
+
+    rebuilt = build_strategy_spec_from_blueprint(core_candidate)
+    assert rebuilt == derived_strategies[8]
+
+
+
+def test_strategy_signal_builder_infers_data_source_and_feature_definition() -> None:
+    signal = build_strategy_signal_spec(
+        key="signal__metadata",
+        label="Metadata signal",
+        description="Signal metadata inference.",
+        observation_spec=build_observation_spec(
+            key="observation__metadata",
+            label="Metadata observation",
+            tickers=("SPY", "QQQ"),
+            fields=("close", "volume"),
+        ),
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        source_kind="selection_signal",
+    )
+
+    assert signal.data_source_spec is not None
+    assert signal.data_source_spec.kind == "market_observation"
+    assert signal.feature_definition_spec is not None
+    assert signal.feature_definition_spec.source_field_keys == ("close", "volume")
+    assert signal.alignment_policy is None
+
+    serialized = serialize_strategy_signal_spec(signal)
+    assert serialized["dataSource"]["kind"] == "market_observation"
+    assert serialized["featureDefinition"]["sourceFieldKeys"] == ["close", "volume"]
+    assert serialized["alignmentPolicy"] is None
+
+
+
+def test_strategy_signal_builder_infers_alignment_policy_for_mismatched_timeframes() -> None:
+    signal = build_strategy_signal_spec(
+        key="signal__alignment",
+        label="Alignment signal",
+        description="Signal alignment inference.",
+        observation_spec=build_observation_spec(
+            key="observation__alignment",
+            label="Alignment observation",
+            tickers=("SPY", "QQQ"),
+            fields=("close",),
+        ),
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        source_kind="selection_signal",
+    )
+
+    assert signal.alignment_policy is not None
+    assert signal.alignment_policy.method == "asof_last"
+
+    serialized = serialize_strategy_signal_spec(signal)
+    assert serialized["alignmentPolicy"]["method"] == "asof_last"
+    assert serialized["alignmentPolicy"]["parameters"]["fromTimeframe"] == "1d"
+    assert serialized["alignmentPolicy"]["parameters"]["toTimeframe"] == "1w"
+
+
+
+def test_selection_blueprint_builder_creates_legacy_compatible_blueprint() -> None:
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder strategy",
+            hypothesis="Builder hypothesis",
+            description="Builder description",
+        )
+    )
+
+    assert blueprint.strategy_id == "builder__selection"
+    assert blueprint.signals[0].source_kind == "selection_signal"
+    assert blueprint.signals[0].data_timeframe.key == "1d"
+
+    rebuilt = build_strategy_spec_from_blueprint(blueprint)
+    assert rebuilt.selection.strategy_type == FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.strategy_type
+    assert rebuilt.execution_policy.rebalance_schedule == "month_end"
+    assert rebuilt.decision_schedule == "month_end"
+    assert rebuilt.signal_execution_contexts[0]["dataTimeframe"] == "1d"
+    assert rebuilt.signal_execution_contexts[0]["signalTimeframe"] == "1d"
+
+
+def test_predictor_blueprint_builder_creates_overlay_signal() -> None:
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="every_bar",
+                label="毎バー",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="every_bar",
+            ),
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor strategy",
+            hypothesis="Builder predictor hypothesis",
+            description="Builder predictor description",
+        )
+    )
+
+    assert len(blueprint.signals) == 2
+    assert blueprint.signals[0].weight == 0.6
+    assert blueprint.signals[1].source_kind == "predictor_overlay"
+    assert blueprint.signals[1].predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
+
+    rebuilt = build_strategy_spec_from_blueprint(blueprint)
+    assert rebuilt.predictor_use is not None
+    assert rebuilt.predictor_use.predictor_weight == 0.4
+    assert rebuilt.predictor_signal_execution_context is not None
+    assert rebuilt.predictor_signal_execution_context["predictorKey"] == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
+
+
+
+def test_selection_blueprint_builder_accepts_explicit_signal_metadata() -> None:
+    observation_spec = build_observation_spec(
+        key="observation__builder_metadata",
+        label="Builder metadata observation",
+        tickers=("SPY", "QQQ", "TLT"),
+        fields=("close", "volume"),
+    )
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection__metadata",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            data_source_spec=build_strategy_data_source_spec(
+                key="data_source__builder_selection",
+                label="Selection market data",
+                kind="market_panel",
+                observation_spec=observation_spec,
+            ),
+            feature_definition_spec=build_strategy_feature_definition_spec(
+                key="feature_definition__builder_selection",
+                label="Selection features",
+                source_field_keys=("close", "volume"),
+                derived_feature_keys=("momentum", "volume_strength"),
+            ),
+            alignment_policy=build_alignment_policy_spec(
+                key="alignment_policy__builder_selection",
+                label="Weekly alignment",
+                method="end_of_period",
+                parameters={"anchor": "week_end"},
+            ),
+        )
+    )
+
+    signal = blueprint.signals[0]
+    assert signal.data_source_spec is not None
+    assert signal.data_source_spec.kind == "market_panel"
+    assert signal.feature_definition_spec is not None
+    assert signal.feature_definition_spec.derived_feature_keys == ("momentum", "volume_strength")
+    assert signal.alignment_policy is not None
+    assert signal.alignment_policy.method == "end_of_period"
+
+
+def test_selection_blueprint_builder_supports_distinct_signal_timeframe() -> None:
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection__multi_tf",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+        )
+    )
+
+    assert blueprint.signals[0].data_timeframe.key == "1d"
+    assert blueprint.signals[0].signal_timeframe.key == "1w"
+    assert blueprint.execution_plan.decision_schedule == "every_bar"
+    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+
+
+
+def test_predictor_blueprint_builder_accepts_explicit_signal_metadata() -> None:
+    selection_observation_spec = build_observation_spec(
+        key="observation__builder_predictor_selection_metadata",
+        label="Predictor selection observation",
+        tickers=("SPY", "QQQ", "TLT"),
+        fields=("close",),
+    )
+    predictor_observation_spec = build_observation_spec(
+        key="observation__builder_predictor_overlay_metadata",
+        label="Predictor overlay observation",
+        tickers=("SPY", "QQQ", "TLT"),
+        fields=("close", "volume"),
+    )
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor__metadata",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            selection_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_data_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+            predictor_signal_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor strategy",
+            hypothesis="Builder predictor hypothesis",
+            description="Builder predictor description",
+            selection_data_source_spec=build_strategy_data_source_spec(
+                key="data_source__builder_predictor_selection",
+                label="Predictor selection source",
+                kind="selection_panel",
+                observation_spec=selection_observation_spec,
+            ),
+            selection_feature_definition_spec=build_strategy_feature_definition_spec(
+                key="feature_definition__builder_predictor_selection",
+                label="Predictor selection features",
+                source_field_keys=("close",),
+                derived_feature_keys=("momentum",),
+            ),
+            predictor_data_source_spec=build_strategy_data_source_spec(
+                key="data_source__builder_predictor_overlay",
+                label="Predictor overlay source",
+                kind="predictor_panel",
+                observation_spec=predictor_observation_spec,
+            ),
+            predictor_feature_definition_spec=build_strategy_feature_definition_spec(
+                key="feature_definition__builder_predictor_overlay",
+                label="Predictor overlay features",
+                source_field_keys=("close", "volume"),
+                derived_feature_keys=("momentum", "score"),
+            ),
+            predictor_alignment_policy=build_alignment_policy_spec(
+                key="alignment_policy__builder_predictor_overlay",
+                label="Predictor month-end alignment",
+                method="calendar_resample",
+                parameters={"toTimeframe": "1mo"},
+            ),
+        )
+    )
+
+    selection_signal, predictor_signal = blueprint.signals
+    assert selection_signal.data_source_spec is not None
+    assert selection_signal.data_source_spec.kind == "selection_panel"
+    assert predictor_signal.data_source_spec is not None
+    assert predictor_signal.data_source_spec.kind == "predictor_panel"
+    assert predictor_signal.feature_definition_spec is not None
+    assert predictor_signal.feature_definition_spec.derived_feature_keys == ("momentum", "score")
+    assert predictor_signal.alignment_policy is not None
+    assert predictor_signal.alignment_policy.method == "calendar_resample"
+
+
+def test_predictor_blueprint_builder_supports_distinct_predictor_timeframes() -> None:
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor__multi_tf",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            selection_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_data_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+            predictor_signal_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor strategy",
+            hypothesis="Builder predictor hypothesis",
+            description="Builder predictor description",
+        )
+    )
+
+    assert blueprint.signals[0].data_timeframe.key == "1d"
+    assert blueprint.signals[0].signal_timeframe.key == "1w"
+    assert blueprint.signals[1].data_timeframe.key == "1mo"
+    assert blueprint.signals[1].signal_timeframe.key == "1mo"
+    assert blueprint.execution_plan.decision_schedule == "every_bar"
+    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+
+
+
+def test_direct_execution_blueprint_compatibility_helper_accepts_signal_timeframe_execution() -> None:
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection__direct_execution",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+        )
+    )
+
+    assert is_legacy_compatible_strategy_blueprint(blueprint) is False
+    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
+    assert get_direct_execution_strategy_blueprint_compatibility_issues(blueprint) == []
+
+    direct_strategy = build_direct_execution_strategy_spec_from_blueprint(blueprint)
+    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    assert direct_strategy.timeframe.key == "1w"
+    assert executable_strategy.timeframe.key == "1w"
+    assert executable_strategy.execution_mode == "direct_signal_timeframe"
+    assert executable_strategy.signal_execution_contexts[0]["dataTimeframe"] == "1d"
+    assert executable_strategy.signal_execution_contexts[0]["signalTimeframe"] == "1w"
+    assert executable_strategy.decision_schedule == "every_bar"
+    assert executable_strategy.execution_policy.rebalance_schedule == "month_end"
+
+
+def test_direct_execution_blueprint_compatibility_helper_accepts_multi_selection_blend() -> None:
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection__multi_signal_direct_execution",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+        )
+    )
+    secondary_signal = build_strategy_signal_spec(
+        key="selection__secondary",
+        label="Secondary momentum signal",
+        description="Secondary momentum signal",
+        observation_spec=blueprint.signals[0].observation_spec,
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        source_kind="selection_signal",
+        weight=0.4,
+        signal_parameters={
+            "selectionKey": "secondary_momo6",
+            "strategyType": "full_universe_momentum_tilt",
+            "scoreParameters": {
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 6},
+            },
+        },
+    )
+    blueprint = replace(blueprint, signals=(blueprint.signals[0], secondary_signal))
+
+    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
+    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    assert executable_strategy.timeframe.key == "1w"
+    assert len(executable_strategy.signal_execution_contexts) == 2
+    assert executable_strategy.signal_execution_contexts[1]["selectionKey"] == "secondary_momo6"
+    assert executable_strategy.signal_execution_contexts[1]["signalTimeframe"] == "1w"
+
+
+def test_resample_market_frame_to_timeframe_supports_alignment_methods() -> None:
+    frame = pd.DataFrame(
+        {"SPY": [100.0, 101.0, 102.0, 103.0]},
+        index=pd.to_datetime(["2025-01-06", "2025-01-07", "2025-01-08", "2025-01-09"]),
+    )
+
+    end_of_period = resample_market_frame_to_timeframe(
+        frame,
+        target_timeframe_key="1w",
+        value_kind="close",
+        alignment_method="end_of_period",
+    )
+    calendar_resample = resample_market_frame_to_timeframe(
+        frame,
+        target_timeframe_key="1w",
+        value_kind="close",
+        alignment_method="calendar_resample",
+    )
+    asof_last = resample_market_frame_to_timeframe(
+        frame,
+        target_timeframe_key="1w",
+        value_kind="close",
+        alignment_method="asof_last",
+    )
+
+    assert str(end_of_period.index[-1].date()) == "2025-01-09"
+    assert str(calendar_resample.index[-1].date()) == "2025-01-10"
+    assert str(asof_last.index[-1].date()) == "2025-01-10"
+    assert float(end_of_period.iloc[-1, 0]) == 103.0
+    assert float(calendar_resample.iloc[-1, 0]) == 103.0
+
+
+def test_prepare_signal_component_data_uses_alignment_policy_for_signal_returns() -> None:
+    closes = pd.DataFrame(
+        {"SPY": [100.0, 101.0, 102.0, 103.0, 104.0]},
+        index=pd.to_datetime(["2025-01-06", "2025-01-07", "2025-01-08", "2025-01-09", "2025-01-13"]),
+    )
+    returns = closes.pct_change().dropna()
+    volumes = pd.DataFrame(
+        {"SPY": [10.0, 11.0, 12.0, 13.0]},
+        index=returns.index,
+    )
+
+    end_of_period_returns, end_of_period_volumes, end_of_period_bars = prepare_signal_component_data(
+        history_returns=returns,
+        volume_history=volumes,
+        data_timeframe_key="1d",
+        signal_timeframe_key="1w",
+        alignment_policy={"method": "end_of_period"},
+    )
+    calendar_returns, calendar_volumes, calendar_bars = prepare_signal_component_data(
+        history_returns=returns,
+        volume_history=volumes,
+        data_timeframe_key="1d",
+        signal_timeframe_key="1w",
+        alignment_policy={"method": "calendar_resample"},
+    )
+
+    assert end_of_period_bars == DEFAULT_WEEKLY_TIMEFRAME.bars_per_year
+    assert calendar_bars == DEFAULT_WEEKLY_TIMEFRAME.bars_per_year
+    assert str(end_of_period_returns.index[-1].date()) == "2025-01-13"
+    assert str(calendar_returns.index[-1].date()) == "2025-01-17"
+    assert str(end_of_period_volumes.index[0].date()) == "2025-01-13"
+    assert str(calendar_volumes.index[0].date()) == "2025-01-17"
+
+
+def test_direct_execution_blueprint_compatibility_helper_preserves_selection_alignment_policy_payloads() -> None:
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection__alignment_payloads",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            alignment_policy=build_alignment_policy_spec(
+                key="primary_asof_last",
+                label="Primary as-of",
+                method="asof_last",
+            ),
+        )
+    )
+    secondary_signal = build_strategy_signal_spec(
+        key="selection__secondary",
+        label="Secondary momentum signal",
+        description="Secondary momentum signal",
+        observation_spec=blueprint.signals[0].observation_spec,
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        source_kind="selection_signal",
+        weight=0.4,
+        alignment_policy=build_alignment_policy_spec(
+            key="secondary_end_of_period",
+            label="Secondary end-of-period",
+            method="end_of_period",
+        ),
+        signal_parameters={
+            "selectionKey": "secondary_momo6",
+            "strategyType": "full_universe_momentum_tilt",
+            "scoreParameters": {
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 6},
+            },
+        },
+    )
+    blueprint = replace(blueprint, signals=(blueprint.signals[0], secondary_signal))
+
+    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+
+    assert executable_strategy.signal_execution_contexts[0]["alignmentPolicy"]["method"] == "asof_last"
+    assert executable_strategy.signal_execution_contexts[1]["alignmentPolicy"]["method"] == "end_of_period"
+    assert executable_strategy.signal_execution_contexts[1]["dataTimeframe"] == "1d"
+    assert executable_strategy.signal_execution_contexts[1]["signalTimeframe"] == "1w"
+
+
+def test_build_strategy_signal_execution_contexts_from_blueprint_returns_selection_and_predictor_contexts() -> None:
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor__execution_contexts",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            selection_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+            predictor_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_alignment_policy=build_alignment_policy_spec(
+                key="predictor_calendar_resample",
+                label="Predictor calendar resample",
+                method="calendar_resample",
+            ),
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor direct strategy",
+            hypothesis="Builder predictor direct hypothesis",
+            description="Builder predictor direct description",
+        )
+    )
+    secondary_signal = build_strategy_signal_spec(
+        key="selection__secondary",
+        label="Secondary momentum signal",
+        description="Secondary momentum signal",
+        observation_spec=blueprint.signals[0].observation_spec,
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        source_kind="selection_signal",
+        weight=0.4,
+        alignment_policy=build_alignment_policy_spec(
+            key="secondary_end_of_period",
+            label="Secondary end-of-period",
+            method="end_of_period",
+        ),
+        signal_parameters={
+            "selectionKey": "secondary_momo6",
+            "strategyType": "full_universe_momentum_tilt",
+            "scoreParameters": {
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 6},
+            },
+        },
+    )
+    blueprint = replace(blueprint, signals=(blueprint.signals[0], secondary_signal, blueprint.signals[1]))
+
+    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_blueprint(blueprint)
+
+    assert len(selection_contexts) == 2
+    assert isinstance(selection_contexts[0]["selectionKey"], str)
+    assert selection_contexts[1]["alignmentPolicy"]["method"] == "end_of_period"
+    assert predictor_context is not None
+    assert predictor_context["predictorKey"] == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
+    assert predictor_context["alignmentPolicy"]["method"] == "calendar_resample"
+
+
+def test_get_strategy_signal_execution_contexts_returns_selection_and_predictor_contexts() -> None:
+    strategy = build_strategy_spec(
+        strategy_id="signal_execution_contexts",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB"],
+            key="signal_execution_contexts_universe",
+            label="Signal execution contexts universe",
+        ),
+        selection=build_selection_spec(
+            "full_universe_momentum_tilt",
+            score_parameters={
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "bars", "value": 3},
+            },
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-signal-context",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+        ),
+        extensions={
+            "signal_data_timeframe": "1d",
+            "signal_timeframe": "1w",
+            "selection_signal_weight": "0.7",
+            "selection_signal_alignment_policy": json.dumps({"method": "end_of_period"}, sort_keys=True),
+            "additional_selection_signals": json.dumps([
+                {
+                    "selectionKey": "secondary_momo6",
+                    "strategyType": "full_universe_momentum_tilt",
+                    "label": "Secondary momentum",
+                    "description": "Secondary momentum",
+                    "scoreParameters": {
+                        "tilt_strength": 0.35,
+                        "tilt_shape": 1.0,
+                        "windowSpec": {"unit": "bars", "value": 6},
+                    },
+                    "weight": 0.3,
+                    "dataTimeframe": "1d",
+                    "signalTimeframe": "1w",
+                    "alignmentPolicy": {"method": "calendar_resample"},
+                }
+            ], sort_keys=True),
+            "predictor_signal_data_timeframe": "1d",
+            "predictor_signal_timeframe": "1w",
+            "predictor_signal_alignment_policy": json.dumps({"method": "calendar_resample"}, sort_keys=True),
+        },
+    )
+
+    selection_contexts, predictor_context = get_strategy_signal_execution_contexts(strategy)
+
+    assert len(selection_contexts) == 2
+    assert selection_contexts[0]["source_kind"] == "selection_signal"
+    assert selection_contexts[0]["weight"] == 0.7
+    assert selection_contexts[1]["alignment_policy"]["method"] == "calendar_resample"
+    assert predictor_context is not None
+    assert predictor_context["source_kind"] == "predictor_overlay"
+    assert predictor_context["predictor_key"] == "pred-signal-context"
+    assert predictor_context["alignment_policy"]["method"] == "calendar_resample"
+
+
+def test_serialize_strategy_spec_includes_explicit_execution_contexts() -> None:
+    strategy = build_strategy_spec(
+        strategy_id="serialized_context_strategy",
+        version="v1",
+        label="Serialized context strategy",
+        description="Serialized context strategy",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            key="serialized_context_universe",
+            label="Serialized context universe",
+            tickers=["SPY", "QQQ", "TLT"],
+        ),
+        selection=build_selection_spec(
+            "full_universe_momentum_tilt",
+            score_parameters={
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 8},
+            },
+        ),
+        portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=0.9, max_weight=0.45),
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred10mom5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+        ),
+        signal_execution_contexts=[
+            {
+                "sourceKind": "selection_signal",
+                "selectionKey": "full_universe_momentum_tilt",
+                "strategyType": "full_universe_momentum_tilt",
+                "scoreParameters": {
+                    "tilt_strength": 0.35,
+                    "tilt_shape": 1.0,
+                    "windowSpec": {"unit": "months", "value": 8},
+                },
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "asof_last", "parameters": {}},
+                "weight": 1.0,
+            },
+        ],
+        predictor_signal_execution_context={
+            "sourceKind": "predictor_overlay",
+            "predictorKey": "pred10mom5050",
+            "signalWeight": 0.6,
+            "predictorWeight": 0.4,
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "calendar_resample", "parameters": {}},
+        },
+        decision_schedule="every_bar",
+    )
+
+    payload = serialize_strategy_spec(strategy)
+
+    assert payload["components"]["core"]["decisionSchedule"] == "every_bar"
+    assert payload["components"]["core"]["executionMode"] is None
+    assert payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][0]["dataTimeframe"] == "1d"
+    assert payload["components"]["optional"]["signalExecutionContexts"]["predictorSignal"]["predictorKey"] == "pred10mom5050"
+
+
+def test_get_strategy_definition_signal_execution_contexts_prefers_explicit_strategy_contexts() -> None:
+    selection_contexts = [
+        {
+            "signalKey": "selection_signal",
+            "signalLabel": "Selection signal",
+            "description": "Selection signal",
+            "sourceKind": "selection_signal",
+            "selectionKey": "full_universe_momentum_tilt",
+            "strategyType": "full_universe_momentum_tilt",
+            "scoreParameters": {
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 8},
+            },
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "asof_last", "parameters": {}},
+            "weight": 1.0,
+        }
+    ]
+    predictor_context = {
+        "sourceKind": "predictor_overlay",
+        "predictorKey": "pred10mom5050",
+        "signalWeight": 0.6,
+        "predictorWeight": 0.4,
+        "dataTimeframe": "1d",
+        "signalTimeframe": "1w",
+        "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "calendar_resample", "parameters": {}},
+    }
+    strategy = build_strategy_spec(
+        strategy_id="explicit_context_strategy",
+        version="v1",
+        label="Explicit context strategy",
+        description="Explicit context strategy",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            key="explicit_context_universe",
+            label="Explicit context universe",
+            tickers=["SPY", "QQQ", "TLT"],
+        ),
+        selection=build_selection_spec(
+            "full_universe_momentum_tilt",
+            score_parameters={
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 8},
+            },
+        ),
+        portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=0.9, max_weight=0.45),
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred10mom5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+        ),
+        signal_execution_contexts=selection_contexts,
+        predictor_signal_execution_context=predictor_context,
+        decision_schedule="every_bar",
+    )
+
+    resolved_selection_contexts, resolved_predictor_context = get_strategy_definition_signal_execution_contexts(strategy)
+
+    assert resolved_selection_contexts == selection_contexts
+    assert resolved_predictor_context == predictor_context
+    assert resolve_decision_schedule(strategy) == "every_bar"
+    assert resolve_strategy_market_data_timeframe_key(strategy) == "1d"
+
+
+def test_get_strategy_definition_signal_execution_contexts_normalizes_legacy_strategy() -> None:
+    strategy = build_strategy_spec(
+        strategy_id="strategy_definition_signal_execution_contexts",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB"],
+            key="strategy_definition_signal_execution_contexts_universe",
+            label="Strategy definition signal execution contexts universe",
+        ),
+        selection=build_selection_spec(
+            "full_universe_momentum_tilt",
+            score_parameters={
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "bars", "value": 3},
+            },
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-signal-context",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+        ),
+        extensions={
+            "signal_data_timeframe": "1d",
+            "signal_timeframe": "1w",
+            "selection_signal_weight": "0.7",
+            "selection_signal_alignment_policy": json.dumps({"method": "end_of_period"}, sort_keys=True),
+            "predictor_signal_data_timeframe": "1d",
+            "predictor_signal_timeframe": "1w",
+            "predictor_signal_alignment_policy": json.dumps({"method": "calendar_resample"}, sort_keys=True),
+        },
+    )
+
+    selection_contexts, predictor_context = get_strategy_definition_signal_execution_contexts(strategy)
+
+    assert len(selection_contexts) == 1
+    assert selection_contexts[0]["sourceKind"] == "selection_signal"
+    assert selection_contexts[0]["selectionKey"] == strategy.selection.key
+    assert selection_contexts[0]["dataTimeframe"] == "1d"
+    assert selection_contexts[0]["signalTimeframe"] == "1w"
+    assert selection_contexts[0]["alignmentPolicy"]["method"] == "end_of_period"
+    assert predictor_context is not None
+    assert predictor_context["sourceKind"] == "predictor_overlay"
+    assert predictor_context["predictorKey"] == "pred-signal-context"
+    assert predictor_context["alignmentPolicy"]["method"] == "calendar_resample"
+
+
+
+def test_compare_portfolio_runs_uses_explicit_signal_execution_contexts() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 102, 104, 103, 105, 107, 108, 110],
+            "BBB": [100, 101, 102, 103, 104, 105, 106, 107],
+            "CCC": [100, 99, 101, 100, 102, 101, 103, 104],
+        },
+        index=pd.date_range("2024-01-05", periods=8, freq="W-FRI"),
+    )
+    strategy = build_strategy_spec(
+        strategy_id="explicit_signal_execution_contexts",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB", "CCC"],
+            key="explicit_signal_execution_contexts_universe",
+            label="Explicit signal execution contexts universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+    signal_execution_contexts = get_strategy_definition_signal_execution_contexts(strategy)
+
+    with patch(
+        "app.portfolio.get_strategy_signal_execution_contexts",
+        side_effect=AssertionError("explicit contexts should avoid strategy re-extraction"),
+    ):
+        runs = compare_portfolio_runs(
+            closes=closes,
+            volumes=None,
+            strategies=[strategy],
+            initial_capital=10000,
+            split_ratio=0.6,
+            transaction_cost=0.001,
+            bars_per_year=DEFAULT_WEEKLY_TIMEFRAME.bars_per_year,
+            strategy_signal_execution_contexts_by_key={strategy.key: signal_execution_contexts},
+        )
+
+    assert len(runs) == 1
+    assert runs[0]["key"] == strategy.key
+
+def test_direct_execution_blueprint_compatibility_helper_preserves_predictor_alignment_policy_payload() -> None:
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor__alignment_payload",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            selection_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+            predictor_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_alignment_policy=build_alignment_policy_spec(
+                key="predictor_calendar_resample",
+                label="Predictor calendar resample",
+                method="calendar_resample",
+            ),
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor direct strategy",
+            hypothesis="Builder predictor direct hypothesis",
+            description="Builder predictor direct description",
+        )
+    )
+
+    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    predictor_payload = extract_predictor_signal_payload(executable_strategy)
+
+    assert executable_strategy.predictor_signal_execution_context is not None
+    assert executable_strategy.predictor_signal_execution_context["alignmentPolicy"]["method"] == "calendar_resample"
+    assert predictor_payload is not None
+    assert predictor_payload["alignmentPolicy"]["method"] == "calendar_resample"
+    assert predictor_payload["signalTimeframe"] == "1w"
+
+
+def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overlay_with_multi_selection_blend() -> None:
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor__multi_selection_direct_execution",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            selection_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+            predictor_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor direct strategy",
+            hypothesis="Builder predictor direct hypothesis",
+            description="Builder predictor direct description",
+        )
+    )
+    secondary_signal = build_strategy_signal_spec(
+        key="selection__secondary",
+        label="Secondary momentum signal",
+        description="Secondary momentum signal",
+        observation_spec=blueprint.signals[0].observation_spec,
+        data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+        signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        source_kind="selection_signal",
+        weight=0.4,
+        signal_parameters={
+            "selectionKey": "secondary_momo6",
+            "strategyType": "full_universe_momentum_tilt",
+            "scoreParameters": {
+                "tilt_strength": 0.35,
+                "tilt_shape": 1.0,
+                "windowSpec": {"unit": "months", "value": 6},
+            },
+        },
+    )
+    blueprint = replace(
+        blueprint,
+        signals=(blueprint.signals[0], secondary_signal, blueprint.signals[1]),
+    )
+
+    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
+    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    assert executable_strategy.predictor_use is not None
+    assert executable_strategy.predictor_use.predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
+    assert executable_strategy.signal_execution_contexts[1]["selectionKey"] == "secondary_momo6"
+
+
+def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overlay() -> None:
+    blueprint = build_predictor_strategy_blueprint(
+        PredictorBlueprintDefinition(
+            strategy_id="builder__predictor__direct_execution",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            selection_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            predictor_data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+            predictor_signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+            label="Builder predictor direct strategy",
+            hypothesis="Builder predictor direct hypothesis",
+            description="Builder predictor direct description",
+        )
+    )
+
+    assert is_legacy_compatible_strategy_blueprint(blueprint) is False
+    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
+    assert get_direct_execution_strategy_blueprint_compatibility_issues(blueprint) == []
+
+    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    assert executable_strategy.timeframe.key == "1w"
+    assert executable_strategy.predictor_use is not None
+    assert executable_strategy.predictor_use.predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
+    assert executable_strategy.predictor_use.predictor_weight == 0.4
+    assert executable_strategy.execution_mode == "direct_signal_timeframe"
+
+
+def test_legacy_blueprint_compatibility_helper_reports_blockers() -> None:
+    blueprint = build_selection_strategy_blueprint(
+        SelectionBlueprintDefinition(
+            strategy_id="builder__selection__incompatible",
+            selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            timeframe=DEFAULT_DAILY_TIMEFRAME,
+            signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+            execution_policy=build_execution_policy_spec(
+                key="month_end",
+                label="月次",
+                entry="train_once_then_periodic_rebalance",
+                rebalance_schedule="month_end",
+            ),
+            decision_schedule="every_bar",
+            investment_universe=build_investment_universe_spec(
+                tickers=["SPY", "QQQ", "TLT"],
+                key="builder_universe",
+                label="Builder universe",
+            ),
+            risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+        )
+    )
+
+    issues = get_legacy_strategy_blueprint_compatibility_issues(blueprint)
+    assert is_legacy_compatible_strategy_blueprint(blueprint) is False
+    assert "requires matching decision and rebalance schedules" in issues
+    assert "requires matching selection data and signal timeframes" in issues
+
+    try:
+        build_strategy_spec_from_blueprint(blueprint)
+    except ValueError as exc:
+        assert "Legacy strategy adapter incompatibilities" in str(exc)
+        assert "requires matching decision and rebalance schedules" in str(exc)
+    else:
+        raise AssertionError("Expected legacy adapter incompatibility error")
+
+
+
+def test_selection_blueprint_product_builder_generates_cross_product() -> None:
+    blueprints = build_selection_strategy_blueprint_product(
+        strategy_id_pattern="prod-{selection}-{portfolio_model}-{execution}",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="momo2",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(
+                key="eq",
+                portfolio_model=build_portfolio_model_spec("equal_weight"),
+            ),
+            PortfolioModelVariantDefinition(
+                key="hrp",
+                portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            ),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="month",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=build_execution_policy_spec(
+                    key="month_end",
+                    label="月次",
+                    entry="train_once_then_periodic_rebalance",
+                    rebalance_schedule="month_end",
+                ),
+            ),
+            ExecutionVariantDefinition(
+                key="daily",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=build_execution_policy_spec(
+                    key="every_bar",
+                    label="毎バー",
+                    entry="train_once_then_periodic_rebalance",
+                    rebalance_schedule="every_bar",
+                ),
+            ),
+        ],
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY", "QQQ", "TLT"],
+            key="product_universe",
+            label="Product universe",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+    )
+
+    assert [blueprint.strategy_id for blueprint in blueprints] == [
+        "prod-momo2-eq-month",
+        "prod-momo2-eq-daily",
+        "prod-momo2-hrp-month",
+        "prod-momo2-hrp-daily",
+    ]
+
+
+
+def test_predictor_blueprint_product_builder_generates_cross_product() -> None:
+    blueprints = build_predictor_strategy_blueprint_product(
+        strategy_id_pattern="prod-{selection}-{predictor}-{portfolio_model}-{execution}",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="momo2",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
+            ),
+        ],
+        predictor_variants=[
+            PredictorVariantDefinition(
+                key="pred5050",
+                predictor_key="pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050",
+                signal_weight=0.6,
+                predictor_weight=0.4,
+                label="Predictor blend",
+                hypothesis="Predictor hypothesis",
+                description="Predictor description",
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(
+                key="hrp",
+                portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
+            ),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="month",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=build_execution_policy_spec(
+                    key="month_end",
+                    label="月次",
+                    entry="train_once_then_periodic_rebalance",
+                    rebalance_schedule="month_end",
+                ),
+                label="月次",
+            ),
+            ExecutionVariantDefinition(
+                key="daily",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=build_execution_policy_spec(
+                    key="every_bar",
+                    label="毎バー",
+                    entry="train_once_then_periodic_rebalance",
+                    rebalance_schedule="every_bar",
+                ),
+                label="毎バー",
+            ),
+        ],
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY", "QQQ", "TLT"],
+            key="product_universe",
+            label="Product universe",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
+    )
+
+    assert [blueprint.strategy_id for blueprint in blueprints] == [
+        "prod-momo2-pred5050-hrp-month",
+        "prod-momo2-pred5050-hrp-daily",
+    ]
+    assert [blueprint.label for blueprint in blueprints] == [
+        "Predictor blend × 月次",
+        "Predictor blend × 毎バー",
+    ]
+
+
+
+def test_filtered_candidates_are_derived_from_blueprints() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(FILTERED_CANDIDATE_BLUEPRINTS)
+    assert len(FILTERED_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        strategy.strategy_id for strategy in derived_strategies
+    ] == [
+        blueprint.strategy_id for blueprint in FILTERED_CANDIDATE_BLUEPRINTS
+    ]
+
+    rebuilt = build_strategy_spec_from_blueprint(FILTERED_CANDIDATE_BLUEPRINTS[0])
+    assert rebuilt == derived_strategies[0]
+
+
+def test_universe_variant_candidates_are_derived_from_blueprints() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS)
+    assert len(UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        strategy.strategy_id for strategy in derived_strategies
+    ] == [
+        blueprint.strategy_id for blueprint in UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS
+    ]
+
+    rebuilt = build_strategy_spec_from_blueprint(UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS[0])
+    assert rebuilt == derived_strategies[0]
+
+
+def test_predictor_candidates_are_derived_from_blueprints() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(PREDICTOR_CANDIDATE_BLUEPRINTS)
+    assert len(PREDICTOR_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        strategy.strategy_id for strategy in derived_strategies
+    ] == [
+        blueprint.strategy_id for blueprint in PREDICTOR_CANDIDATE_BLUEPRINTS
+    ]
+
+    predictor_candidate = PREDICTOR_CANDIDATE_BLUEPRINTS[1]
+    assert predictor_candidate.execution_plan.decision_schedule == "month_end"
+    assert predictor_candidate.signals[0].weight == 0.6
+    assert predictor_candidate.signals[1].source_kind == "predictor_overlay"
+    assert predictor_candidate.signals[1].predictor_key is not None
+
+    rebuilt = build_strategy_spec_from_blueprint(predictor_candidate)
+    assert rebuilt == derived_strategies[1]
+
+
+def test_baseline_blueprint_catalog_matches_strategy_catalog() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(BASELINE_CANDIDATE_BLUEPRINTS)
+    assert len(BASELINE_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        blueprint.strategy_id for blueprint in BASELINE_CANDIDATE_BLUEPRINTS
+    ] == [
+        strategy.strategy_id for strategy in derived_strategies
+    ]
+
+
+def test_canonical_blueprint_catalog_matches_strategy_catalog() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(CANONICAL_CANDIDATE_BLUEPRINTS)
+    assert len(CANONICAL_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        blueprint.strategy_id for blueprint in CANONICAL_CANDIDATE_BLUEPRINTS
+    ] == [
+        strategy.strategy_id for strategy in derived_strategies
+    ]
+
+
+
+def test_timeframe_variant_candidates_are_derived_from_blueprints() -> None:
+    derived_strategies = build_strategy_specs_from_blueprints(TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS)
+    assert len(TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+    assert [
+        strategy.strategy_id for strategy in derived_strategies
+    ] == [
+        blueprint.strategy_id for blueprint in TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS
+    ]
+
+    monthly_candidate = TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS[2]
+    assert monthly_candidate.execution_plan.decision_schedule == "month_end"
+    assert monthly_candidate.execution_plan.rebalance_schedule == "month_end"
+    assert monthly_candidate.signals[0].data_timeframe.key == "1d"
+
+    rebuilt = build_strategy_spec_from_blueprint(monthly_candidate)
+    assert rebuilt == derived_strategies[2]
+
+
+
+def test_compare_portfolio_runs_uses_explicit_decision_schedule() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 110, 121, 133, 146, 146, 146, 146],
+            "BBB": [100, 108, 116, 125, 135, 148, 163, 179],
+            "CCC": [100, 107, 114, 122, 130, 139, 149, 160],
+            "DDD": [100, 90, 81, 73, 95, 124, 161, 209],
+        },
+        index=pd.date_range("2025-01-01", periods=8, freq="D"),
+    )
+    volumes = pd.DataFrame(
+        {ticker: [1_000_000 + idx * 10_000 for idx in range(len(closes))] for ticker in closes.columns},
+        index=closes.index,
+    )
+    hold_strategy = build_strategy_spec(
+        strategy_id="decision_schedule__hold",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="decision_schedule_universe",
+            label="Decision schedule universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "days", "value": 2}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        decision_schedule="hold",
+    )
+    adaptive_strategy = build_strategy_spec(
+        strategy_id="decision_schedule__every_bar",
+        investment_universe=hold_strategy.investment_universe,
+        selection=hold_strategy.selection,
+        portfolio_model=hold_strategy.portfolio_model,
+        execution_policy=hold_strategy.execution_policy,
+        risk_controls=hold_strategy.risk_controls,
+        decision_schedule="every_bar",
+    )
+
+    runs = compare_portfolio_runs(
+        closes=closes,
+        volumes=volumes,
+        strategies=[hold_strategy, adaptive_strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.001,
+        bars_per_year=252.0,
+    )
+
+    hold_run, adaptive_run = runs
+    assert "DDD" not in hold_run["selectedAssets"]
+    assert "DDD" in adaptive_run["selectedAssets"]
+    assert adaptive_run["summary"]["turnoverPct"] > hold_run["summary"]["turnoverPct"]
+
+
+def test_prepare_strategy_market_data_resamples_daily_source_to_weekly_signal_timeframe() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 101, 102, 103, 104, 105, 106],
+            "BBB": [100, 100, 101, 101, 102, 103, 103],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    volumes = pd.DataFrame(
+        {
+            "AAA": [10, 11, 12, 13, 14, 15, 16],
+            "BBB": [20, 21, 22, 23, 24, 25, 26],
+        },
+        index=closes.index,
+    )
+    strategy = build_strategy_spec(
+        strategy_id="weekly_signal_from_daily_source",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB"],
+            key="weekly_signal_source_universe",
+            label="Weekly signal source universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        signal_execution_contexts=[
+            {
+                "selectionKey": "full_universe",
+                "strategyType": "full_universe",
+                "label": "full_universe",
+                "description": "full_universe",
+                "scoreParameters": {},
+                "weight": 1.0,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": None,
+            }
+        ],
+    )
+
+    prepared_closes, prepared_volumes = prepare_strategy_market_data(
+        closes=closes,
+        volumes=volumes,
+        strategy=strategy,
+    )
+
+    assert list(prepared_closes.index) == [pd.Timestamp("2025-01-03"), pd.Timestamp("2025-01-07")]
+    assert prepared_closes.loc[pd.Timestamp("2025-01-03"), "AAA"] == 102
+    assert prepared_closes.loc[pd.Timestamp("2025-01-07"), "AAA"] == 106
+    assert prepared_volumes.loc[pd.Timestamp("2025-01-03"), "AAA"] == 33
+    assert prepared_volumes.loc[pd.Timestamp("2025-01-07"), "AAA"] == 58
+
+
+def test_compare_portfolio_runs_keeps_daily_performance_with_weekly_signal_timeframe() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100 + idx for idx in range(24)],
+            "BBB": [100 + (idx // 2) for idx in range(24)],
+            "CCC": [100 - 4 + idx for idx in range(24)],
+        },
+        index=pd.date_range("2025-01-01", periods=24, freq="D"),
+    )
+    volumes = pd.DataFrame(
+        {ticker: [1_000_000 + idx * 10_000 for idx in range(len(closes))] for ticker in closes.columns},
+        index=closes.index,
+    )
+    weekly_signal_strategy = build_strategy_spec(
+        strategy_id="daily_performance_weekly_signal",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="daily_performance_weekly_signal_universe",
+            label="Daily performance weekly signal universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "weeks", "value": 1}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        signal_execution_contexts=[
+            {
+                "selectionKey": "momentum_top3",
+                "strategyType": "momentum_top3",
+                "label": "momentum_top3",
+                "description": "momentum_top3",
+                "scoreParameters": {"windowSpec": {"unit": "weeks", "value": 1}},
+                "weight": 1.0,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": None,
+            }
+        ],
+        decision_schedule="every_bar",
+    )
+
+    run = compare_portfolio_runs(
+        closes=closes,
+        volumes=volumes,
+        strategies=[weekly_signal_strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.001,
+        bars_per_year=252.0,
+    )[0]
+
+    assert len(run["series"]) == len(closes.pct_change().dropna())
+    assert run["splitAnalysis"]["test"]["barCount"] > 0
+    assert run["strategy"]["components"]["core"]["dataResolution"]["key"] == "1w"
 
 
 def test_compare_portfolio_runs_returns_strategy_combinations() -> None:
@@ -608,6 +2601,531 @@ def test_prediction_supplement_changes_momentum_scores() -> None:
     assert baseline_scores is not None
     assert supplemented_scores is not None
     assert not baseline_scores.equals(supplemented_scores)
+
+
+
+
+def test_select_assets_uses_explicit_selection_contexts_for_momentum_top3() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 101, 102, 103, 104, 105, 106, 107],
+            "BBB": [100, 102, 103, 104, 105, 106, 107, 108],
+            "CCC": [100, 99, 98, 100, 103, 107, 112, 118],
+            "DDD": [100, 101, 101, 102, 102, 103, 103, 104],
+        },
+        index=pd.date_range("2025-01-01", periods=8, freq="D"),
+    )
+    returns = closes.pct_change().dropna()
+    strategy = build_strategy_spec(
+        strategy_id="explicit_selection_assets_top3",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="explicit_selection_assets_top3_universe",
+            label="Explicit selection assets top3 universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "bars", "value": 2}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        signal_execution_contexts=[
+            {
+                "selectionKey": "momentum_top3",
+                "strategyType": "momentum_top3",
+                "label": "momentum_top3",
+                "description": "momentum_top3",
+                "scoreParameters": {"windowSpec": {"unit": "bars", "value": 2}},
+                "weight": 0.4,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1d",
+                "alignmentPolicy": None,
+            },
+            {
+                "selectionKey": "secondary_momo4",
+                "strategyType": "momentum_top3",
+                "label": "Secondary momentum",
+                "description": "Secondary momentum",
+                "scoreParameters": {"windowSpec": {"unit": "bars", "value": 4}},
+                "weight": 0.6,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1d",
+                "alignmentPolicy": None,
+            },
+        ],
+    )
+    selection_contexts, _ = get_strategy_signal_execution_contexts(strategy)
+
+    with patch(
+        "app.portfolio.get_strategy_signal_execution_contexts",
+        side_effect=AssertionError("explicit selection contexts should avoid strategy re-extraction"),
+    ):
+        selected_assets = select_assets(
+            returns,
+            None,
+            strategy,
+            bars_per_year=252.0,
+            selection_contexts=selection_contexts,
+        )
+
+    assert "CCC" in selected_assets
+def test_compare_portfolio_runs_blends_additional_selection_signals_for_momentum_top3() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 101, 102, 103, 104, 105, 106, 107],
+            "BBB": [100, 102, 103, 104, 105, 106, 107, 108],
+            "CCC": [100, 99, 98, 100, 103, 107, 112, 118],
+            "DDD": [100, 101, 101, 102, 102, 103, 103, 104],
+        },
+        index=pd.date_range("2025-01-01", periods=8, freq="D"),
+    )
+    strategy = build_strategy_spec(
+        strategy_id="multi_selection_top3",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="multi_selection_top3_universe",
+            label="Multi selection top3 universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "bars", "value": 2}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        signal_execution_contexts=[
+            {
+                "selectionKey": "momentum_top3",
+                "strategyType": "momentum_top3",
+                "label": "momentum_top3",
+                "description": "momentum_top3",
+                "scoreParameters": {"windowSpec": {"unit": "bars", "value": 2}},
+                "weight": 0.4,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1d",
+                "alignmentPolicy": None,
+            },
+            {
+                "selectionKey": "secondary_momo4",
+                "strategyType": "momentum_top3",
+                "label": "Secondary momentum",
+                "description": "Secondary momentum",
+                "scoreParameters": {"windowSpec": {"unit": "bars", "value": 4}},
+                "weight": 0.6,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1d",
+                "alignmentPolicy": None,
+            },
+        ],
+    )
+
+    run = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.001,
+        bars_per_year=252.0,
+    )[0]
+
+    assert "CCC" in run["selectedAssets"]
+
+
+def test_compute_strategy_score_series_blends_explicit_additional_selection_signals() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106, 108, 109],
+            "QQQ": [100, 104, 105, 107, 109, 112, 114, 116],
+            "TLT": [100, 99, 98, 99, 100, 101, 102, 103],
+        },
+        index=pd.date_range("2025-01-01", periods=8, freq="D"),
+    )
+    returns = closes.pct_change().dropna()
+    primary_strategy = make_strategy(
+        "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
+        score_parameters={
+            "tilt_strength": 0.35,
+            "tilt_shape": 1.0,
+            "windowSpec": {"unit": "bars", "value": 3},
+        },
+    )
+    blended_strategy = build_strategy_spec(
+        strategy_id="multi_selection_blend",
+        timeframe=primary_strategy.timeframe,
+        investment_universe=primary_strategy.investment_universe,
+        selection=primary_strategy.selection,
+        portfolio_model=primary_strategy.portfolio_model,
+        execution_policy=primary_strategy.execution_policy,
+        risk_controls=primary_strategy.risk_controls,
+        signal_execution_contexts=[
+            {
+                "selectionKey": primary_strategy.selection.key,
+                "strategyType": primary_strategy.selection.strategy_type,
+                "label": primary_strategy.selection.label,
+                "description": primary_strategy.selection.description,
+                "scoreParameters": {
+                    "tilt_strength": 0.35,
+                    "tilt_shape": 1.0,
+                    "windowSpec": {"unit": "bars", "value": 3},
+                },
+                "weight": 0.6,
+                "dataTimeframe": primary_strategy.timeframe.key,
+                "signalTimeframe": primary_strategy.timeframe.key,
+                "alignmentPolicy": None,
+            },
+            {
+                "selectionKey": "secondary_momo2",
+                "strategyType": "full_universe_momentum_tilt",
+                "label": "Secondary momentum",
+                "description": "Secondary momentum",
+                "scoreParameters": {
+                    "tilt_strength": 0.35,
+                    "tilt_shape": 1.0,
+                    "windowSpec": {"unit": "bars", "value": 2},
+                },
+                "weight": 0.4,
+                "dataTimeframe": primary_strategy.timeframe.key,
+                "signalTimeframe": primary_strategy.timeframe.key,
+                "alignmentPolicy": None,
+            },
+        ],
+    )
+
+    primary_scores = compute_strategy_score_series(
+        returns,
+        None,
+        primary_strategy,
+        bars_per_year=252,
+    )
+    blended_scores = compute_strategy_score_series(
+        returns,
+        None,
+        blended_strategy,
+        bars_per_year=252,
+    )
+
+    assert primary_scores is not None
+    assert blended_scores is not None
+    assert not primary_scores.equals(blended_scores)
+
+
+
+
+def test_compute_strategy_score_series_uses_explicit_predictor_context() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106],
+            "QQQ": [100, 103, 105, 107, 108, 110],
+            "TLT": [100, 100, 99, 100, 101, 102],
+        },
+        index=pd.date_range("2025-01-01", periods=6, freq="D"),
+    )
+    returns = closes.pct_change().dropna()
+    strategy = make_strategy(
+        "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
+        score_parameters={
+            "tilt_strength": 0.35,
+            "tilt_shape": 1.0,
+            "windowSpec": {"unit": "bars", "value": 3},
+        },
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-test-explicit-context-2bar",
+            signal_weight=0.8,
+            predictor_weight=0.2,
+        ),
+    )
+    selection_contexts, predictor_context = get_strategy_signal_execution_contexts(strategy)
+    predictor_panel = pd.DataFrame(
+        {
+            "SPY": [0.8],
+            "QQQ": [0.1],
+            "TLT": [-0.7],
+        },
+        index=[returns.index[-1]],
+    )
+    assert predictor_context is not None
+
+    with patch(
+        "app.portfolio.get_strategy_signal_execution_contexts",
+        side_effect=AssertionError("explicit score contexts should avoid strategy re-extraction"),
+    ):
+        scores = compute_strategy_score_series(
+            returns,
+            None,
+            strategy,
+            bars_per_year=252,
+            current_date=str(returns.index[-1]),
+            predictor_panel=predictor_panel,
+            selection_contexts=selection_contexts,
+            predictor_context=predictor_context,
+        )
+
+    assert scores is not None
+    assert scores["SPY"] > scores["TLT"]
+def test_compute_strategy_score_series_uses_latest_predictor_snapshot_before_current_date() -> None:
+    closes = pd.DataFrame(
+        {
+            "SPY": [100, 101, 103, 102, 104, 106],
+            "QQQ": [100, 103, 105, 107, 108, 110],
+            "TLT": [100, 100, 99, 100, 101, 102],
+        },
+        index=pd.date_range("2025-01-01", periods=6, freq="D"),
+    )
+    returns = closes.pct_change().dropna()
+    strategy = make_strategy(
+        "full_universe_momentum_tilt",
+        "hierarchical_risk_parity",
+        score_parameters={
+            "tilt_strength": 0.35,
+            "tilt_shape": 1.0,
+            "windowSpec": {"unit": "bars", "value": 3},
+        },
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-test-asof-2bar",
+            signal_weight=0.8,
+            predictor_weight=0.2,
+        ),
+    )
+    predictor_panel = pd.DataFrame(
+        {
+            "SPY": [0.8],
+            "QQQ": [0.1],
+            "TLT": [-0.7],
+        },
+        index=[returns.index[-2]],
+    )
+
+    exact_scores = compute_strategy_score_series(
+        returns,
+        None,
+        strategy,
+        bars_per_year=252,
+        current_date=str(returns.index[-2]),
+        predictor_panel=predictor_panel,
+    )
+    asof_scores = compute_strategy_score_series(
+        returns,
+        None,
+        strategy,
+        bars_per_year=252,
+        current_date=str(returns.index[-1]),
+        predictor_panel=predictor_panel,
+    )
+
+    assert exact_scores is not None
+    assert asof_scores is not None
+    pd.testing.assert_series_equal(asof_scores.sort_index(), exact_scores.sort_index())
+
+
+
+
+def test_prepare_strategy_signal_data_uses_explicit_selection_contexts() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 102, 104, 103, 105, 107, 108],
+            "BBB": [100, 101, 102, 103, 104, 105, 106],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    returns = closes.pct_change().dropna()
+    strategy = build_strategy_spec(
+        strategy_id="explicit_selection_signal_data",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB"],
+            key="explicit_selection_signal_data_universe",
+            label="Explicit selection signal data universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        extensions={"signal_data_timeframe": "1d", "signal_timeframe": "1w"},
+    )
+    selection_contexts, _ = get_strategy_signal_execution_contexts(strategy)
+
+    with patch(
+        "app.portfolio.get_strategy_signal_execution_contexts",
+        side_effect=AssertionError("explicit selection contexts should avoid strategy re-extraction"),
+    ):
+        signal_returns, signal_volumes, signal_bars_per_year = prepare_strategy_signal_data(
+            history_returns=returns,
+            volume_history=None,
+            selection_contexts=selection_contexts,
+        )
+
+    assert signal_volumes is None
+    assert signal_bars_per_year == DEFAULT_WEEKLY_TIMEFRAME.bars_per_year
+    assert list(signal_returns.index) == [pd.Timestamp("2025-01-07")]
+
+
+def test_prepare_strategy_predictor_panel_uses_explicit_predictor_context() -> None:
+    predictor_panel = pd.DataFrame(
+        {
+            "AAA": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "BBB": [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_strategy_spec(
+        strategy_id="explicit_predictor_signal_data",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB"],
+            key="explicit_predictor_signal_data_universe",
+            label="Explicit predictor signal data universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-explicit-predictor-context",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+        ),
+        predictor_signal_execution_context={
+            "predictorKey": "pred-explicit-predictor-context",
+            "signalWeight": 0.6,
+            "predictorWeight": 0.4,
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": None,
+        },
+    )
+    _, predictor_context = get_strategy_signal_execution_contexts(strategy)
+    assert predictor_context is not None
+
+    with patch(
+        "app.portfolio.get_strategy_signal_execution_contexts",
+        side_effect=AssertionError("explicit predictor context should avoid strategy re-extraction"),
+    ):
+        prepared_panel = prepare_strategy_predictor_panel(
+            predictor_panel=predictor_panel,
+            predictor_context=predictor_context,
+        )
+
+    assert prepared_panel is not None
+    assert list(prepared_panel.index) == [pd.Timestamp("2025-01-03"), pd.Timestamp("2025-01-07")]
+    assert prepared_panel.loc[pd.Timestamp("2025-01-07"), "AAA"] == 0.7
+def test_prepare_strategy_predictor_panel_resamples_daily_source_to_weekly_signal_timeframe() -> None:
+    predictor_panel = pd.DataFrame(
+        {
+            "AAA": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "BBB": [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_strategy_spec(
+        strategy_id="weekly_predictor_from_daily_source",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB"],
+            key="weekly_predictor_source_universe",
+            label="Weekly predictor source universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="month_end",
+            label="月次",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="month_end",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        predictor_use=build_predictor_use_spec(
+            predictor_key="pred-weekly-predictor-source",
+            signal_weight=0.6,
+            predictor_weight=0.4,
+        ),
+        signal_execution_contexts=[
+            {
+                "selectionKey": "full_universe",
+                "strategyType": "full_universe",
+                "label": "full_universe",
+                "description": "full_universe",
+                "scoreParameters": {},
+                "weight": 1.0,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": None,
+            }
+        ],
+    )
+
+    prepared_panel = prepare_strategy_predictor_panel(
+        predictor_panel=predictor_panel,
+        strategy=strategy,
+    )
+
+    calendar_strategy = build_strategy_spec(
+        strategy_id="weekly_predictor_from_daily_source_calendar",
+        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+        investment_universe=strategy.investment_universe,
+        selection=strategy.selection,
+        portfolio_model=strategy.portfolio_model,
+        execution_policy=strategy.execution_policy,
+        risk_controls=strategy.risk_controls,
+        predictor_use=strategy.predictor_use,
+        signal_execution_contexts=[
+            {
+                "selectionKey": "full_universe",
+                "strategyType": "full_universe",
+                "label": "full_universe",
+                "description": "full_universe",
+                "scoreParameters": {},
+                "weight": 1.0,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": None,
+            }
+        ],
+        predictor_signal_execution_context={
+            "predictorKey": "pred-weekly-predictor-source",
+            "signalWeight": 0.6,
+            "predictorWeight": 0.4,
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": {"method": "calendar_resample"},
+        },
+    )
+    calendar_panel = prepare_strategy_predictor_panel(
+        predictor_panel=predictor_panel,
+        strategy=calendar_strategy,
+    )
+
+    assert prepared_panel is not None
+    assert list(prepared_panel.index) == [pd.Timestamp("2025-01-03"), pd.Timestamp("2025-01-07")]
+    assert prepared_panel.loc[pd.Timestamp("2025-01-03"), "AAA"] == 0.3
+    assert prepared_panel.loc[pd.Timestamp("2025-01-07"), "AAA"] == 0.7
+    assert calendar_panel is not None
+    assert list(calendar_panel.index) == [pd.Timestamp("2025-01-03"), pd.Timestamp("2025-01-10")]
+    assert calendar_panel.loc[pd.Timestamp("2025-01-03"), "AAA"] == 0.3
+    assert calendar_panel.loc[pd.Timestamp("2025-01-10"), "AAA"] == 0.7
 
 
 def test_predictor_evaluation_includes_predictor_series() -> None:

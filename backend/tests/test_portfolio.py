@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 
 from app.portfolio import (
@@ -1971,6 +1972,88 @@ def test_timeframe_variant_candidates_are_strategy_definitions() -> None:
 
 
 
+def test_compare_portfolio_runs_does_not_apply_test_initial_weights_to_train() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 110, 120, 130, 140, 150, 160],
+            "BBB": [100, 100, 100, 100, 100, 100, 100],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="no_lookahead_train_universe",
+            label="No lookahead train universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    run = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+    )[0]
+
+    assert run["splitAnalysis"]["train"]["portfolio"]["totalReturnPct"] == 0.0
+    assert run["summary"] == run["splitAnalysis"]["test"]["portfolio"]
+
+
+def test_compare_portfolio_runs_applies_rebalance_on_next_bar() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 100, 100, 100, 100, 100, 100],
+            "BBB": [100, 100, 100, 100, 100, 200, 200],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="next_bar_execution_universe",
+            label="Next bar execution universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        decision_schedule="every_bar",
+    )
+
+    allocation_calls = 0
+
+    def fake_compute_portfolio_allocation(**kwargs):
+        nonlocal allocation_calls
+        allocation_calls += 1
+        if allocation_calls == 1:
+            return ["AAA"], np.asarray([1.0, 0.0], dtype="float64")
+        return ["BBB"], np.asarray([0.0, 1.0], dtype="float64")
+
+    with patch("app.portfolio.compute_portfolio_allocation", side_effect=fake_compute_portfolio_allocation):
+        run = compare_portfolio_runs(
+            closes=closes,
+            volumes=None,
+            strategies=[strategy],
+            initial_capital=1000.0,
+            split_ratio=0.5,
+            transaction_cost=0.0,
+            portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+        )[0]
+
+    assert run["splitAnalysis"]["test"]["portfolio"]["totalReturnPct"] == 0.0
+
+
 def test_compare_portfolio_runs_uses_explicit_decision_schedule() -> None:
     closes = pd.DataFrame(
         {
@@ -2238,7 +2321,8 @@ def test_compare_portfolio_runs_returns_strategy_combinations() -> None:
         "momentum_top3__hierarchical_risk_parity",
     ]
     assert any(row["asset"] == "CASH" and row["weightPct"] == 20.0 for row in payload[0]["weights"])
-    assert payload[0]["summary"]["turnoverPct"] >= 80.0
+    assert payload[0]["summary"] == payload[0]["splitAnalysis"]["test"]["portfolio"]
+    assert payload[0]["summary"]["turnoverPct"] > 0.0
     assert len(payload[0]["series"]) == 6
 
 

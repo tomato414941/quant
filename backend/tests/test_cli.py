@@ -121,8 +121,49 @@ def test_comparison_summary_command(monkeypatch, tmp_path, capsys) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert config.comparison_id in captured.out
-    assert "Top 2 candidate runs:" in captured.out
-    assert "Sharpe" in captured.out
+    assert "Top 2 candidate runs by test performance:" in captured.out
+    assert "Test Sharpe" in captured.out
+
+
+def test_sort_candidate_runs_uses_test_metrics() -> None:
+    weak_test_run = {
+        "summary": {"sharpeRatio": 9.0, "totalReturnPct": 90.0, "maxDrawdownPct": 1.0},
+        "splitAnalysis": {
+            "train": {"portfolio": {"sharpeRatio": 9.0, "totalReturnPct": 90.0, "maxDrawdownPct": 1.0}},
+            "test": {"portfolio": {"sharpeRatio": 0.1, "totalReturnPct": 1.0, "maxDrawdownPct": 9.0}},
+        },
+    }
+    strong_test_run = {
+        "summary": {"sharpeRatio": 1.0, "totalReturnPct": 10.0, "maxDrawdownPct": 5.0},
+        "splitAnalysis": {
+            "train": {"portfolio": {"sharpeRatio": 1.0, "totalReturnPct": 10.0, "maxDrawdownPct": 5.0}},
+            "test": {"portfolio": {"sharpeRatio": 2.0, "totalReturnPct": 5.0, "maxDrawdownPct": 4.0}},
+        },
+    }
+
+    assert cli_module.sort_candidate_runs([weak_test_run, strong_test_run])[0] is strong_test_run
+
+
+def test_apply_comparison_universe_variant_removes_crypto_assets() -> None:
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
+
+    filtered = cli_module.apply_comparison_universe_variant(config, "no_crypto")
+
+    assert filtered.comparison_id.endswith("__no_crypto")
+    assert "BTC-USD" not in filtered.run_spec.portfolio_state.current_weights
+    assert "ETH-USD" not in filtered.run_spec.portfolio_state.current_weights
+    assert filtered.run_spec.portfolio_state.cash_weight > config.run_spec.portfolio_state.cash_weight
+    assert all(
+        "BTC-USD" not in strategy.investment_universe.tickers
+        and "ETH-USD" not in strategy.investment_universe.tickers
+        for strategy in filtered.candidate_strategies + filtered.reference_strategies
+    )
+    assert all(
+        "BTC-USD" not in signal.observation_spec.tickers
+        and "ETH-USD" not in signal.observation_spec.tickers
+        for strategy in filtered.candidate_strategies + filtered.reference_strategies
+        for signal in strategy.signals
+    )
 
 
 def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -138,7 +179,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v59"
+    assert payload["records"][0]["logicVersion"] == "v60"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

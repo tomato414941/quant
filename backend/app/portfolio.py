@@ -1033,6 +1033,7 @@ def compare_portfolio_runs(
             strategy=strategy,
             portfolio_model=portfolio_model,
             bars_per_year=bars_per_year,
+            warmup_weights=initial_portfolio_weights,
             initial_weights=initial_weights,
             initial_selected_assets=initial_selected_assets,
             max_investment_ratio=risk_controls.max_investment_ratio,
@@ -2303,6 +2304,7 @@ def run_portfolio_backtest(
     split_ratio: float,
     strategy: EvaluatorStrategySpec,
     portfolio_model: PortfolioModelSpec,
+    warmup_weights: np.ndarray,
     initial_weights: np.ndarray,
     initial_selected_assets: list[str],
     max_investment_ratio: float,
@@ -2328,72 +2330,44 @@ def run_portfolio_backtest(
     test_portfolio_returns: list[float] = []
     train_turnover = 0.0
     test_turnover = 0.0
-    current_weights = initial_weights.copy()
-    current_selected_assets = list(initial_selected_assets)
-    pending_weights = initial_weights.copy()
-    pending_selected_assets = list(initial_selected_assets)
-    latest_weights = initial_weights.copy()
-    latest_selected_assets = list(initial_selected_assets)
+    current_weights = warmup_weights.copy()
+    current_selected_assets: list[str] = []
+    latest_weights = current_weights.copy()
+    latest_selected_assets = list(current_selected_assets)
+    pending_decision_weights = initial_weights.copy()
+    pending_decision_selected_assets = list(initial_selected_assets)
+    next_rebalance_weights: np.ndarray | None = None
+    next_rebalance_selected_assets: list[str] | None = None
 
     for index, (date, row) in enumerate(returns.iterrows()):
         trade_turnover = 0.0
         trade_cost = 0.0
-        if index == 0:
-            trade_turnover = float(np.abs(current_weights).sum())
+
+        if index == split_index:
+            next_rebalance_weights = initial_weights.copy()
+            next_rebalance_selected_assets = list(initial_selected_assets)
+
+        if index >= split_index and next_rebalance_weights is not None:
+            rebalanced_weights = next_rebalance_weights
+            selected_assets = next_rebalance_selected_assets or []
+            weight_delta = np.abs(rebalanced_weights - current_weights)
+            trade_turnover = float(weight_delta.sum())
             trade_cost = compute_trade_cost(
-                weight_delta=np.abs(current_weights),
+                weight_delta=weight_delta,
                 linear_cost_rates=asset_transaction_costs,
                 impact_cost_rates=asset_impact_costs,
                 portfolio_equity=portfolio_equity,
-                price_snapshot=closes.iloc[index],
-                volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
+                price_snapshot=closes.iloc[max(index - 1, 0)],
+                volume_history=volumes.iloc[:index] if volumes is not None else None,
                 adv_window_bars=adv_window_bars,
                 min_adv_notional=min_adv_notional,
             )
-        elif index > split_index:
-            if should_rebalance(
-                previous_date=returns.index[index - 1],
-                current_date=date,
-                rebalance_schedule=decision_schedule,
-            ):
-                pending_selected_assets, pending_weights = compute_portfolio_allocation(
-                    history_returns=returns.iloc[:index],
-                    volume_history=volumes.iloc[:index] if volumes is not None else None,
-                    strategy=strategy,
-                    portfolio_model=portfolio_model,
-                    bars_per_year=bars_per_year,
-                    universe_columns=returns.columns,
-                    max_investment_ratio=max_investment_ratio,
-                    max_weight=max_weight,
-                    previous_weights=current_weights,
-                    transaction_cost=transaction_cost,
-                    current_date=str(date),
-                    predictor_panel=predictor_panel,
-                    selection_contexts=selection_contexts,
-                    predictor_context=predictor_context,
-                )
-            if should_rebalance(
-                previous_date=returns.index[index - 1],
-                current_date=date,
-                rebalance_schedule=rebalance_schedule,
-            ):
-                rebalanced_weights = pending_weights
-                current_selected_assets = list(pending_selected_assets)
-                weight_delta = np.abs(rebalanced_weights - current_weights)
-                trade_turnover = float(weight_delta.sum())
-                trade_cost = compute_trade_cost(
-                    weight_delta=weight_delta,
-                    linear_cost_rates=asset_transaction_costs,
-                    impact_cost_rates=asset_impact_costs,
-                    portfolio_equity=portfolio_equity,
-                    price_snapshot=closes.iloc[index - 1],
-                    volume_history=volumes.iloc[:index] if volumes is not None else None,
-                    adv_window_bars=adv_window_bars,
-                    min_adv_notional=min_adv_notional,
-                )
-                current_weights = rebalanced_weights
-                latest_weights = rebalanced_weights.copy()
-                latest_selected_assets = list(current_selected_assets)
+            current_weights = rebalanced_weights
+            current_selected_assets = list(selected_assets)
+            latest_weights = rebalanced_weights.copy()
+            latest_selected_assets = list(current_selected_assets)
+            next_rebalance_weights = None
+            next_rebalance_selected_assets = None
 
         portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), current_weights))
         portfolio_return -= trade_cost
@@ -2416,35 +2390,60 @@ def run_portfolio_backtest(
             }
         )
 
-    summary = summarize_portfolio_metrics(
-        final_value=portfolio_equity,
-        initial_value=initial_capital,
-        periods=len(returns),
-        returns=portfolio_returns,
+        if index <= split_index or index >= len(returns) - 1:
+            continue
+
+        previous_date = returns.index[index - 1]
+        if should_rebalance(
+            previous_date=previous_date,
+            current_date=date,
+            rebalance_schedule=decision_schedule,
+        ):
+            pending_decision_selected_assets, pending_decision_weights = compute_portfolio_allocation(
+                history_returns=returns.iloc[: index + 1],
+                volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
+                strategy=strategy,
+                portfolio_model=portfolio_model,
+                bars_per_year=bars_per_year,
+                universe_columns=returns.columns,
+                max_investment_ratio=max_investment_ratio,
+                max_weight=max_weight,
+                previous_weights=current_weights,
+                transaction_cost=transaction_cost,
+                current_date=str(date),
+                predictor_panel=predictor_panel,
+                selection_contexts=selection_contexts,
+                predictor_context=predictor_context,
+            )
+        if should_rebalance(
+            previous_date=previous_date,
+            current_date=date,
+            rebalance_schedule=rebalance_schedule,
+        ):
+            next_rebalance_weights = pending_decision_weights.copy()
+            next_rebalance_selected_assets = list(pending_decision_selected_assets)
+
+    train_summary = summarize_segment_from_returns(
+        dates=train_dates,
+        portfolio_returns=train_portfolio_returns,
         bars_per_year=bars_per_year,
-        series=series,
-        equity_key="portfolioEquity",
-        turnover=round((train_turnover + test_turnover) * 100, 2),
+        turnover=train_turnover,
+    )
+    test_summary = summarize_segment_from_returns(
+        dates=test_dates,
+        portfolio_returns=test_portfolio_returns,
+        bars_per_year=bars_per_year,
+        turnover=test_turnover,
     )
     return {
-        "summary": summary,
+        "summary": test_summary["portfolio"],
         "series": series,
         "latestWeights": latest_weights,
         "latestSelectedAssets": latest_selected_assets,
         "splitAnalysis": {
             "config": {"splitRatioPct": round(split_ratio * 100, 1)},
-            "train": summarize_segment_from_returns(
-                dates=train_dates,
-                portfolio_returns=train_portfolio_returns,
-                bars_per_year=bars_per_year,
-                turnover=train_turnover,
-            ),
-            "test": summarize_segment_from_returns(
-                dates=test_dates,
-                portfolio_returns=test_portfolio_returns,
-                bars_per_year=bars_per_year,
-                turnover=test_turnover,
-            ),
+            "train": train_summary,
+            "test": test_summary,
         },
     }
 

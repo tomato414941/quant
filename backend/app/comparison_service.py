@@ -166,9 +166,40 @@ def collect_strategy_predictor_specs(strategy_definitions: list) -> list:
         if predictor_key in seen_keys:
             continue
         seen_keys.add(predictor_key)
-        predictor_specs.append(predictor_spec)
+        predictor_specs.append(
+            align_predictor_spec_to_strategy_definition(
+                predictor_spec,
+                strategy_definition,
+                predictor_key,
+            )
+        )
 
     return predictor_specs
+
+
+def align_predictor_spec_to_strategy_definition(
+    predictor_spec,
+    strategy_definition: StrategyDefinition,
+    predictor_key: str,
+):
+    predictor_signal = next(
+        (
+            signal
+            for signal in strategy_definition.signals
+            if signal.predictor_key == predictor_key
+        ),
+        None,
+    )
+    if predictor_signal is None:
+        return predictor_spec
+    return replace(
+        predictor_spec,
+        signal_spec=replace(
+            predictor_spec.signal_spec,
+            observation_spec=predictor_signal.observation_spec,
+            entity_identifiers=predictor_signal.observation_spec.tickers,
+        ),
+    )
 
 
 def collect_strategy_predictor_source_definitions(
@@ -1572,6 +1603,50 @@ def add_market_slice_dates(
         payload["endDate"] = comparison.run_spec.market_slice.end_date
 
 
+def build_market_data_warnings(
+    comparison: ComparisonSpec,
+    metadata_by_timeframe: dict[str, dict[str, object]],
+    *,
+    period_override: str | None = None,
+) -> list[dict[str, object]]:
+    if not should_include_market_slice_dates(comparison, period_override):
+        return []
+
+    warnings: list[dict[str, object]] = []
+    requested_start = comparison.run_spec.market_slice.start_date
+    requested_end = comparison.run_spec.market_slice.end_date
+    for timeframe_key, metadata in sorted(metadata_by_timeframe.items()):
+        aligned_start = str(metadata.get("aligned_start_date", ""))
+        aligned_end = str(metadata.get("aligned_end_date", ""))
+        if requested_start is not None and aligned_start and aligned_start > requested_start:
+            warnings.append(
+                {
+                    "kind": "aligned_start_after_requested_start",
+                    "timeframe": timeframe_key,
+                    "requestedStartDate": requested_start,
+                    "alignedStartDate": aligned_start,
+                    "message": (
+                        f"{timeframe_key} data starts at {aligned_start}, "
+                        f"after requested start {requested_start}."
+                    ),
+                }
+            )
+        if requested_end is not None and aligned_end and aligned_end < requested_end:
+            warnings.append(
+                {
+                    "kind": "aligned_end_before_requested_end",
+                    "timeframe": timeframe_key,
+                    "requestedEndDate": requested_end,
+                    "alignedEndDate": aligned_end,
+                    "message": (
+                        f"{timeframe_key} data ends at {aligned_end}, "
+                        f"before requested end {requested_end}."
+                    ),
+                }
+            )
+    return warnings
+
+
 def serialize_market_slice_context(
     *,
     comparison: ComparisonSpec,
@@ -1746,6 +1821,13 @@ def serialize_evaluation(
     )
     if signal_market_data_contexts:
         payload["signalMarketDataContexts"] = signal_market_data_contexts
+    warnings = build_market_data_warnings(
+        comparison,
+        metadata_by_timeframe,
+        period_override=period_override,
+    )
+    if warnings:
+        payload["warnings"] = warnings
     return payload
 
 

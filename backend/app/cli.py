@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 from typing import Sequence
@@ -26,6 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print a terminal summary of the current comparison.",
     )
     comparison_parser.add_argument("--top", type=int, default=5)
+    comparison_parser.add_argument(
+        "--universe",
+        choices=("crypto_included", "btc_only", "no_crypto"),
+        default="crypto_included",
+        help="Run the comparison against a fixed universe variant.",
+    )
     comparison_parser.add_argument("--json", action="store_true", dest="as_json")
 
     comparison_run_spec_parser = subparsers.add_parser(
@@ -74,17 +82,119 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+UNIVERSE_VARIANTS = {
+    "crypto_included": {
+        "label": "Crypto included",
+        "excluded_tickers": set(),
+    },
+    "btc_only": {
+        "label": "BTC only",
+        "excluded_tickers": {"ETH-USD"},
+    },
+    "no_crypto": {
+        "label": "No crypto",
+        "excluded_tickers": {"BTC-USD", "ETH-USD"},
+    },
+}
+
+
+def apply_comparison_universe_variant(comparison, universe_key: str):
+    variant = UNIVERSE_VARIANTS[universe_key]
+    excluded_tickers = set(variant["excluded_tickers"])
+    if not excluded_tickers:
+        return comparison
+
+    filtered_comparison = copy.deepcopy(comparison)
+    filtered_comparison.comparison_id = f"{comparison.comparison_id}__{universe_key}"
+    filtered_comparison.candidate_strategies = [
+        filter_strategy_definition_universe(strategy, excluded_tickers, universe_key)
+        for strategy in comparison.candidate_strategies
+    ]
+    filtered_comparison.reference_strategies = [
+        filter_strategy_definition_universe(strategy, excluded_tickers, universe_key)
+        for strategy in comparison.reference_strategies
+    ]
+    portfolio_state = comparison.run_spec.portfolio_state
+    retained_weights = {
+        asset: weight
+        for asset, weight in portfolio_state.current_weights.items()
+        if asset not in excluded_tickers
+    }
+    removed_weight = sum(
+        weight
+        for asset, weight in portfolio_state.current_weights.items()
+        if asset in excluded_tickers
+    )
+    filtered_comparison.run_spec.portfolio_state = replace(
+        portfolio_state,
+        current_weights=retained_weights,
+        cash_weight=portfolio_state.cash_weight + removed_weight,
+    )
+    return filtered_comparison
+
+
+def filter_strategy_definition_universe(strategy_definition, excluded_tickers: set[str], universe_key: str):
+    tickers = tuple(
+        ticker
+        for ticker in strategy_definition.investment_universe.tickers
+        if ticker not in excluded_tickers
+    )
+    if len(tickers) < 2:
+        raise ValueError("Universe variant must retain at least two assets per strategy.")
+    investment_universe = replace(
+        strategy_definition.investment_universe,
+        key=f"{strategy_definition.investment_universe.key}__{universe_key}",
+        label=f"{strategy_definition.investment_universe.label} / {UNIVERSE_VARIANTS[universe_key]['label']}",
+        tickers=tickers,
+    )
+    return replace(
+        strategy_definition,
+        investment_universe=investment_universe,
+        signals=tuple(
+            filter_strategy_signal_universe(signal, tickers, universe_key)
+            for signal in strategy_definition.signals
+        ),
+    )
+
+
+def filter_strategy_signal_universe(signal, tickers: tuple[str, ...], universe_key: str):
+    observation_spec = replace(
+        signal.observation_spec,
+        key=f"{signal.observation_spec.key}__{universe_key}",
+        tickers=tickers,
+    )
+    data_source_spec = signal.data_source_spec
+    if data_source_spec is not None:
+        data_source_spec = replace(
+            data_source_spec,
+            observation_spec=replace(
+                data_source_spec.observation_spec,
+                key=f"{data_source_spec.observation_spec.key}__{universe_key}",
+                tickers=tickers,
+            ),
+        )
+    return replace(
+        signal,
+        observation_spec=observation_spec,
+        data_source_spec=data_source_spec,
+    )
+
+
 def format_percent(value: float) -> str:
     return f"{value:+.2f}%"
+
+
+def portfolio_segment_summary(run: dict, segment: str) -> dict:
+    return run["splitAnalysis"][segment]["portfolio"]
 
 
 def sort_candidate_runs(candidate_runs: list[dict]) -> list[dict]:
     return sorted(
         candidate_runs,
         key=lambda run: (
-            -run["summary"]["sharpeRatio"],
-            -run["summary"]["totalReturnPct"],
-            run["summary"]["maxDrawdownPct"],
+            -portfolio_segment_summary(run, "test")["sharpeRatio"],
+            -portfolio_segment_summary(run, "test")["totalReturnPct"],
+            portfolio_segment_summary(run, "test")["maxDrawdownPct"],
         ),
     )
 
@@ -113,18 +223,33 @@ def render_comparison_summary(payload: dict, *, top: int) -> str:
             f"predictor={len(payload['predictorRuns'])}"
         ),
         "",
-        f"Top {min(top, len(candidate_runs))} candidate runs:",
     ]
 
+    warnings = comparison.get("runSpec", {}).get("evaluation", {}).get("warnings", [])
+    if warnings:
+        lines.append("Warnings:")
+        for warning in warnings:
+            lines.append(f"- {warning['message']}")
+        lines.append("")
+
+    lines.append(f"Top {min(top, len(candidate_runs))} candidate runs by test performance:")
+
     for index, run in enumerate(candidate_runs[:top], start=1):
-        summary = run["summary"]
+        test_summary = portfolio_segment_summary(run, "test")
+        train_summary = portfolio_segment_summary(run, "train")
+        overall_summary = run["summary"]
         lines.append(f"{index}. {run['strategy']['label']} [{run['key']}]")
         lines.append(
             "   "
-            f"Sharpe {summary['sharpeRatio']:.3f} | "
-            f"Return {format_percent(summary['totalReturnPct'])} | "
-            f"MDD {format_percent(summary['maxDrawdownPct'])} | "
-            f"Turnover {format_percent(summary['turnoverPct'])}"
+            f"Test Sharpe {test_summary['sharpeRatio']:.3f} | "
+            f"Return {format_percent(test_summary['totalReturnPct'])} | "
+            f"MDD {format_percent(test_summary['maxDrawdownPct'])} | "
+            f"Turnover {format_percent(test_summary['turnoverPct'])}"
+        )
+        lines.append(
+            "   "
+            f"Train Sharpe {train_summary['sharpeRatio']:.3f} | "
+            f"Summary Sharpe {overall_summary['sharpeRatio']:.3f}"
         )
 
     return "\n".join(lines)
@@ -196,8 +321,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "comparison-summary":
+        comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
         payload = build_comparison_payload(
-            DEFAULT_COMPARISON_SPEC,
+            comparison_spec,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
         )
         if args.as_json:

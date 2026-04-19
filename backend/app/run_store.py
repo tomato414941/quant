@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v58"
+RUN_STORE_LOGIC_VERSION = "v59"
 RUN_STORE_INDEX_FILENAME = "_index.json"
 
 
@@ -255,6 +255,7 @@ class FileRunResultStore:
             "runKind": run_spec.get("runKind"),
             "generationMethod": generation.get("method"),
             "strategyDefinitionFingerprint": fingerprints.get("strategyDefinition"),
+            "evaluationSubjectFingerprint": fingerprints.get("evaluationSubject"),
             "marketDataFingerprint": fingerprints.get("marketData"),
             "evaluationFingerprint": fingerprints.get("evaluation"),
             "genericCompactRecord": build_compact_run_record(record),
@@ -357,6 +358,7 @@ def build_compact_run_record(record: dict) -> dict:
         "capitalBase": run_spec.get("capitalBase"),
         "splitRatioPct": evaluation.get("evaluationSettings", {}).get("splitRatioPct"),
         "strategyDefinitionFingerprint": fingerprints.get("strategyDefinition"),
+        "evaluationSubjectFingerprint": fingerprints.get("evaluationSubject"),
         "marketDataFingerprint": fingerprints.get("marketData"),
         "evaluationFingerprint": fingerprints.get("evaluation"),
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
@@ -369,7 +371,8 @@ def build_compact_predictor_run_record(record: dict) -> dict:
     run_spec = record["runSpec"]
     result = record["result"]
     fingerprints = run_spec.get("fingerprints", {})
-    predictor = run_spec.get("strategy", {}).get("predictor", {})
+    evaluation_subject = run_spec.get("evaluationSubject", {})
+    predictor = evaluation_subject.get("predictor") or run_spec.get("strategy", {}).get("predictor", {})
     signal = predictor.get("signalSpec", {})
     observation = signal.get("observationSpec", {})
     predicted_quantity = predictor.get("predictedQuantitySpec", {})
@@ -392,6 +395,7 @@ def build_compact_predictor_run_record(record: dict) -> dict:
         "runKind": run_spec.get("runKind"),
         "logicVersion": run_spec.get("logicVersion"),
         "strategyDefinitionFingerprint": fingerprints.get("strategyDefinition"),
+        "evaluationSubjectFingerprint": fingerprints.get("evaluationSubject"),
         "marketDataFingerprint": fingerprints.get("marketData"),
         "evaluationFingerprint": fingerprints.get("evaluation"),
         "predictorKey": predictor.get("key"),
@@ -442,6 +446,7 @@ def build_run_spec_fingerprints(
     *,
     strategy: dict | None,
     strategy_definition: dict | None,
+    evaluation_subject: dict | None,
     market_slice: dict,
     evaluation: dict,
     execution_assumptions: dict,
@@ -451,6 +456,7 @@ def build_run_spec_fingerprints(
 ) -> dict[str, str]:
     return {
         "strategyDefinition": build_run_fingerprint(strategy_definition or strategy),
+        "evaluationSubject": build_run_fingerprint(evaluation_subject or {"kind": "strategy"}),
         "marketData": build_run_fingerprint(
             {
                 "marketSlice": market_slice,
@@ -481,6 +487,7 @@ def build_run_spec(
     generation: dict | None = None,
     strategy: dict | None = None,
     strategy_definition: dict | None = None,
+    evaluation_subject: dict | None = None,
 ) -> dict:
     if strategy is None and strategy_definition is None:
         raise ValueError("run spec must include strategy or strategy_definition.")
@@ -497,6 +504,7 @@ def build_run_spec(
         "fingerprints": build_run_spec_fingerprints(
             strategy=strategy,
             strategy_definition=strategy_definition,
+            evaluation_subject=evaluation_subject,
             market_slice=market_slice,
             evaluation=evaluation,
             execution_assumptions=execution_assumptions,
@@ -507,6 +515,8 @@ def build_run_spec(
     }
     if strategy_definition is not None:
         run_spec["strategyDefinition"] = strategy_definition
+    if evaluation_subject is not None:
+        run_spec["evaluationSubject"] = evaluation_subject
     if strategy is not None:
         run_spec["strategy"] = strategy
     if generation is not None:

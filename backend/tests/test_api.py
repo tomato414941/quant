@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
+from app.comparison_service import build_run_result_store
 from app.main import app
 from app.portfolio import (
     StrategyDefinition,
@@ -414,7 +415,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    expected_predictor_count = len(main_module.REGISTERED_PREDICTOR_SPECS)
+    expected_predictor_count = count_predictor_specs(config.candidate_strategies + config.reference_strategies)
     assert payload["kind"] == "predictor_run_collection"
     assert payload["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["runSpec"]["kind"] == "comparison_run_spec"
@@ -436,8 +437,9 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["recordCount"] == min(10, expected_predictor_count * 2)
     assert index_payload["sortBy"] == "test_rank_ic"
     assert index_payload["records"][0]["runKind"] == "predictor_run"
-    assert index_payload["records"][0]["logicVersion"] == "v58"
+    assert index_payload["records"][0]["logicVersion"] == "v59"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
+    assert index_payload["records"][0]["evaluationSubjectFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
     assert index_payload["records"][0]["evaluationFingerprint"]
     assert "trainingFitMode" in index_payload["records"][0]
@@ -456,8 +458,12 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "predictor_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "predictor_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v58"
-    assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "marketData", "evaluation"}
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v59"
+    assert detail_payload["record"]["runSpec"]["strategyDefinition"]["kind"] == "strategy_definition"
+    assert detail_payload["record"]["runSpec"]["evaluationSubject"]["kind"] == "predictor"
+    assert detail_payload["record"]["runSpec"]["evaluationSubject"]["predictor"]["kind"] == "predictor_spec"
+    assert "strategy" not in detail_payload["record"]["runSpec"]
+    assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "evaluationSubject", "marketData", "evaluation"}
 
     fingerprint_filtered_response = client.get(
         "/api/predictor-runs",
@@ -1046,8 +1052,9 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["totalCount"] == (expected_strategy_count + expected_reference_count) * 2
     assert index_payload["recordCount"] == 10
     assert index_payload["records"][0]["runKind"] == "strategy_run"
-    assert index_payload["records"][0]["logicVersion"] == "v58"
+    assert index_payload["records"][0]["logicVersion"] == "v59"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
+    assert index_payload["records"][0]["evaluationSubjectFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
     assert index_payload["records"][0]["evaluationFingerprint"]
     run_key = index_payload["records"][0]["runKey"]
@@ -1058,8 +1065,8 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "strategy_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "strategy_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v58"
-    assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "marketData", "evaluation"}
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v59"
+    assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "evaluationSubject", "marketData", "evaluation"}
 
     fingerprint_filtered_response = client.get(
         "/api/strategy-runs",
@@ -1308,8 +1315,9 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["limit"] == 5
     assert payload["runKind"] == "strategy_run"
     assert payload["recordCount"] == 5
-    assert payload["records"][0]["logicVersion"] == "v58"
+    assert payload["records"][0]["logicVersion"] == "v59"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
+    assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]
     assert payload["records"][0]["evaluationFingerprint"]
     assert payload["records"][0]["strategyLabel"]
@@ -1403,6 +1411,18 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["results"][0]["rankingSpec"]["rankingModel"]["label"]
     assert payload["results"][0]["overall"]["observationCount"] >= 1
     assert payload["results"][0]["overall"]["meanTopMinusBottomPct"] is not None
+
+    ranking_records = build_run_result_store(config).list_records(
+        run_kind="ranking_evaluation",
+        limit=1,
+    )
+    assert len(ranking_records) == 1
+    ranking_run_spec = ranking_records[0]["runSpec"]
+    assert ranking_run_spec["strategyDefinition"]["kind"] == "strategy_definition"
+    assert ranking_run_spec["evaluationSubject"]["kind"] == "ranking"
+    assert ranking_run_spec["evaluationSubject"]["ranking"]["kind"] == "asset_ranking_spec"
+    assert "strategy" not in ranking_run_spec
+    assert set(ranking_run_spec["fingerprints"].keys()) == {"strategyDefinition", "evaluationSubject", "marketData", "evaluation"}
 
     second_response = client.get("/api/ranking-evaluation")
 

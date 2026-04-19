@@ -6,8 +6,7 @@ from app.run_store import FileRunResultStore, RUN_STORE_INDEX_FILENAME, build_ru
 def make_run_spec(*, run_kind: str, strategy_label: str, fingerprint_seed: str) -> dict:
     return build_run_spec(
         run_kind=run_kind,
-        strategy={"label": strategy_label, "strategyId": strategy_label},
-        strategy_definition={"label": strategy_label, "seed": fingerprint_seed},
+        strategy_definition={"label": strategy_label, "strategyId": strategy_label, "seed": fingerprint_seed},
         market_slice={"period": "10y", "timeframe": {"key": "1d"}},
         evaluation={
             "evaluationSettings": {"splitRatioPct": 70.0},
@@ -45,7 +44,9 @@ def test_run_store_writes_index_and_filters_records(tmp_path: Path) -> None:
     )
 
     assert len(filtered_records) == 1
-    assert filtered_records[0]["runSpec"]["strategy"]["label"] == "beta"
+    assert filtered_records[0]["runSpec"]["strategyDefinition"]["label"] == "beta"
+    assert "strategy" not in filtered_records[0]["runSpec"]
+    assert filtered_records[0]["runSpec"]["fingerprints"]["evaluationSubject"]
 
 
 def test_run_store_rebuilds_index_from_saved_runs(tmp_path: Path) -> None:
@@ -65,6 +66,72 @@ def test_run_store_rebuilds_index_from_saved_runs(tmp_path: Path) -> None:
     assert len(rebuilt_records) == 1
     assert rebuilt_records[0]["runSpec"]["runKind"] == "predictor_run"
     assert index_path.exists()
+
+
+def test_predictor_compact_record_reads_evaluation_subject(tmp_path: Path) -> None:
+    store = FileRunResultStore(tmp_path)
+    run_spec = build_run_spec(
+        run_kind="predictor_run",
+        strategy_definition={"label": "source strategy", "strategyId": "source"},
+        evaluation_subject={
+            "kind": "predictor",
+            "predictor": {
+                "key": "predictor-alpha",
+                "label": "Predictor Alpha",
+                "timeframe": {"key": "1d"},
+                "signalSpec": {
+                    "entityIdentifiers": ["AAA", "BBB"],
+                    "entityKind": "asset_set",
+                    "observationSpec": {
+                        "key": "observation-alpha",
+                        "label": "Observation Alpha",
+                        "assetCount": 2,
+                        "fields": ["close"],
+                    },
+                    "outputSpec": {"outputKind": "score"},
+                    "decisionUseSpec": {"useKind": "supplemental"},
+                },
+                "predictedQuantitySpec": {"quantityKind": "return"},
+                "targetSpec": {
+                    "key": "target-alpha",
+                    "baseline": "zero",
+                    "transform": "none",
+                    "horizonSpec": {"unit": "bar", "value": 5},
+                },
+                "featureSpec": {"key": "feature-alpha"},
+                "trainingSpec": {"fitMode": "expanding", "minTrainSamples": 10},
+                "engineSpec": {
+                    "signalSourceSpec": {"signalSourceKind": "ranking_signal", "featureKey": "score"},
+                    "learnerSpec": {"learnerKind": "linear_regression"},
+                    "combinerSpec": {"combinerKind": "learner_only"},
+                },
+            },
+        },
+        market_slice={"period": "10y", "timeframe": {"key": "1d"}},
+        evaluation={
+            "evaluationSettings": {"splitRatioPct": 70.0},
+            "marketDataContexts": [{"timeframe": "1d"}],
+            "signalMarketDataContexts": [],
+        },
+        execution_assumptions={"costModel": {"kind": "pct", "parameters": {"commissionPct": 0.1}}},
+        portfolio_state={"kind": "portfolio_state", "positions": []},
+        capital_base=100000.0,
+    )
+    store.save(
+        run_spec,
+        {
+            "overall": {"observationCount": 20, "meanRankIc": 0.2, "meanTopMinusBottomPct": 1.0},
+            "test": {"observationCount": 5, "meanRankIc": 0.3, "meanTopMinusBottomPct": 1.5, "hitRatePct": 60.0},
+        },
+    )
+
+    records = store.list_compact_records(run_kind="predictor_run", view="predictor")
+
+    assert len(records) == 1
+    assert records[0]["predictorKey"] == "predictor-alpha"
+    assert records[0]["evaluationSubjectFingerprint"] == run_spec["fingerprints"]["evaluationSubject"]
+    assert records[0]["strategyDefinitionFingerprint"] == run_spec["fingerprints"]["strategyDefinition"]
+    assert "strategy" not in store.list_records(run_kind="predictor_run")[0]["runSpec"]
 
 
 def test_run_store_lists_compact_records_from_index_only(tmp_path: Path) -> None:

@@ -176,6 +176,34 @@ def collect_strategy_predictor_specs(strategy_definitions: list) -> list:
     return predictor_specs
 
 
+def collect_strategy_predictor_source_definitions(
+    strategy_definitions: list[StrategyDefinition],
+) -> dict[str, StrategyDefinition]:
+    source_definitions: dict[str, StrategyDefinition] = {}
+    for strategy_definition in strategy_definitions:
+        _selection_contexts, predictor_context = get_strategy_definition_signal_execution_contexts(
+            strategy_definition
+        )
+        if predictor_context is None:
+            continue
+        predictor_key = str(predictor_context["predictorKey"])
+        source_definitions.setdefault(predictor_key, strategy_definition)
+    return source_definitions
+
+
+def collect_ranking_source_definitions(
+    strategy_definitions: list[StrategyDefinition],
+) -> dict[str, StrategyDefinition]:
+    source_definitions: dict[str, StrategyDefinition] = {}
+    for strategy_definition in strategy_definitions:
+        ranking_specs = build_asset_ranking_specs([
+            build_executable_strategy_spec_from_definition(strategy_definition)
+        ])
+        for ranking_spec in ranking_specs:
+            source_definitions.setdefault(ranking_spec.key, strategy_definition)
+    return source_definitions
+
+
 def fetch_market_data_by_timeframe(
     comparison: ComparisonSpec,
     *,
@@ -777,6 +805,11 @@ def build_predictor_runs_payload(
 ) -> dict:
     run_store = build_run_result_store(comparison)
     strategy_definitions = comparison.candidate_strategies + comparison.reference_strategies
+    predictor_source_definitions = collect_strategy_predictor_source_definitions(strategy_definitions)
+    predictor_specs = [
+        predictor_spec for predictor_spec in predictor_specs
+        if predictor_spec.key in predictor_source_definitions
+    ]
     (
         market_bundles_by_timeframe,
         metadata_by_timeframe,
@@ -1992,6 +2025,7 @@ def build_predictor_runs(
         strategy_definitions=strategy_definitions,
     )
     serialized_execution_assumptions = serialize_execution_assumptions(comparison)
+    predictor_source_definitions = collect_strategy_predictor_source_definitions(strategy_definitions)
 
     for predictor_spec in predictor_specs:
         timeframe_key = predictor_spec.timeframe.key
@@ -2005,9 +2039,14 @@ def build_predictor_runs(
         )
         returns = closes.pct_change().dropna()
         aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
+        source_strategy_definition = predictor_source_definitions.get(predictor_spec.key)
+        if source_strategy_definition is None:
+            raise ValueError(f"No source strategy definition found for predictor: {predictor_spec.key}")
+        serialized_predictor_spec = serialize_predictor_spec(predictor_spec)
         run_spec = build_run_spec(
             run_kind="predictor_run",
-            strategy={"predictor": serialize_predictor_spec(predictor_spec)},
+            strategy_definition=serialize_strategy_definition_payload(source_strategy_definition),
+            evaluation_subject={"kind": "predictor", "predictor": serialized_predictor_spec},
             market_slice={
                 "period": market_data_period,
                 "timeframe": serialize_timeframe(predictor_spec.timeframe),
@@ -2184,9 +2223,11 @@ def build_ranking_evaluation_runs(
     metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
+    candidate_strategy_definitions = list(comparison.candidate_strategies)
+    ranking_source_definitions = collect_ranking_source_definitions(candidate_strategy_definitions)
     ranking_specs = build_asset_ranking_specs([
         build_executable_strategy_spec_from_definition(strategy_definition)
-        for strategy_definition in comparison.candidate_strategies
+        for strategy_definition in candidate_strategy_definitions
     ])
     results: list[dict] = []
     cached_run_count = 0
@@ -2205,10 +2246,14 @@ def build_ranking_evaluation_runs(
         )
         returns = closes.pct_change().dropna()
         aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
+        source_strategy_definition = ranking_source_definitions.get(ranking_spec.key)
+        if source_strategy_definition is None:
+            raise ValueError(f"No source strategy definition found for ranking: {ranking_spec.key}")
         serialized_ranking_spec = serialize_asset_ranking_spec(ranking_spec)
         run_spec = build_run_spec(
             run_kind="ranking_evaluation",
-            strategy={"ranking": serialized_ranking_spec},
+            strategy_definition=serialize_strategy_definition_payload(source_strategy_definition),
+            evaluation_subject={"kind": "ranking", "ranking": serialized_ranking_spec},
             market_slice={
                 "period": market_data_period,
                 "timeframe": serialize_timeframe(ranking_spec.timeframe),

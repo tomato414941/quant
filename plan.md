@@ -32,9 +32,11 @@
 - `StrategySpec` は公開正本ではなく、低レベル evaluator 用の内部 DTO として残る
 - runtime の legacy fallback は `portfolio.py` 先頭の helper にかなり集約済み
 - `evaluate_strategy_definition_run` が multi-timeframe / predictor / multi-selection を通す
-- run store は `v58` で strategy / condition / parameter sweep の `strategyDefinition` を正本化した
+- run store は `v59` で `strategyDefinition` と `evaluationSubject` の fingerprint を正本化した
+- strategy / condition / parameter / predictor / ranking run は新規 runSpec で legacy `strategy` payload を生成しない
+- predictor / ranking run は由来を `strategyDefinition`、評価対象を `evaluationSubject` として分離する
 - 外部入口は `comparison` 系に統一済み
-- 現在の全体テスト: `105 passed`
+- 現在の全体テスト: `106 passed`
 
 ## 21 Steps
 
@@ -60,20 +62,9 @@
 
 17. signal ごとに `data_timeframe` と `signal_timeframe` を自然に実行できるようにする
 18. legacy adapter を通さず comparison layer が definition を直接評価する経路を作る
+19. run store を `strategyDefinition + evaluationSubject + marketData + evaluation + logicVersion` fingerprint ベースへ寄せる
 
 ### In Progress
-
-19. run store を `strategy definition fingerprint + data fingerprint + logicVersion` ベースへ寄せる
-状況:
-- runSpec に fingerprint を保存済み
-- compact/index payload でも fingerprint を露出済み
-- API / CLI で fingerprint filter を利用可能
-- `_index.json` による index 化と index-only 一覧は実装済み
-- `rebuild-run-index` で復旧できる
-- fingerprint 条件から最新 run を直接引く lookup を API / CLI で利用できる
-- condition sweep / parameter sweep でも run spec に strategy definition を保存する
-- `RUN_STORE_LOGIC_VERSION` は `v58`
-- ただし predictor / ranking run は strategyDefinition 以外の strategy payload をまだ使う
 
 20. 評価条件と CLI を正本化し、同条件で再検証できる状態にする
 状況:
@@ -81,9 +72,10 @@
 - canonical payload に strategy definitions / condition variants / comparison fingerprint を含める
 - `rerun-comparison-spec` で保存済み JSON から同条件再実行できる
 - rerun 時に `runSpecFingerprint` / `comparisonFingerprint` の整合性を検証できる
-- strategy / condition / parameter sweep の run spec が strategy definition を持つ
+- strategy / condition / parameter / predictor / ranking run の run spec が strategy definition を持つ
+- predictor / ranking run は `evaluationSubject` で実評価対象を再現可能にした
 - rerun は definition-only payload を前提にする
-- ただし predictor / ranking run の payload 正本化はまだ残る
+- 個別 subject fingerprint filter は必要になった段階で追加する
 
 ## Remaining Duplication
 
@@ -91,7 +83,6 @@
 
 - low-level evaluator 内部に残る `StrategySpec` DTO bridge
 - runtime 境界に残る最終的な `extensions` fallback
-- predictor / ranking run の run spec がまだ strategyDefinition 正本ではない点
 
 外部入口の二重化はほぼ解消済み。
 
@@ -101,8 +92,7 @@
 
 ## Near-Term Next Steps
 
-1. predictor / ranking run の run spec も definition-aware に整理する
-2. low-level evaluator の `StrategySpec` DTO bridge をさらに薄くする
-3. 残っている `extensions` fallback を legacy helper の外から見えない形まで縮める
-4. run store を fingerprint-first な検索・再利用モデルへさらに寄せ切る
-5. `plan.md` の完了条件を step ごとにより厳密に固定する
+1. low-level evaluator の `StrategySpec` DTO bridge をさらに薄くする
+2. 残っている `extensions` fallback を legacy helper の外から見えない形まで縮める
+3. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する
+4. `plan.md` の完了条件を step ごとにより厳密に固定する

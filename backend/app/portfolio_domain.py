@@ -244,7 +244,7 @@ class StrategySignalSpec:
 
 
 @dataclass(frozen=True)
-class StrategySpec:
+class EvaluatorStrategySpec:
     strategy_id: str
     version: str
     label: str
@@ -1081,8 +1081,8 @@ def serialize_strategy_definition(strategy: StrategyDefinition) -> dict:
             },
         },
         "executionSupport": {
-            "strategySpecAdapterCompatible": not compatibility_issues,
-            "strategySpecAdapterIssues": compatibility_issues,
+            "evaluatorAdapterCompatible": not compatibility_issues,
+            "evaluatorAdapterIssues": compatibility_issues,
             "directExecutionCompatible": not direct_execution_issues,
             "directExecutionIssues": direct_execution_issues,
         },
@@ -1116,7 +1116,7 @@ def build_alignment_policy_spec_from_payload(
     )
 
 
-def build_strategy_definition_from_strategy_spec(strategy: StrategySpec) -> StrategyDefinition:
+def build_strategy_definition_from_evaluator_strategy_spec(strategy: EvaluatorStrategySpec) -> StrategyDefinition:
     selection_contexts = [dict(context) for context in strategy.signal_execution_contexts]
     predictor_context = (
         None
@@ -1457,9 +1457,9 @@ def is_direct_execution_compatible_strategy_definition(
     return not get_direct_execution_strategy_definition_compatibility_issues(strategy)
 
 
-def build_direct_execution_strategy_spec_from_definition(
+def build_direct_execution_evaluator_strategy_spec_from_definition(
     strategy: StrategyDefinition,
-) -> StrategySpec:
+) -> EvaluatorStrategySpec:
     issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
     if issues:
         raise ValueError(
@@ -1481,7 +1481,7 @@ def build_direct_execution_strategy_spec_from_definition(
             predictor_weight=float(predictor_context["predictorWeight"]),
         )
 
-    return build_strategy_spec(
+    return build_evaluator_strategy_spec(
         strategy_id=strategy.strategy_id,
         version=strategy.version,
         hypothesis=strategy.hypothesis,
@@ -1513,29 +1513,29 @@ def build_direct_execution_strategy_spec_from_definition(
     )
 
 
-def build_executable_strategy_spec_from_definition(strategy: StrategyDefinition) -> StrategySpec:
+def build_executable_evaluator_strategy_spec_from_definition(strategy: StrategyDefinition) -> EvaluatorStrategySpec:
     legacy_issues = get_legacy_strategy_definition_compatibility_issues(strategy)
     if not legacy_issues:
-        return build_strategy_spec_from_definition(strategy)
+        return build_evaluator_strategy_spec_from_definition(strategy)
 
     direct_execution_issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
     if not direct_execution_issues:
-        return build_direct_execution_strategy_spec_from_definition(strategy)
+        return build_direct_execution_evaluator_strategy_spec_from_definition(strategy)
 
     raise ValueError(
         "Strategy definition is not executable: "
-        + "StrategySpec adapter incompatibilities: "
+        + "Evaluator adapter incompatibilities: "
         + "; ".join(legacy_issues)
         + " | direct execution incompatibilities: "
         + "; ".join(direct_execution_issues)
     )
 
 
-def build_strategy_spec_from_definition(strategy: StrategyDefinition) -> StrategySpec:
+def build_evaluator_strategy_spec_from_definition(strategy: StrategyDefinition) -> EvaluatorStrategySpec:
     issues = get_legacy_strategy_definition_compatibility_issues(strategy)
     if issues:
         raise ValueError(
-            "StrategySpec adapter incompatibilities: " + "; ".join(issues)
+            "Evaluator adapter incompatibilities: " + "; ".join(issues)
         )
 
     selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_definition(strategy)
@@ -1558,7 +1558,7 @@ def build_strategy_spec_from_definition(strategy: StrategyDefinition) -> Strateg
             predictor_weight=float(predictor_parameters.get("predictorWeight", predictor_signal.weight)),
         )
 
-    return build_strategy_spec(
+    return build_evaluator_strategy_spec(
         strategy_id=strategy.strategy_id,
         version=strategy.version,
         hypothesis=strategy.hypothesis,
@@ -1589,7 +1589,7 @@ def build_strategy_spec_from_definition(strategy: StrategyDefinition) -> Strateg
     )
 
 
-def build_strategy_spec(
+def build_evaluator_strategy_spec(
     *,
     timeframe: TimeframeSpec | None = None,
     investment_universe: InvestmentUniverseSpec,
@@ -1609,7 +1609,7 @@ def build_strategy_spec(
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
-) -> StrategySpec:
+) -> EvaluatorStrategySpec:
     resolved_strategy_id = strategy_id or key or "__".join(
         [
             selection.key,
@@ -1624,7 +1624,7 @@ def build_strategy_spec(
             portfolio_model.label,
         ]
     )
-    return StrategySpec(
+    return EvaluatorStrategySpec(
         strategy_id=resolved_strategy_id,
         version=version,
         label=strategy_label,
@@ -1901,7 +1901,7 @@ def extract_ranking_score_parameters(
     return extracted
 
 
-def serialize_asset_ranking_model_parameters(strategy: StrategySpec) -> dict[str, object]:
+def serialize_asset_ranking_model_parameters(strategy: EvaluatorStrategySpec) -> dict[str, object]:
     score_parameters = dict(strategy.selection.ranking_signal.score_parameters)
     serialized: dict[str, object] = {}
 
@@ -1949,7 +1949,7 @@ def serialize_predictor_use_spec(predictor_use: PredictorUseSpec) -> dict[str, o
     }
 
 
-def serialize_tilt_rule(strategy: StrategySpec) -> dict | None:
+def serialize_tilt_rule(strategy: EvaluatorStrategySpec) -> dict | None:
     score_parameters = dict(strategy.selection.ranking_signal.score_parameters)
     if "tilt_strength" not in score_parameters:
         return None
@@ -1967,7 +1967,7 @@ def serialize_tilt_rule(strategy: StrategySpec) -> dict | None:
     }
 
 
-def serialize_strategy_spec(strategy: StrategySpec) -> dict:
+def serialize_evaluator_strategy_spec(strategy: EvaluatorStrategySpec) -> dict:
     ranking_model = (
         {
             "kind": strategy.selection.ranking_signal.score_model.kind,
@@ -1986,7 +1986,7 @@ def serialize_strategy_spec(strategy: StrategySpec) -> dict:
         else None
     )
     return {
-        "kind": "strategy_spec",
+        "kind": "evaluator_strategy_spec",
         "schemaVersion": "v1",
         "strategyId": strategy.strategy_id,
         "version": strategy.version,

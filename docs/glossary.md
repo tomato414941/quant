@@ -152,7 +152,7 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 `Strategy` は上位概念であり、内部に複数の signal / feature / predictor / execution rule を持つ。
 
 コード上の正本は `StrategyDefinition`。
-`StrategySpec` は公開正本ではなく、低レベル evaluator に渡すための内部 DTO として残っている。
+`EvaluatorStrategySpec` は公開正本ではなく、低レベル evaluator に渡すための内部 DTO として残っている。
 
 最低限持つもの:
 - `strategy_id`
@@ -194,7 +194,7 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 補足:
 - `data_timeframe` / `signal_timeframe` / `decision_schedule` / `rebalance_schedule` は分けて扱う
 - runSpec では由来となる戦略を `strategyDefinition`、実評価対象を `evaluationSubject` として分離する
-- `executionSupport.strategySpecAdapter*` は内部 DTO へ変換できるかを表す
+- `executionSupport.evaluatorAdapter*` は内部 DTO へ変換できるかを表す
 - `executionSupport.directExecution*` は direct execution 経路で評価できるかを表す
 
 要するに、`Strategy` は「何をどう持つか」の仕様であり、  

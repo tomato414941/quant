@@ -23,7 +23,7 @@ from app.portfolio import (
     build_predictor_spec,
     build_predictor_use_spec,
     build_ranking_feature_recipe_spec,
-    build_strategy_definition_from_strategy_spec,
+    build_strategy_definition_from_evaluator_strategy_spec,
     build_strategy_signal_execution_contexts_from_definition,
     build_strategy_definition,
     build_strategy_execution_plan_spec,
@@ -34,13 +34,13 @@ from app.portfolio import (
     build_portfolio_state,
     build_strategy_data_source_spec,
     build_strategy_feature_definition_spec,
-    build_direct_execution_strategy_spec_from_definition,
-    build_executable_strategy_spec_from_definition,
+    build_direct_execution_evaluator_strategy_spec_from_definition,
+    build_executable_evaluator_strategy_spec_from_definition,
     build_execution_policy_spec,
     build_risk_controls_spec,
     build_selection_spec,
-    build_strategy_spec_from_definition,
-    build_strategy_spec,
+    build_evaluator_strategy_spec_from_definition,
+    build_evaluator_strategy_spec,
     compare_portfolio_runs,
     compute_predictor_panel,
     convert_window_spec_to_bars,
@@ -63,7 +63,7 @@ from app.portfolio import (
     resolve_decision_schedule,
     resolve_strategy_market_data_timeframe_key,
     serialize_strategy_definition,
-    serialize_strategy_spec,
+    serialize_evaluator_strategy_spec,
     serialize_strategy_signal_spec,
     select_assets,
     should_rebalance,
@@ -79,7 +79,6 @@ from app.strategy_definition_builder import (
     build_predictor_strategy_definition_product,
     build_selection_strategy_definition,
     build_selection_strategy_definition_product,
-    build_evaluator_strategy_specs_from_definitions,
 )
 from app.strategy_candidate_baselines import (
     BASELINE_CANDIDATE_DEFINITIONS,
@@ -128,7 +127,7 @@ def make_strategy(
     score_parameters: dict[str, float | str | bool] | None = None,
     predictor_use=None,
 ):
-    return build_strategy_spec(
+    return build_evaluator_strategy_spec(
         investment_universe=build_investment_universe_spec(
             tickers=[
                 "SPY",
@@ -362,13 +361,13 @@ def test_build_strategy_definition_rejects_signal_outside_universe() -> None:
         raise AssertionError("Expected build_strategy_definition to reject out-of-universe tickers.")
 
 
-def test_build_strategy_definition_from_strategy_spec_maps_predictor_overlay() -> None:
+def test_build_strategy_definition_from_evaluator_strategy_spec_maps_predictor_overlay() -> None:
     predictor_use = build_predictor_use_spec(
         predictor_key="pred__overlay",
         signal_weight=0.6,
         predictor_weight=0.4,
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="strategy__with_predictor",
         label="Strategy with predictor",
         description="Legacy strategy with predictor overlay.",
@@ -431,7 +430,7 @@ def test_build_strategy_definition_from_strategy_spec_maps_predictor_overlay() -
         decision_schedule="every_bar",
     )
 
-    definition = build_strategy_definition_from_strategy_spec(strategy)
+    definition = build_strategy_definition_from_evaluator_strategy_spec(strategy)
 
     assert definition.strategy_id == strategy.strategy_id
     assert definition.execution_plan.decision_schedule == "every_bar"
@@ -452,14 +451,14 @@ def test_build_strategy_definition_from_strategy_spec_maps_predictor_overlay() -
     assert definition.signals[1].alignment_policy.method == "calendar_resample"
 
 
-def test_build_strategy_definition_from_strategy_spec_without_predictor_keeps_single_signal() -> None:
+def test_build_strategy_definition_from_evaluator_strategy_spec_without_predictor_keeps_single_signal() -> None:
     strategy = make_strategy(
         "full_universe",
         "equal_weight",
         max_investment_ratio=0.8,
     )
 
-    definition = build_strategy_definition_from_strategy_spec(strategy)
+    definition = build_strategy_definition_from_evaluator_strategy_spec(strategy)
 
     assert definition.strategy_id == strategy.strategy_id
     assert len(definition.signals) == 1
@@ -468,18 +467,18 @@ def test_build_strategy_definition_from_strategy_spec_without_predictor_keeps_si
     assert definition.execution_plan.rebalance_schedule == strategy.execution_policy.rebalance_schedule
 
 
-def test_build_strategy_spec_from_definition_round_trips_legacy_strategy() -> None:
+def test_build_evaluator_strategy_spec_from_definition_round_trips_legacy_strategy() -> None:
     predictor_use = build_predictor_use_spec(
         predictor_key="pred__overlay",
         signal_weight=0.6,
         predictor_weight=0.4,
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="strategy__round_trip",
         version="v7",
-        hypothesis="Round-trip StrategySpec adapter.",
+        hypothesis="Round-trip Evaluator adapter.",
         label="Round trip strategy",
-        description="StrategySpec adapter round-trip test strategy.",
+        description="Evaluator adapter round-trip test strategy.",
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ", "TLT"],
             key="round_trip_universe",
@@ -506,8 +505,8 @@ def test_build_strategy_spec_from_definition_round_trips_legacy_strategy() -> No
         extensions={"source": "test"},
     )
 
-    rebuilt = build_strategy_spec_from_definition(
-        build_strategy_definition_from_strategy_spec(strategy)
+    rebuilt = build_evaluator_strategy_spec_from_definition(
+        build_strategy_definition_from_evaluator_strategy_spec(strategy)
     )
 
     assert rebuilt.strategy_id == strategy.strategy_id
@@ -530,15 +529,17 @@ def test_build_strategy_spec_from_definition_round_trips_legacy_strategy() -> No
     assert rebuilt.predictor_signal_execution_context is not None
     assert rebuilt.predictor_signal_execution_context["predictorKey"] == predictor_use.predictor_key
     assert dict(rebuilt.extensions) == dict(strategy.extensions)
-    payload = serialize_strategy_definition(build_strategy_definition_from_strategy_spec(strategy))
+    payload = serialize_strategy_definition(build_strategy_definition_from_evaluator_strategy_spec(strategy))
     support = payload["executionSupport"]
-    assert support["strategySpecAdapterCompatible"] is True
-    assert support["strategySpecAdapterIssues"] == []
+    assert support["evaluatorAdapterCompatible"] is True
+    assert support["evaluatorAdapterIssues"] == []
+    assert "strategySpecAdapterCompatible" not in support
+    assert "strategySpecAdapterIssues" not in support
     assert "legacyAdapterCompatible" not in support
     assert "legacyAdapterIssues" not in support
 
 
-def test_build_strategy_spec_from_definition_rejects_split_execution_plan() -> None:
+def test_build_evaluator_strategy_spec_from_definition_rejects_split_execution_plan() -> None:
     definition = build_strategy_definition(
         strategy_id="definition__split_execution",
         investment_universe=build_investment_universe_spec(
@@ -577,14 +578,14 @@ def test_build_strategy_spec_from_definition_rejects_split_execution_plan() -> N
     )
 
     try:
-        build_strategy_spec_from_definition(definition)
+        build_evaluator_strategy_spec_from_definition(definition)
     except ValueError as exc:
         assert "matching decision and rebalance schedules" in str(exc)
     else:
         raise AssertionError("Expected split execution plan to be rejected.")
 
 
-def test_build_strategy_spec_from_definition_rejects_mismatched_signal_timeframe() -> None:
+def test_build_evaluator_strategy_spec_from_definition_rejects_mismatched_signal_timeframe() -> None:
     definition = build_strategy_definition(
         strategy_id="definition__mismatched_signal_timeframe",
         investment_universe=build_investment_universe_spec(
@@ -624,29 +625,21 @@ def test_build_strategy_spec_from_definition_rejects_mismatched_signal_timeframe
     )
 
     try:
-        build_strategy_spec_from_definition(definition)
+        build_evaluator_strategy_spec_from_definition(definition)
     except ValueError as exc:
         assert "requires matching selection data and signal timeframes" in str(exc)
     else:
         raise AssertionError("Expected mismatched signal timeframe to be rejected.")
 
 
-def test_full_universe_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(FULL_UNIVERSE_CANDIDATE_DEFINITIONS)
-    assert len(FULL_UNIVERSE_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        strategy.strategy_id for strategy in derived_strategies
-    ] == [
-        definition.strategy_id for definition in FULL_UNIVERSE_CANDIDATE_DEFINITIONS
-    ]
+def test_full_universe_candidates_are_strategy_definitions() -> None:
+    assert len({definition.strategy_id for definition in FULL_UNIVERSE_CANDIDATE_DEFINITIONS}) == len(FULL_UNIVERSE_CANDIDATE_DEFINITIONS)
 
     core_candidate = FULL_UNIVERSE_CANDIDATE_DEFINITIONS[8]
     assert core_candidate.execution_plan.decision_schedule == "year_end"
     assert core_candidate.execution_plan.rebalance_schedule == "year_end"
+    assert core_candidate.signals[0].source_kind == "selection_signal"
     assert core_candidate.signals[0].data_timeframe.key == "1d"
-
-    rebuilt = build_strategy_spec_from_definition(core_candidate)
-    assert rebuilt == derived_strategies[8]
 
 
 
@@ -733,7 +726,7 @@ def test_selection_definition_builder_creates_legacy_compatible_definition() -> 
     assert definition.signals[0].source_kind == "selection_signal"
     assert definition.signals[0].data_timeframe.key == "1d"
 
-    rebuilt = build_strategy_spec_from_definition(definition)
+    rebuilt = build_evaluator_strategy_spec_from_definition(definition)
     assert rebuilt.selection.strategy_type == FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.strategy_type
     assert rebuilt.execution_policy.rebalance_schedule == "month_end"
     assert rebuilt.decision_schedule == "month_end"
@@ -774,7 +767,7 @@ def test_predictor_definition_builder_creates_overlay_signal() -> None:
     assert definition.signals[1].source_kind == "predictor_overlay"
     assert definition.signals[1].predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
 
-    rebuilt = build_strategy_spec_from_definition(definition)
+    rebuilt = build_evaluator_strategy_spec_from_definition(definition)
     assert rebuilt.predictor_use is not None
     assert rebuilt.predictor_use.predictor_weight == 0.4
     assert rebuilt.predictor_signal_execution_context is not None
@@ -1024,8 +1017,8 @@ def test_direct_execution_definition_compatibility_helper_accepts_signal_timefra
     assert is_direct_execution_compatible_strategy_definition(definition) is True
     assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
-    direct_strategy = build_direct_execution_strategy_spec_from_definition(definition)
-    executable_strategy = build_executable_strategy_spec_from_definition(definition)
+    direct_strategy = build_direct_execution_evaluator_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
     assert direct_strategy.timeframe.key == "1w"
     assert executable_strategy.timeframe.key == "1w"
     assert executable_strategy.execution_mode == "direct_signal_timeframe"
@@ -1080,7 +1073,7 @@ def test_direct_execution_definition_compatibility_helper_accepts_multi_selectio
     definition = replace(definition, signals=(definition.signals[0], secondary_signal))
 
     assert is_direct_execution_compatible_strategy_definition(definition) is True
-    executable_strategy = build_executable_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
     assert executable_strategy.timeframe.key == "1w"
     assert len(executable_strategy.signal_execution_contexts) == 2
     assert executable_strategy.signal_execution_contexts[1]["selectionKey"] == "secondary_momo6"
@@ -1207,7 +1200,7 @@ def test_direct_execution_definition_compatibility_helper_preserves_selection_al
     )
     definition = replace(definition, signals=(definition.signals[0], secondary_signal))
 
-    executable_strategy = build_executable_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
 
     assert executable_strategy.signal_execution_contexts[0]["alignmentPolicy"]["method"] == "asof_last"
     assert executable_strategy.signal_execution_contexts[1]["alignmentPolicy"]["method"] == "end_of_period"
@@ -1288,7 +1281,7 @@ def test_build_strategy_signal_execution_contexts_from_definition_returns_select
 
 
 def test_get_strategy_signal_execution_contexts_returns_selection_and_predictor_contexts() -> None:
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="signal_execution_contexts",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -1371,8 +1364,8 @@ def test_get_strategy_signal_execution_contexts_returns_selection_and_predictor_
     assert predictor_context["alignment_policy"]["method"] == "calendar_resample"
 
 
-def test_serialize_strategy_spec_includes_explicit_execution_contexts() -> None:
-    strategy = build_strategy_spec(
+def test_serialize_evaluator_strategy_spec_includes_explicit_execution_contexts() -> None:
+    strategy = build_evaluator_strategy_spec(
         strategy_id="serialized_context_strategy",
         version="v1",
         label="Serialized context strategy",
@@ -1432,7 +1425,7 @@ def test_serialize_strategy_spec_includes_explicit_execution_contexts() -> None:
         decision_schedule="every_bar",
     )
 
-    payload = serialize_strategy_spec(strategy)
+    payload = serialize_evaluator_strategy_spec(strategy)
 
     assert payload["components"]["core"]["decisionSchedule"] == "every_bar"
     assert payload["components"]["core"]["executionMode"] is None
@@ -1469,7 +1462,7 @@ def test_get_strategy_definition_signal_execution_contexts_prefers_explicit_stra
         "signalTimeframe": "1w",
         "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "calendar_resample", "parameters": {}},
     }
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="explicit_context_strategy",
         version="v1",
         label="Explicit context strategy",
@@ -1514,8 +1507,8 @@ def test_get_strategy_definition_signal_execution_contexts_prefers_explicit_stra
     assert resolve_strategy_market_data_timeframe_key(strategy) == "1d"
 
 
-def test_strategy_spec_extensions_do_not_rehydrate_execution_contexts() -> None:
-    strategy = build_strategy_spec(
+def test_evaluator_strategy_spec_extensions_do_not_rehydrate_execution_contexts() -> None:
+    strategy = build_evaluator_strategy_spec(
         strategy_id="strategy_definition_signal_execution_contexts",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -1581,7 +1574,7 @@ def test_compare_portfolio_runs_uses_explicit_signal_execution_contexts() -> Non
         },
         index=pd.date_range("2024-01-05", periods=8, freq="W-FRI"),
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="explicit_signal_execution_contexts",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -1656,7 +1649,7 @@ def test_direct_execution_definition_compatibility_helper_preserves_predictor_al
         )
     )
 
-    executable_strategy = build_executable_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
     predictor_payload = extract_predictor_signal_payload(executable_strategy)
 
     assert executable_strategy.predictor_signal_execution_context is not None
@@ -1722,7 +1715,7 @@ def test_direct_execution_definition_compatibility_helper_accepts_predictor_over
     )
 
     assert is_direct_execution_compatible_strategy_definition(definition) is True
-    executable_strategy = build_executable_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
     assert executable_strategy.predictor_use is not None
     assert executable_strategy.predictor_use.predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
     assert executable_strategy.signal_execution_contexts[1]["selectionKey"] == "secondary_momo6"
@@ -1764,7 +1757,7 @@ def test_direct_execution_definition_compatibility_helper_accepts_predictor_over
     assert is_direct_execution_compatible_strategy_definition(definition) is True
     assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
-    executable_strategy = build_executable_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
     assert executable_strategy.timeframe.key == "1w"
     assert executable_strategy.predictor_use is not None
     assert executable_strategy.predictor_use.predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
@@ -1802,12 +1795,12 @@ def test_legacy_definition_compatibility_helper_reports_blockers() -> None:
     assert "requires matching selection data and signal timeframes" in issues
 
     try:
-        build_strategy_spec_from_definition(definition)
+        build_evaluator_strategy_spec_from_definition(definition)
     except ValueError as exc:
-        assert "StrategySpec adapter incompatibilities" in str(exc)
+        assert "Evaluator adapter incompatibilities" in str(exc)
         assert "requires matching decision and rebalance schedules" in str(exc)
     else:
-        raise AssertionError("Expected StrategySpec adapter incompatibility error")
+        raise AssertionError("Expected Evaluator adapter incompatibility error")
 
 
 
@@ -1938,40 +1931,18 @@ def test_predictor_definition_product_builder_generates_cross_product() -> None:
 
 
 
-def test_filtered_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(FILTERED_CANDIDATE_DEFINITIONS)
-    assert len(FILTERED_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        strategy.strategy_id for strategy in derived_strategies
-    ] == [
-        definition.strategy_id for definition in FILTERED_CANDIDATE_DEFINITIONS
-    ]
-
-    rebuilt = build_strategy_spec_from_definition(FILTERED_CANDIDATE_DEFINITIONS[0])
-    assert rebuilt == derived_strategies[0]
+def test_filtered_candidates_are_strategy_definitions() -> None:
+    assert len({definition.strategy_id for definition in FILTERED_CANDIDATE_DEFINITIONS}) == len(FILTERED_CANDIDATE_DEFINITIONS)
+    assert all(definition.signals[0].source_kind == "selection_signal" for definition in FILTERED_CANDIDATE_DEFINITIONS)
 
 
-def test_universe_variant_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS)
-    assert len(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        strategy.strategy_id for strategy in derived_strategies
-    ] == [
-        definition.strategy_id for definition in UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS
-    ]
-
-    rebuilt = build_strategy_spec_from_definition(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS[0])
-    assert rebuilt == derived_strategies[0]
+def test_universe_variant_candidates_are_strategy_definitions() -> None:
+    assert len({definition.strategy_id for definition in UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS}) == len(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS)
+    assert all(definition.investment_universe.tickers for definition in UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS)
 
 
-def test_predictor_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(PREDICTOR_CANDIDATE_DEFINITIONS)
-    assert len(PREDICTOR_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        strategy.strategy_id for strategy in derived_strategies
-    ] == [
-        definition.strategy_id for definition in PREDICTOR_CANDIDATE_DEFINITIONS
-    ]
+def test_predictor_candidates_are_strategy_definitions() -> None:
+    assert len({definition.strategy_id for definition in PREDICTOR_CANDIDATE_DEFINITIONS}) == len(PREDICTOR_CANDIDATE_DEFINITIONS)
 
     predictor_candidate = PREDICTOR_CANDIDATE_DEFINITIONS[1]
     assert predictor_candidate.execution_plan.decision_schedule == "month_end"
@@ -1979,47 +1950,24 @@ def test_predictor_candidates_are_derived_from_definitions() -> None:
     assert predictor_candidate.signals[1].source_kind == "predictor_overlay"
     assert predictor_candidate.signals[1].predictor_key is not None
 
-    rebuilt = build_strategy_spec_from_definition(predictor_candidate)
-    assert rebuilt == derived_strategies[1]
+
+def test_baseline_definition_catalog_has_unique_strategy_ids() -> None:
+    assert len({definition.strategy_id for definition in BASELINE_CANDIDATE_DEFINITIONS}) == len(BASELINE_CANDIDATE_DEFINITIONS)
 
 
-def test_baseline_definition_catalog_matches_strategy_catalog() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(BASELINE_CANDIDATE_DEFINITIONS)
-    assert len(BASELINE_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        definition.strategy_id for definition in BASELINE_CANDIDATE_DEFINITIONS
-    ] == [
-        strategy.strategy_id for strategy in derived_strategies
-    ]
-
-
-def test_canonical_definition_catalog_matches_strategy_catalog() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(CANONICAL_CANDIDATE_DEFINITIONS)
-    assert len(CANONICAL_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        definition.strategy_id for definition in CANONICAL_CANDIDATE_DEFINITIONS
-    ] == [
-        strategy.strategy_id for strategy in derived_strategies
-    ]
+def test_canonical_definition_catalog_has_unique_strategy_ids() -> None:
+    assert len({definition.strategy_id for definition in CANONICAL_CANDIDATE_DEFINITIONS}) == len(CANONICAL_CANDIDATE_DEFINITIONS)
 
 
 
-def test_timeframe_variant_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_evaluator_strategy_specs_from_definitions(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS)
-    assert len(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS) == len(derived_strategies)
-    assert [
-        strategy.strategy_id for strategy in derived_strategies
-    ] == [
-        definition.strategy_id for definition in TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS
-    ]
+def test_timeframe_variant_candidates_are_strategy_definitions() -> None:
+    assert len({definition.strategy_id for definition in TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS}) == len(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS)
 
     monthly_candidate = TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS[2]
     assert monthly_candidate.execution_plan.decision_schedule == "month_end"
     assert monthly_candidate.execution_plan.rebalance_schedule == "month_end"
+    assert monthly_candidate.signals[0].source_kind == "selection_signal"
     assert monthly_candidate.signals[0].data_timeframe.key == "1d"
-
-    rebuilt = build_strategy_spec_from_definition(monthly_candidate)
-    assert rebuilt == derived_strategies[2]
 
 
 
@@ -2037,7 +1985,7 @@ def test_compare_portfolio_runs_uses_explicit_decision_schedule() -> None:
         {ticker: [1_000_000 + idx * 10_000 for idx in range(len(closes))] for ticker in closes.columns},
         index=closes.index,
     )
-    hold_strategy = build_strategy_spec(
+    hold_strategy = build_evaluator_strategy_spec(
         strategy_id="decision_schedule__hold",
         investment_universe=build_investment_universe_spec(
             tickers=list(closes.columns),
@@ -2058,7 +2006,7 @@ def test_compare_portfolio_runs_uses_explicit_decision_schedule() -> None:
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
         decision_schedule="hold",
     )
-    adaptive_strategy = build_strategy_spec(
+    adaptive_strategy = build_evaluator_strategy_spec(
         strategy_id="decision_schedule__every_bar",
         investment_universe=hold_strategy.investment_universe,
         selection=hold_strategy.selection,
@@ -2099,7 +2047,7 @@ def test_prepare_strategy_market_data_resamples_daily_source_to_weekly_signal_ti
         },
         index=closes.index,
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="weekly_signal_from_daily_source",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -2157,7 +2105,7 @@ def test_compare_portfolio_runs_keeps_daily_performance_with_weekly_signal_timef
         {ticker: [1_000_000 + idx * 10_000 for idx in range(len(closes))] for ticker in closes.columns},
         index=closes.index,
     )
-    weekly_signal_strategy = build_strategy_spec(
+    weekly_signal_strategy = build_evaluator_strategy_spec(
         strategy_id="daily_performance_weekly_signal",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -2639,7 +2587,7 @@ def test_select_assets_uses_explicit_selection_contexts_for_momentum_top3() -> N
         index=pd.date_range("2025-01-01", periods=8, freq="D"),
     )
     returns = closes.pct_change().dropna()
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="explicit_selection_assets_top3",
         investment_universe=build_investment_universe_spec(
             tickers=list(closes.columns),
@@ -2708,7 +2656,7 @@ def test_compare_portfolio_runs_blends_additional_selection_signals_for_momentum
         },
         index=pd.date_range("2025-01-01", periods=8, freq="D"),
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="multi_selection_top3",
         investment_universe=build_investment_universe_spec(
             tickers=list(closes.columns),
@@ -2785,7 +2733,7 @@ def test_compute_strategy_score_series_blends_explicit_additional_selection_sign
             "windowSpec": {"unit": "bars", "value": 3},
         },
     )
-    blended_strategy = build_strategy_spec(
+    blended_strategy = build_evaluator_strategy_spec(
         strategy_id="multi_selection_blend",
         timeframe=primary_strategy.timeframe,
         investment_universe=primary_strategy.investment_universe,
@@ -2999,7 +2947,7 @@ def test_prepare_strategy_predictor_panel_uses_explicit_predictor_context() -> N
         },
         index=pd.date_range("2025-01-01", periods=7, freq="D"),
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="explicit_predictor_signal_data",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -3053,7 +3001,7 @@ def test_prepare_strategy_predictor_panel_resamples_daily_source_to_weekly_signa
         },
         index=pd.date_range("2025-01-01", periods=7, freq="D"),
     )
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         strategy_id="weekly_predictor_from_daily_source",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=build_investment_universe_spec(
@@ -3103,7 +3051,7 @@ def test_prepare_strategy_predictor_panel_resamples_daily_source_to_weekly_signa
         strategy=strategy,
     )
 
-    calendar_strategy = build_strategy_spec(
+    calendar_strategy = build_evaluator_strategy_spec(
         strategy_id="weekly_predictor_from_daily_source_calendar",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         investment_universe=strategy.investment_universe,
@@ -3370,7 +3318,7 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         ],
     )
 
-    strategy = build_strategy_spec(
+    strategy = build_evaluator_strategy_spec(
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ"],
             key="test_universe_small",

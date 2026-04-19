@@ -18,7 +18,7 @@ def freeze_parameter_value(value: object) -> object:
 
 
 
-def build_default_strategy_selection_context(strategy: StrategySpec) -> dict[str, object]:
+def build_default_strategy_selection_context(strategy: EvaluatorStrategySpec) -> dict[str, object]:
     return {
         "signalKey": f"signal__{strategy.strategy_id}__selection",
         "signalLabel": strategy.selection.label,
@@ -34,7 +34,7 @@ def build_default_strategy_selection_context(strategy: StrategySpec) -> dict[str
     }
 
 
-def build_default_strategy_predictor_context(strategy: StrategySpec) -> dict[str, object] | None:
+def build_default_strategy_predictor_context(strategy: EvaluatorStrategySpec) -> dict[str, object] | None:
     if strategy.predictor_use is None:
         return None
     return {
@@ -52,19 +52,19 @@ def build_default_strategy_predictor_context(strategy: StrategySpec) -> dict[str
     }
 
 
-def resolve_decision_schedule(strategy: StrategySpec) -> str:
+def resolve_decision_schedule(strategy: EvaluatorStrategySpec) -> str:
     if strategy.decision_schedule is not None:
         return str(strategy.decision_schedule)
     return str(strategy.execution_policy.rebalance_schedule)
 
 
-def resolve_strategy_market_data_timeframe_key(strategy: StrategySpec) -> str:
+def resolve_strategy_market_data_timeframe_key(strategy: EvaluatorStrategySpec) -> str:
     if strategy.signal_execution_contexts:
         return str(strategy.signal_execution_contexts[0]["dataTimeframe"])
     return strategy.timeframe.key
 
 
-def extract_predictor_signal_payload(strategy: StrategySpec) -> dict[str, object] | None:
+def extract_predictor_signal_payload(strategy: EvaluatorStrategySpec) -> dict[str, object] | None:
     if strategy.predictor_signal_execution_context is not None:
         return dict(strategy.predictor_signal_execution_context)
     return build_default_strategy_predictor_context(strategy)
@@ -115,7 +115,7 @@ def build_runtime_signal_execution_contexts(
 
 
 def get_strategy_signal_execution_contexts(
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None]:
     normalized_selection_contexts, normalized_predictor_context = get_strategy_definition_signal_execution_contexts(strategy)
     return build_runtime_signal_execution_contexts(
@@ -125,7 +125,7 @@ def get_strategy_signal_execution_contexts(
 
 
 def resolve_runtime_signal_execution_contexts(
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     signal_execution_contexts: tuple[list[dict[str, object]], dict[str, object] | None] | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None]:
     if signal_execution_contexts is None:
@@ -160,7 +160,7 @@ def build_selection_spec_from_signal_payload(payload: dict[str, object]) -> Rank
 
 
 def get_strategy_selection_components(
-    strategy: StrategySpec | None = None,
+    strategy: EvaluatorStrategySpec | None = None,
     *,
     selection_contexts: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
@@ -175,7 +175,7 @@ def get_strategy_selection_components(
 def compute_strategy_selection_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     *,
     bars_per_year: float,
     selection_contexts: list[dict[str, object]] | None = None,
@@ -230,7 +230,7 @@ def compute_strategy_selection_score_series(
 
 def compute_strategy_selection_trailing_total_returns(
     returns: pd.DataFrame,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     *,
     bars_per_year: float,
     selection_contexts: list[dict[str, object]] | None = None,
@@ -329,7 +329,7 @@ def prepare_strategy_market_data(
     *,
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     market_data_timeframe_key = resolve_strategy_market_data_timeframe_key(strategy)
     if market_data_timeframe_key == strategy.timeframe.key:
@@ -402,7 +402,7 @@ def prepare_strategy_signal_data(
     *,
     history_returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy: StrategySpec | None = None,
+    strategy: EvaluatorStrategySpec | None = None,
     selection_contexts: list[dict[str, object]] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, float]:
     selection_components = get_strategy_selection_components(
@@ -422,7 +422,7 @@ def prepare_strategy_signal_data(
 def prepare_strategy_predictor_panel(
     *,
     predictor_panel: pd.DataFrame | None,
-    strategy: StrategySpec | None = None,
+    strategy: EvaluatorStrategySpec | None = None,
     predictor_context: dict[str, object] | None = None,
     market_data_timeframe_key: str | None = None,
     signal_timeframe_key: str | None = None,
@@ -478,7 +478,7 @@ def resolve_predictor_snapshot(
 
 
 def build_asset_ranking_specs(
-    strategies: list[StrategySpec],
+    strategies: list[EvaluatorStrategySpec],
 ) -> list[AssetRankingSpec]:
     grouped: dict[
         tuple[
@@ -490,7 +490,7 @@ def build_asset_ranking_specs(
             str,
             tuple[tuple[str, float], ...],
         ],
-        list[StrategySpec],
+        list[EvaluatorStrategySpec],
     ] = {}
 
     for strategy in strategies:
@@ -555,7 +555,7 @@ def build_asset_ranking_specs_from_strategy_definitions(
 ) -> list[AssetRankingSpec]:
     return build_asset_ranking_specs(
         [
-            build_executable_strategy_spec_from_definition(strategy_definition)
+            build_executable_evaluator_strategy_spec_from_definition(strategy_definition)
             for strategy_definition in strategy_definitions
         ]
     )
@@ -931,7 +931,7 @@ def compute_trade_cost(
 def compare_portfolio_runs(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    strategies: list[StrategySpec],
+    strategies: list[EvaluatorStrategySpec],
     initial_capital: float,
     split_ratio: float,
     bars_per_year: float = 252.0,
@@ -1055,7 +1055,7 @@ def compare_portfolio_runs(
                 "kind": "run_result",
                 "schemaVersion": "v1",
                 "key": strategy.key,
-                "strategy": serialize_strategy_spec(strategy),
+                "strategy": serialize_evaluator_strategy_spec(strategy),
                 "weights": serialize_weights(
                     returns.columns,
                     backtest["latestWeights"],
@@ -1074,7 +1074,7 @@ def compare_portfolio_runs(
 def evaluate_strategy_run(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     initial_capital: float,
     split_ratio: float,
     bars_per_year: float = 252.0,
@@ -1119,7 +1119,7 @@ def evaluate_strategy_definition_run(
     predictor_panel: pd.DataFrame | None = None,
 ) -> dict:
     try:
-        strategy = build_executable_strategy_spec_from_definition(strategy_definition)
+        strategy = build_executable_evaluator_strategy_spec_from_definition(strategy_definition)
     except ValueError as exc:
         raise ValueError(
             f"Strategy definition {strategy_definition.strategy_id} is not executable: {exc}"
@@ -1158,7 +1158,7 @@ def compare_portfolio_models(
         closes=closes,
         volumes=volumes,
         strategies=[
-            build_strategy_spec(
+            build_evaluator_strategy_spec(
                 investment_universe=build_investment_universe_spec(
                     tickers=list(closes.columns),
                     key="ad_hoc_universe",
@@ -1201,12 +1201,12 @@ def compare_portfolio_models(
 def select_assets(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    selection: StrategySpec | RankingSourceSpec,
+    selection: EvaluatorStrategySpec | RankingSourceSpec,
     *,
     bars_per_year: float,
     selection_contexts: list[dict[str, object]] | None = None,
 ) -> list[str]:
-    if isinstance(selection, StrategySpec):
+    if isinstance(selection, EvaluatorStrategySpec):
         strategy = selection
         base_selection = resolve_primary_selection_spec(
             strategy,
@@ -1593,19 +1593,19 @@ def compute_predictor_panel(
 
 
 def resolve_primary_selection_spec(
-    strategy_or_selection: StrategySpec | RankingSourceSpec,
+    strategy_or_selection: EvaluatorStrategySpec | RankingSourceSpec,
     *,
     selection_contexts: list[dict[str, object]] | None = None,
 ) -> RankingSourceSpec:
     if selection_contexts is not None and len(selection_contexts) > 0:
         return selection_contexts[0]["selection"]
-    if isinstance(strategy_or_selection, StrategySpec):
+    if isinstance(strategy_or_selection, EvaluatorStrategySpec):
         return strategy_or_selection.selection
     return strategy_or_selection
 
 
 def resolve_predictor_use_spec(
-    strategy_or_selection: StrategySpec | RankingSourceSpec,
+    strategy_or_selection: EvaluatorStrategySpec | RankingSourceSpec,
     *,
     predictor_context: dict[str, object] | None = None,
 ) -> PredictorUseSpec | None:
@@ -1615,7 +1615,7 @@ def resolve_predictor_use_spec(
             signal_weight=float(predictor_context["signal_weight"]),
             predictor_weight=float(predictor_context["predictor_weight"]),
         )
-    if isinstance(strategy_or_selection, StrategySpec):
+    if isinstance(strategy_or_selection, EvaluatorStrategySpec):
         return strategy_or_selection.predictor_use
     return None
 
@@ -1623,7 +1623,7 @@ def resolve_predictor_use_spec(
 def compute_prediction_supplemented_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_or_selection: StrategySpec | RankingSourceSpec,
+    strategy_or_selection: EvaluatorStrategySpec | RankingSourceSpec,
     *,
     bars_per_year: float,
     base_score_series: pd.Series,
@@ -1657,7 +1657,7 @@ def compute_prediction_supplemented_score_series(
 def compute_strategy_score_series(
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy_or_selection: StrategySpec | RankingSourceSpec,
+    strategy_or_selection: EvaluatorStrategySpec | RankingSourceSpec,
     *,
     bars_per_year: float,
     current_date: str | None = None,
@@ -1669,7 +1669,7 @@ def compute_strategy_score_series(
         strategy_or_selection,
         selection_contexts=selection_contexts,
     )
-    if isinstance(strategy_or_selection, StrategySpec):
+    if isinstance(strategy_or_selection, EvaluatorStrategySpec):
         base_score_series = compute_strategy_selection_score_series(
             returns,
             volume_history,
@@ -1974,7 +1974,7 @@ def expand_weights(
 def compute_portfolio_allocation(
     history_returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     portfolio_model: PortfolioModelSpec,
     bars_per_year: float,
     universe_columns: pd.Index,
@@ -2063,7 +2063,7 @@ def apply_strategy_weight_tilt(
     *,
     weights: np.ndarray,
     history_returns: pd.DataFrame,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     bars_per_year: float,
     max_investment_ratio: float,
     max_weight: float | None,
@@ -2127,7 +2127,7 @@ def compute_expected_return_proxy(
     *,
     returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     bars_per_year: float,
     current_date: str | None,
     predictor_panel: pd.DataFrame | None,
@@ -2301,7 +2301,7 @@ def run_portfolio_backtest(
     bars_per_year: float,
     split_index: int,
     split_ratio: float,
-    strategy: StrategySpec,
+    strategy: EvaluatorStrategySpec,
     portfolio_model: PortfolioModelSpec,
     initial_weights: np.ndarray,
     initial_selected_assets: list[str],

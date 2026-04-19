@@ -14,7 +14,7 @@ from app.portfolio import (
     StrategyDefinition,
     build_alignment_policy_spec,
     build_asset_ranking_specs_from_strategy_definitions,
-    build_strategy_definition_from_strategy_spec,
+    build_strategy_definition_from_evaluator_strategy_spec,
     build_strategy_execution_plan_spec,
     build_strategy_signal_spec,
     get_strategy_definition_signal_execution_contexts,
@@ -29,7 +29,7 @@ client = TestClient(app)
 def normalize_strategy_definition(strategy):
     if isinstance(strategy, StrategyDefinition):
         return strategy
-    return build_strategy_definition_from_strategy_spec(strategy)
+    return build_strategy_definition_from_evaluator_strategy_spec(strategy)
 
 
 def normalize_strategy_definitions(strategies):
@@ -56,13 +56,13 @@ def count_predictor_specs(strategies) -> int:
     return len(predictor_keys)
 
 
-def test_comparison_service_does_not_import_strategy_spec_dto_bridge() -> None:
+def test_comparison_service_does_not_import_evaluator_strategy_spec_dto_bridge() -> None:
     source = Path(main_module.__file__).with_name("comparison_service.py").read_text()
     forbidden_tokens = (
-        "build_strategy_spec_from_definition",
-        "build_executable_strategy_spec_from_definition",
-        "build_strategy_spec(",
-        "build_strategy_definition_from_strategy_spec",
+        "build_evaluator_strategy_spec_from_definition",
+        "build_executable_evaluator_strategy_spec_from_definition",
+        "build_evaluator_strategy_spec(",
+        "build_strategy_definition_from_evaluator_strategy_spec",
     )
     for token in forbidden_tokens:
         assert token not in source
@@ -362,9 +362,12 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
         payload["comparison"]["candidateStrategies"][0]["components"]["core"]["executionPlan"]["rebalanceSchedule"]
         == "year_end"
     )
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is True
-    assert "legacyAdapterCompatible" not in payload["comparison"]["candidateStrategies"][0]["executionSupport"]
-    assert "legacyAdapterIssues" not in payload["comparison"]["candidateStrategies"][0]["executionSupport"]
+    execution_support = payload["comparison"]["candidateStrategies"][0]["executionSupport"]
+    assert execution_support["evaluatorAdapterCompatible"] is True
+    assert "strategySpecAdapterCompatible" not in execution_support
+    assert "strategySpecAdapterIssues" not in execution_support
+    assert "legacyAdapterCompatible" not in execution_support
+    assert "legacyAdapterIssues" not in execution_support
     assert payload["comparison"]["candidateStrategies"][0]["components"]["optional"]["signals"][0]["sourceKind"] == "selection_signal"
     assert (
         payload["candidateRuns"][5]["strategy"]["components"]["optional"]["signals"][0]["signalParameters"]["scoreParameters"]["windowSpec"]["unit"]
@@ -582,7 +585,7 @@ def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path
     payload = response.json()
     assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
     assert payload["comparison"]["candidateStrategies"][0]["strategyId"] == definition.strategy_id
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is True
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["evaluatorAdapterCompatible"] is True
     signal_market_data_contexts = [
         context
         for context in payload["comparison"]["runSpec"]["evaluation"]["signalMarketDataContexts"]
@@ -673,7 +676,7 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is False
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["evaluatorAdapterCompatible"] is False
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     direct_signal_contexts = [
         context
@@ -986,7 +989,7 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candi
     assert response.status_code == 200
     payload = response.json()
     strategy_payload = payload["candidateRuns"][0]["strategy"]
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["strategySpecAdapterCompatible"] is False
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["evaluatorAdapterCompatible"] is False
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     assert strategy_payload["kind"] == "strategy_definition"
     assert strategy_payload["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"
@@ -1027,7 +1030,7 @@ def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_pa
     assert response.status_code == 400
     assert incompatible_definition.strategy_id in response.json()["detail"]
     assert "not executable" in response.json()["detail"]
-    assert "StrategySpec adapter incompatibilities" in response.json()["detail"]
+    assert "Evaluator adapter incompatibilities" in response.json()["detail"]
     assert "decision_schedule to match rebalance_schedule or be every_bar" in response.json()["detail"]
 
 

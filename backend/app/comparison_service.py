@@ -68,18 +68,18 @@ def resolve_timeframe_spec_by_key(timeframe_key: str) -> TimeframeSpec:
     return timeframe
 
 
-def resolve_strategy_market_data_timeframe(strategy_spec) -> TimeframeSpec:
-    selection_contexts, predictor_context = get_strategy_definition_signal_execution_contexts(strategy_spec)
+def resolve_strategy_market_data_timeframe(strategy_definition) -> TimeframeSpec:
+    selection_contexts, predictor_context = get_strategy_definition_signal_execution_contexts(strategy_definition)
     if selection_contexts:
         return resolve_timeframe_spec_by_key(str(selection_contexts[0]["dataTimeframe"]))
     if predictor_context is not None:
         return resolve_timeframe_spec_by_key(str(predictor_context["dataTimeframe"]))
-    return resolve_timeframe_spec_by_key(strategy_spec.timeframe.key)
+    return resolve_timeframe_spec_by_key(strategy_definition.timeframe.key)
 
 
 def serialize_strategy_definition_payload(strategy_definition: StrategyDefinition) -> dict:
     if not isinstance(strategy_definition, StrategyDefinition):
-        raise ValueError("StrategyDefinition is required; StrategySpec payloads are not supported.")
+        raise ValueError("StrategyDefinition is required; evaluator DTO payloads are not supported.")
     return serialize_canonical_strategy_definition(strategy_definition)
 
 
@@ -1102,12 +1102,12 @@ def build_strategy_runs_payload(
             strategy_definitions=original_candidate_definitions + original_reference_definitions,
         ),
         "candidateStrategies": [
-            serialize_strategy_definition_payload(strategy_spec)
-            for strategy_spec in original_candidate_definitions
+            serialize_strategy_definition_payload(strategy_definition)
+            for strategy_definition in original_candidate_definitions
         ],
         "referenceStrategies": [
-            serialize_strategy_definition_payload(strategy_spec)
-            for strategy_spec in original_reference_definitions
+            serialize_strategy_definition_payload(strategy_definition)
+            for strategy_definition in original_reference_definitions
         ],
         "predictorRuns": predictor_runs,
         "candidateRuns": candidate_runs,
@@ -1746,12 +1746,12 @@ def serialize_comparison(
             + (reference_strategy_definitions or comparison.reference_strategies),
         ),
         "candidateStrategies": [
-            serialize_strategy_definition_payload(strategy_spec)
-            for strategy_spec in (candidate_strategy_definitions or comparison.candidate_strategies)
+            serialize_strategy_definition_payload(strategy_definition)
+            for strategy_definition in (candidate_strategy_definitions or comparison.candidate_strategies)
         ],
         "referenceStrategies": [
-            serialize_strategy_definition_payload(strategy_spec)
-            for strategy_spec in (reference_strategy_definitions or comparison.reference_strategies)
+            serialize_strategy_definition_payload(strategy_definition)
+            for strategy_definition in (reference_strategy_definitions or comparison.reference_strategies)
         ],
         "conditionVariants": [
             serialize_condition_variant(condition_variant)

@@ -14,7 +14,7 @@
 - `decision_schedule`
 - `rebalance_schedule`
 
-これにより、
+これにより、次のような構成を自然に表現できるようにする。
 
 - 日足価格を使う
 - 週次 signal を計算する
@@ -22,14 +22,13 @@
 - 判断は毎日
 - 売買は月末
 
-のような構成を自然に表現できるようにする。
+## Current State
 
-## Current Snapshot
+基盤整理は一段落している。公開正本は `StrategyDefinition`、低レベル evaluator 内部 DTO は `EvaluatorStrategySpec` として分離済み。
 
-- 正本の戦略定義は `StrategyDefinition`
+現在の状態:
 - canonical candidate catalog の正本は strategy definitions
 - `comparison_service` は `StrategyDefinition` を直接実行入口として扱う
-- `EvaluatorStrategySpec` は公開正本ではなく、低レベル evaluator 用の内部 DTO として残る
 - `comparison_service` は strategy / condition / parameter / predictor / ranking の runSpec を `StrategyDefinition` 正本で生成する
 - `executionSupport` は `evaluatorAdapter*` と `directExecution*` で実行互換性を表す
 - runtime の `extensions` fallback は通常実行経路から削除済み
@@ -40,75 +39,60 @@
 - 外部入口は `comparison` 系に統一済み
 - 現在の全体テスト: `107 passed`
 
-## 22 Steps
+## Completed Foundation
 
-### Done
+完了した基盤:
+- `StrategyDefinition` / `StrategyExecutionPlanSpec` / `StrategySignalSpec` を導入した
+- `StrategyBlueprintSpec` を `StrategyDefinition` にリネームした
+- legacy evaluator DTO との相互変換と互換判定を導入した
+- `ComparisonSpec` と `comparison_service` を definition-first に移行した
+- candidate catalog / baseline / canonical catalog を strategy definitions 正本に寄せた
+- `selection × portfolio_model × execution` の product builder を作った
+- predictor を signal として builder に取り込んだ
+- `FeatureDefinition` と `DataSourceDefinition` を分けた
+- 異粒度データを結合する `alignment_policy` を導入した
+- signal ごとの `data_timeframe` / `signal_timeframe` を評価経路に通した
+- comparison layer が legacy adapter を直接使わず definition を評価できる経路を作った
+- run store を `strategyDefinition + evaluationSubject + marketData + evaluation + logicVersion` fingerprint ベースへ寄せた
+- `comparison-run-spec` / `rerun-comparison-spec` で同条件再実行できる状態にした
+- API payload の互換表示を `evaluatorAdapter*` / `directExecution*` に揃えた
+- production で不要だった evaluator DTO list helper を削除した
 
-1. `StrategyDefinition` を導入する
-2. `StrategyExecutionPlanSpec` を導入する
-3. `StrategySignalSpec` を導入する
-4. `legacy EvaluatorStrategySpec -> definition` 変換を実装する
-5. `definition -> legacy EvaluatorStrategySpec` 変換を実装する
-6. legacy adapter の互換判定を独立させる
-7. `ComparisonSpec` が definition を受けられるようにする
-8. `comparison_service` が definition を正規化して実行できるようにする
-9. candidate 定義を `definition first` に移行する
-10. baseline / canonical catalog を definition 正本に寄せる
-11. `selection × portfolio_model × execution` の product builder を作る
-12. predictor を signal として builder に取り込む
-13. `DEFAULT_COMPARISON_SPEC` を definition 起点にする
-14. API payload で definition と互換情報を見えるようにする
-15. `FeatureDefinition` と `DataSourceDefinition` を分ける
-16. 異粒度データを結合する `alignment_policy` を導入する
-17. signal ごとに `data_timeframe` と `signal_timeframe` を自然に実行できるようにする
-18. legacy adapter を通さず comparison layer が definition を直接評価する経路を作る
-19. run store を `strategyDefinition + evaluationSubject + marketData + evaluation + logicVersion` fingerprint ベースへ寄せる
-20. 評価条件と CLI を正本化し、同条件で再検証できる状態にする
-21. `StrategyBlueprintSpec` を `StrategyDefinition` にリネームする
-22. 低レベル evaluator DTO を `EvaluatorStrategySpec` として明示し、外部表示を `evaluatorAdapter*` に揃える
-
-### Done Notes
-
-Step 20 の完了内容:
-- `comparison-run-spec` を CLI / API から取得できる
-- canonical payload に strategy definitions / condition variants / comparison fingerprint を含める
-- `rerun-comparison-spec` で保存済み JSON から同条件再実行できる
+重要な完了条件:
 - rerun 時に `runSpecFingerprint` / `comparisonFingerprint` の整合性を検証できる
-- strategy / condition / parameter / predictor / ranking run の run spec が strategy definition を持つ
-- predictor / ranking run は `evaluationSubject` で実評価対象を再現可能にした
 - rerun は definition-only payload を前提にする
 - `EvaluatorStrategySpec.extensions` は runtime context の復元元ではない
 - `comparison_service` から `EvaluatorStrategySpec` 変換の直接 import を削除済み
 - parameter sweep は `EvaluatorStrategySpec` を経由せず `StrategyDefinition` を直接生成する
-- ranking 用の evaluator DTO 変換は `portfolio.py` の helper に閉じた
-- `legacyAdapter*` 表示は削除し、`evaluatorAdapter*` 表示へ一本化した
-- 個別 subject fingerprint filter は必要になった段階で追加する
-
-Step 22 の完了内容:
-- 低レベル evaluator DTO 名を `EvaluatorStrategySpec` に変更した
-- evaluator DTO bridge helper 名を `build_evaluator_*` / `serialize_evaluator_*` に揃えた
-- API payload の互換表示を `evaluatorAdapter*` に変更し、旧 adapter 表示は残していない
 - candidate catalog tests は evaluator DTO 変換比較ではなく `StrategyDefinition` を直接検証する
-- production で不要だった evaluator DTO list helper は削除した
 
-### In Progress
+## Active Decision
 
-なし。
+次の大きな分岐は次のどちらか。
 
-## Remaining Duplication
+- evaluator 本体をさらに `StrategyDefinition` 直接評価へ寄せる
+- 日次中心の戦略探索・比較へ戻る
 
-いま残っている主な二重構造は次の通り。
+現時点では、戦略探索に戻るほうを優先する。理由は、外部正本と再現性の基盤は整っており、evaluator 内部 DTO を完全撤去するよりも、実際に勝てる候補を探すほうが目的に近いから。
 
-- low-level evaluator 本体はまだ `EvaluatorStrategySpec` DTO を中心に動く
+## Next Work
 
-外部入口の二重化はほぼ解消済み。
+次にやること:
+- 現在もっとも良い既存結果を確認する
+- その結果を reference として固定し、同条件で再実行する
+- daily-first の candidate set を作る
+- 年次トップに対して、日次 / 週次 signal、月次 rebalance、predictor overlay の候補を比較する
+- 良い候補が出たら、その strategy family を広げる
 
-- API は `/api/comparison`
-- CLI は `comparison-summary`
-- candidate catalog の production 正本は strategy definitions
+成功条件:
+- 比較条件が runSpec として保存され、rerun できる
+- reference の年次トップと daily-first 候補を同じ market data / cost / split 条件で比較できる
+- 勝敗だけでなく、年率リターン、最大DD、Sharpe、取引頻度を確認できる
 
-## Near-Term Next Steps
+## Parking Lot
 
-1. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する
-2. evaluator 本体を `StrategyDefinition` 直接評価へ寄せるか、戦略探索・比較改善へ戻るかを選ぶ
-3. 新しい構造で日次中心の戦略探索・比較を進める
+後で必要になったらやること:
+- `evaluationSubjectFingerprint` filter を API / CLI に追加する
+- evaluator 本体から `EvaluatorStrategySpec` DTO 依存をさらに減らす
+- `portfolio.py` の低レベル evaluator を `StrategyDefinition` 直接評価へ段階移行する
+- strategy search の結果保存・ランキング・比較 UI 相当の CLI 出力を改善する

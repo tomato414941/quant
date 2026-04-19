@@ -1310,31 +1310,45 @@ def test_get_strategy_signal_execution_contexts_returns_selection_and_predictor_
             signal_weight=0.6,
             predictor_weight=0.4,
         ),
-        extensions={
-            "signal_data_timeframe": "1d",
-            "signal_timeframe": "1w",
-            "selection_signal_weight": "0.7",
-            "selection_signal_alignment_policy": json.dumps({"method": "end_of_period"}, sort_keys=True),
-            "additional_selection_signals": json.dumps([
-                {
-                    "selectionKey": "secondary_momo6",
-                    "strategyType": "full_universe_momentum_tilt",
-                    "label": "Secondary momentum",
-                    "description": "Secondary momentum",
-                    "scoreParameters": {
-                        "tilt_strength": 0.35,
-                        "tilt_shape": 1.0,
-                        "windowSpec": {"unit": "bars", "value": 6},
-                    },
-                    "weight": 0.3,
-                    "dataTimeframe": "1d",
-                    "signalTimeframe": "1w",
-                    "alignmentPolicy": {"method": "calendar_resample"},
-                }
-            ], sort_keys=True),
-            "predictor_signal_data_timeframe": "1d",
-            "predictor_signal_timeframe": "1w",
-            "predictor_signal_alignment_policy": json.dumps({"method": "calendar_resample"}, sort_keys=True),
+        signal_execution_contexts=[
+            {
+                "selectionKey": "full_universe_momentum_tilt",
+                "strategyType": "full_universe_momentum_tilt",
+                "label": "Primary momentum",
+                "description": "Primary momentum",
+                "scoreParameters": {
+                    "tilt_strength": 0.35,
+                    "tilt_shape": 1.0,
+                    "windowSpec": {"unit": "bars", "value": 3},
+                },
+                "weight": 0.7,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": {"method": "end_of_period"},
+            },
+            {
+                "selectionKey": "secondary_momo6",
+                "strategyType": "full_universe_momentum_tilt",
+                "label": "Secondary momentum",
+                "description": "Secondary momentum",
+                "scoreParameters": {
+                    "tilt_strength": 0.35,
+                    "tilt_shape": 1.0,
+                    "windowSpec": {"unit": "bars", "value": 6},
+                },
+                "weight": 0.3,
+                "dataTimeframe": "1d",
+                "signalTimeframe": "1w",
+                "alignmentPolicy": {"method": "calendar_resample"},
+            },
+        ],
+        predictor_signal_execution_context={
+            "predictorKey": "pred-signal-context",
+            "signalWeight": 0.6,
+            "predictorWeight": 0.4,
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": {"method": "calendar_resample"},
         },
     )
 
@@ -1493,7 +1507,7 @@ def test_get_strategy_definition_signal_execution_contexts_prefers_explicit_stra
     assert resolve_strategy_market_data_timeframe_key(strategy) == "1d"
 
 
-def test_get_strategy_definition_signal_execution_contexts_normalizes_legacy_strategy() -> None:
+def test_strategy_spec_extensions_do_not_rehydrate_execution_contexts() -> None:
     strategy = build_strategy_spec(
         strategy_id="strategy_definition_signal_execution_contexts",
         timeframe=DEFAULT_WEEKLY_TIMEFRAME,
@@ -1539,13 +1553,15 @@ def test_get_strategy_definition_signal_execution_contexts_normalizes_legacy_str
     assert len(selection_contexts) == 1
     assert selection_contexts[0]["sourceKind"] == "selection_signal"
     assert selection_contexts[0]["selectionKey"] == strategy.selection.key
-    assert selection_contexts[0]["dataTimeframe"] == "1d"
+    assert selection_contexts[0]["dataTimeframe"] == "1w"
     assert selection_contexts[0]["signalTimeframe"] == "1w"
-    assert selection_contexts[0]["alignmentPolicy"]["method"] == "end_of_period"
+    assert selection_contexts[0]["alignmentPolicy"] is None
     assert predictor_context is not None
     assert predictor_context["sourceKind"] == "predictor_overlay"
     assert predictor_context["predictorKey"] == "pred-signal-context"
-    assert predictor_context["alignmentPolicy"]["method"] == "calendar_resample"
+    assert predictor_context["dataTimeframe"] == "1w"
+    assert predictor_context["signalTimeframe"] == "1w"
+    assert predictor_context["alignmentPolicy"] is None
 
 
 
@@ -2942,26 +2958,16 @@ def test_prepare_strategy_signal_data_uses_explicit_selection_contexts() -> None
         index=pd.date_range("2025-01-01", periods=7, freq="D"),
     )
     returns = closes.pct_change().dropna()
-    strategy = build_strategy_spec(
-        strategy_id="explicit_selection_signal_data",
-        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
-        investment_universe=build_investment_universe_spec(
-            tickers=["AAA", "BBB"],
-            key="explicit_selection_signal_data_universe",
-            label="Explicit selection signal data universe",
-        ),
-        selection=build_selection_spec("full_universe"),
-        portfolio_model=build_portfolio_model_spec("equal_weight"),
-        execution_policy=build_execution_policy_spec(
-            key="month_end",
-            label="月次",
-            entry="train_once_then_periodic_rebalance",
-            rebalance_schedule="month_end",
-        ),
-        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
-        extensions={"signal_data_timeframe": "1d", "signal_timeframe": "1w"},
-    )
-    selection_contexts, _ = get_strategy_signal_execution_contexts(strategy)
+    selection_contexts = [
+        {
+            "source_kind": "selection_signal",
+            "selection": build_selection_spec("full_universe"),
+            "weight": 1.0,
+            "data_timeframe_key": "1d",
+            "signal_timeframe_key": "1w",
+            "alignment_policy": None,
+        }
+    ]
 
     with patch(
         "app.portfolio.get_strategy_signal_execution_contexts",
@@ -3075,6 +3081,14 @@ def test_prepare_strategy_predictor_panel_resamples_daily_source_to_weekly_signa
                 "alignmentPolicy": None,
             }
         ],
+        predictor_signal_execution_context={
+            "predictorKey": "pred-weekly-predictor-source",
+            "signalWeight": 0.6,
+            "predictorWeight": 0.4,
+            "dataTimeframe": "1d",
+            "signalTimeframe": "1w",
+            "alignmentPolicy": None,
+        },
     )
 
     prepared_panel = prepare_strategy_predictor_panel(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 import statistics
 
@@ -18,89 +17,57 @@ def freeze_parameter_value(value: object) -> object:
     return value
 
 
-def load_legacy_alignment_policy_payload(raw_alignment_policy: str | None) -> dict[str, object] | None:
-    if not raw_alignment_policy:
-        return None
-    return json.loads(raw_alignment_policy)
 
-
-def build_legacy_strategy_execution_payloads(strategy: StrategySpec) -> dict[str, object]:
-    extensions = dict(strategy.extensions)
-    primary_selection_payload = {
+def build_default_strategy_selection_context(strategy: StrategySpec) -> dict[str, object]:
+    return {
+        "signalKey": f"signal__{strategy.strategy_id}__selection",
+        "signalLabel": strategy.selection.label,
+        "description": strategy.selection.description,
+        "sourceKind": "selection_signal",
         "selectionKey": strategy.selection.key,
         "strategyType": strategy.selection.strategy_type,
-        "label": strategy.selection.label,
-        "description": strategy.selection.description,
         "scoreParameters": thaw_strategy_parameter_value(dict(strategy.selection.ranking_signal.score_parameters)),
-        "weight": float(extensions.get("selection_signal_weight", 1.0)),
-        "dataTimeframe": extensions.get("signal_data_timeframe", strategy.timeframe.key),
-        "signalTimeframe": extensions.get("signal_timeframe", strategy.timeframe.key),
-        "alignmentPolicy": load_legacy_alignment_policy_payload(extensions.get("selection_signal_alignment_policy")),
+        "dataTimeframe": strategy.timeframe.key,
+        "signalTimeframe": strategy.timeframe.key,
+        "alignmentPolicy": None,
+        "weight": 1.0 if strategy.predictor_use is None else strategy.predictor_use.signal_weight,
     }
 
-    raw_additional_selection_payloads = extensions.get("additional_selection_signals")
-    additional_selection_payloads: list[dict[str, object]] = []
-    if raw_additional_selection_payloads is not None:
-        decoded_payloads = json.loads(raw_additional_selection_payloads)
-        if not isinstance(decoded_payloads, list):
-            raise ValueError("additional_selection_signals must be a JSON list")
-        additional_selection_payloads = decoded_payloads
 
-    predictor_payload = None
-    if strategy.predictor_use is not None:
-        predictor_payload = {
-            "predictorKey": strategy.predictor_use.predictor_key,
-            "signalWeight": strategy.predictor_use.signal_weight,
-            "predictorWeight": strategy.predictor_use.predictor_weight,
-            "dataTimeframe": extensions.get("predictor_signal_data_timeframe", primary_selection_payload["dataTimeframe"]),
-            "signalTimeframe": extensions.get("predictor_signal_timeframe", strategy.timeframe.key),
-            "alignmentPolicy": load_legacy_alignment_policy_payload(extensions.get("predictor_signal_alignment_policy")),
-        }
-
+def build_default_strategy_predictor_context(strategy: StrategySpec) -> dict[str, object] | None:
+    if strategy.predictor_use is None:
+        return None
     return {
-        "decisionSchedule": str(extensions.get("decision_schedule", strategy.execution_policy.rebalance_schedule)),
-        "marketDataTimeframeKey": str(primary_selection_payload["dataTimeframe"]),
-        "primarySelectionSignal": primary_selection_payload,
-        "additionalSelectionSignals": additional_selection_payloads,
-        "predictorSignal": predictor_payload,
+        "signalKey": f"signal__{strategy.strategy_id}__predictor",
+        "signalLabel": f"{strategy.label} predictor overlay",
+        "description": "Predictor overlay translated from predictor_use.",
+        "sourceKind": "predictor_overlay",
+        "predictorKey": strategy.predictor_use.predictor_key,
+        "signalWeight": strategy.predictor_use.signal_weight,
+        "predictorWeight": strategy.predictor_use.predictor_weight,
+        "dataTimeframe": strategy.timeframe.key,
+        "signalTimeframe": strategy.timeframe.key,
+        "alignmentPolicy": None,
+        "weight": strategy.predictor_use.predictor_weight,
     }
 
 
 def resolve_decision_schedule(strategy: StrategySpec) -> str:
     if strategy.decision_schedule is not None:
         return str(strategy.decision_schedule)
-    return str(build_legacy_strategy_execution_payloads(strategy)["decisionSchedule"])
+    return str(strategy.execution_policy.rebalance_schedule)
 
 
 def resolve_strategy_market_data_timeframe_key(strategy: StrategySpec) -> str:
     if strategy.signal_execution_contexts:
         return str(strategy.signal_execution_contexts[0]["dataTimeframe"])
-    return str(build_legacy_strategy_execution_payloads(strategy)["marketDataTimeframeKey"])
-
-
-def extract_additional_selection_signal_payloads(strategy: StrategySpec) -> list[dict[str, object]]:
-    if len(strategy.signal_execution_contexts) > 1:
-        return [dict(selection_context) for selection_context in strategy.signal_execution_contexts[1:]]
-    return list(build_legacy_strategy_execution_payloads(strategy)["additionalSelectionSignals"])
-
-
-def extract_primary_selection_signal_payload(strategy: StrategySpec) -> dict[str, object]:
-    if strategy.signal_execution_contexts:
-        return dict(strategy.signal_execution_contexts[0])
-    return dict(build_legacy_strategy_execution_payloads(strategy)["primarySelectionSignal"])
+    return strategy.timeframe.key
 
 
 def extract_predictor_signal_payload(strategy: StrategySpec) -> dict[str, object] | None:
-    if strategy.predictor_use is None:
-        return None
     if strategy.predictor_signal_execution_context is not None:
         return dict(strategy.predictor_signal_execution_context)
-
-    predictor_payload = build_legacy_strategy_execution_payloads(strategy)["predictorSignal"]
-    if predictor_payload is None:
-        return None
-    return dict(predictor_payload)
-
+    return build_default_strategy_predictor_context(strategy)
 
 def get_strategy_definition_signal_execution_contexts(
     strategy_definition,
@@ -108,49 +75,12 @@ def get_strategy_definition_signal_execution_contexts(
     if isinstance(strategy_definition, StrategyDefinition):
         return build_strategy_signal_execution_contexts_from_definition(strategy_definition)
 
-    if strategy_definition.signal_execution_contexts or strategy_definition.predictor_signal_execution_context is not None:
-        return (
-            [dict(selection_context) for selection_context in strategy_definition.signal_execution_contexts],
-            None
-            if strategy_definition.predictor_signal_execution_context is None
-            else dict(strategy_definition.predictor_signal_execution_context),
-        )
-
-    selection_payloads = [
-        extract_primary_selection_signal_payload(strategy_definition),
-        *extract_additional_selection_signal_payloads(strategy_definition),
-    ]
-    normalized_selection_contexts = [
-        {
-            "signalKey": str(payload.get("selectionKey") or payload.get("strategyType")),
-            "signalLabel": str(payload.get("label") or payload.get("selectionKey") or payload.get("strategyType")),
-            "description": str(payload.get("description") or payload.get("label") or payload.get("selectionKey") or payload.get("strategyType")),
-            "sourceKind": "selection_signal",
-            "selectionKey": str(payload.get("selectionKey") or payload.get("strategyType")),
-            "strategyType": str(payload.get("strategyType")),
-            "scoreParameters": payload.get("scoreParameters"),
-            "dataTimeframe": str(payload.get("dataTimeframe", strategy_definition.timeframe.key)),
-            "signalTimeframe": str(payload.get("signalTimeframe", strategy_definition.timeframe.key)),
-            "alignmentPolicy": payload.get("alignmentPolicy"),
-            "weight": float(payload.get("weight", 1.0)),
-        }
-        for payload in selection_payloads
-    ]
-
-    normalized_predictor_context = None
-    predictor_payload = extract_predictor_signal_payload(strategy_definition)
-    if predictor_payload is not None:
-        normalized_predictor_context = {
-            "sourceKind": "predictor_overlay",
-            "predictorKey": str(predictor_payload.get("predictorKey")),
-            "signalWeight": float(predictor_payload.get("signalWeight", strategy_definition.predictor_use.signal_weight)),
-            "predictorWeight": float(
-                predictor_payload.get("predictorWeight", strategy_definition.predictor_use.predictor_weight)
-            ),
-            "dataTimeframe": str(predictor_payload.get("dataTimeframe", strategy_definition.timeframe.key)),
-            "signalTimeframe": str(predictor_payload.get("signalTimeframe", strategy_definition.timeframe.key)),
-            "alignmentPolicy": predictor_payload.get("alignmentPolicy"),
-        }
+    normalized_selection_contexts = (
+        [dict(selection_context) for selection_context in strategy_definition.signal_execution_contexts]
+        if strategy_definition.signal_execution_contexts
+        else [build_default_strategy_selection_context(strategy_definition)]
+    )
+    normalized_predictor_context = extract_predictor_signal_payload(strategy_definition)
     return normalized_selection_contexts, normalized_predictor_context
 
 

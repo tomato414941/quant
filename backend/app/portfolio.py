@@ -1164,6 +1164,45 @@ def evaluate_strategy_run(
     )[0]
 
 
+def evaluate_strategy_definition_run(
+    closes: pd.DataFrame,
+    volumes: pd.DataFrame | None,
+    strategy_definition: StrategyDefinition,
+    initial_capital: float,
+    split_ratio: float,
+    bars_per_year: float = 252.0,
+    execution_assumptions: dict | None = None,
+    cost_model: dict | None = None,
+    transaction_cost: float | None = None,
+    portfolio_state: PortfolioState | None = None,
+    predictor_panel: pd.DataFrame | None = None,
+) -> dict:
+    try:
+        strategy = build_executable_strategy_spec_from_definition(strategy_definition)
+    except ValueError as exc:
+        raise ValueError(
+            f"Strategy definition {strategy_definition.strategy_id} is not executable: {exc}"
+        ) from exc
+    signal_execution_contexts = get_strategy_definition_signal_execution_contexts(strategy_definition)
+    run = evaluate_strategy_run(
+        closes=closes,
+        volumes=volumes,
+        strategy=strategy,
+        bars_per_year=bars_per_year,
+        initial_capital=initial_capital,
+        split_ratio=split_ratio,
+        execution_assumptions=execution_assumptions,
+        cost_model=cost_model,
+        transaction_cost=transaction_cost,
+        portfolio_state=portfolio_state,
+        predictor_panel=predictor_panel,
+        signal_execution_contexts=signal_execution_contexts,
+    )
+    run["key"] = strategy_definition.key
+    run["strategy"] = serialize_strategy_definition(strategy_definition)
+    return run
+
+
 def compare_portfolio_models(
     closes: pd.DataFrame,
     volumes: pd.DataFrame | None,

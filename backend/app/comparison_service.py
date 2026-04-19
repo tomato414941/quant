@@ -27,14 +27,13 @@ from app.portfolio import (
     deserialize_predictor_panel,
     evaluate_asset_ranking_spec,
     evaluate_predictor_spec,
-    evaluate_strategy_run,
+    evaluate_strategy_definition_run,
     get_strategy_definition_signal_execution_contexts,
     serialize_asset_ranking_spec,
     serialize_predictor_spec,
     serialize_predictor_panel,
     serialize_portfolio_state,
     serialize_strategy_definition as serialize_canonical_strategy_definition,
-    serialize_strategy_spec,
 )
 from app.predictor_registry import REGISTERED_PREDICTOR_SPECS_BY_KEY
 from app.comparison_models import (
@@ -83,50 +82,14 @@ def resolve_strategy_market_data_timeframe(strategy_spec) -> TimeframeSpec:
     return resolve_timeframe_spec_by_key(strategy_spec.timeframe.key)
 
 
-def serialize_strategy_definition_payload(strategy_definition):
-    if isinstance(strategy_definition, StrategyDefinition):
-        return serialize_canonical_strategy_definition(strategy_definition)
-    return serialize_strategy_spec(strategy_definition)
+def serialize_strategy_definition_payload(strategy_definition: StrategyDefinition) -> dict:
+    if not isinstance(strategy_definition, StrategyDefinition):
+        raise ValueError("StrategyDefinition is required; legacy StrategySpec payloads are not supported.")
+    return serialize_canonical_strategy_definition(strategy_definition)
 
 
-def serialize_reproducible_strategy_definition(strategy_definition):
-    if isinstance(strategy_definition, StrategyDefinition):
-        return serialize_canonical_strategy_definition(strategy_definition)
-    return serialize_canonical_strategy_definition(
-        build_strategy_definition_from_strategy_spec(strategy_definition)
-    )
-
-
-def normalize_strategy_spec(strategy_spec):
-    if isinstance(strategy_spec, StrategyDefinition):
-        try:
-            return build_executable_strategy_spec_from_definition(strategy_spec)
-        except ValueError as exc:
-            raise ValueError(
-                f"Strategy definition {strategy_spec.strategy_id} is not executable: {exc}"
-            ) from exc
-    return strategy_spec
-
-
-def normalize_comparison_strategies(comparison: ComparisonSpec) -> ComparisonSpec:
-    candidate_strategies = [
-        normalize_strategy_spec(strategy_spec)
-        for strategy_spec in comparison.candidate_strategies
-    ]
-    reference_strategies = [
-        normalize_strategy_spec(strategy_spec)
-        for strategy_spec in comparison.reference_strategies
-    ]
-    if (
-        candidate_strategies == comparison.candidate_strategies
-        and reference_strategies == comparison.reference_strategies
-    ):
-        return comparison
-    return replace(
-        comparison,
-        candidate_strategies=candidate_strategies,
-        reference_strategies=reference_strategies,
-    )
+def serialize_reproducible_strategy_definition(strategy_definition: StrategyDefinition) -> dict:
+    return serialize_strategy_definition_payload(strategy_definition)
 
 
 def collect_comparison_tickers(
@@ -252,8 +215,7 @@ def build_comparison_run_spec_payload(
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
-    comparison = normalize_comparison_strategies(comparison)
-    strategy_definitions = comparison.candidate_strategies + comparison.reference_strategies
+    strategy_definitions = original_candidate_definitions + original_reference_definitions
     predictor_specs = collect_strategy_predictor_specs(strategy_definitions)
     (
         _market_bundles_by_timeframe,
@@ -649,7 +611,6 @@ def build_comparison_payload(
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
-    comparison = normalize_comparison_strategies(comparison)
     run_store = build_run_result_store(comparison)
     strategy_definitions = comparison.candidate_strategies + comparison.reference_strategies
     predictor_specs = collect_strategy_predictor_specs(strategy_definitions)
@@ -675,23 +636,21 @@ def build_comparison_payload(
     )
     candidate_runs, candidate_run_store_summary = build_strategy_runs(
         comparison=comparison,
-        strategy_specs=comparison.candidate_strategies,
+        strategy_definitions=original_candidate_definitions,
         market_bundles_by_timeframe=market_bundles_by_timeframe,
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
         predictor_panels_by_key=predictor_panels_by_key,
-        strategy_definitions=original_candidate_definitions,
     )
     reference_runs, reference_run_store_summary = build_strategy_runs(
         comparison=comparison,
-        strategy_specs=comparison.reference_strategies,
+        strategy_definitions=original_reference_definitions,
         market_bundles_by_timeframe=market_bundles_by_timeframe,
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
         predictor_panels_by_key=predictor_panels_by_key,
-        strategy_definitions=original_reference_definitions,
     )
     sanity_checks = []
     required_fields = collect_required_market_fields(
@@ -736,23 +695,21 @@ def build_comparison_payload(
         )
         sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
             comparison=comparison,
-            strategy_specs=comparison.candidate_strategies,
+            strategy_definitions=original_candidate_definitions,
             market_bundles_by_timeframe=sanity_bundles_by_timeframe,
             market_data_period=period,
             metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
             predictor_panels_by_key=sanity_predictor_panels_by_key,
-            strategy_definitions=original_candidate_definitions,
         )
         sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
             comparison=comparison,
-            strategy_specs=comparison.reference_strategies,
+            strategy_definitions=original_reference_definitions,
             market_bundles_by_timeframe=sanity_bundles_by_timeframe,
             market_data_period=period,
             metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
             predictor_panels_by_key=sanity_predictor_panels_by_key,
-            strategy_definitions=original_reference_definitions,
         )
         total_cached_runs += (
             sanity_predictor_run_store_summary.cached_run_count
@@ -818,7 +775,6 @@ def build_predictor_runs_payload(
     predictor_specs: list,
     fetch_market_universe_bundle,
 ) -> dict:
-    comparison = normalize_comparison_strategies(comparison)
     run_store = build_run_result_store(comparison)
     strategy_definitions = comparison.candidate_strategies + comparison.reference_strategies
     (
@@ -917,7 +873,6 @@ def build_strategy_runs_payload(
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
-    comparison = normalize_comparison_strategies(comparison)
     run_store = build_run_result_store(comparison)
     strategy_definitions = original_candidate_definitions + original_reference_definitions
     predictor_specs = collect_strategy_predictor_specs(strategy_definitions)
@@ -943,23 +898,21 @@ def build_strategy_runs_payload(
     )
     candidate_runs, candidate_run_store_summary = build_strategy_runs(
         comparison=comparison,
-        strategy_specs=comparison.candidate_strategies,
+        strategy_definitions=original_candidate_definitions,
         market_bundles_by_timeframe=market_bundles_by_timeframe,
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
         predictor_panels_by_key=predictor_panels_by_key,
-        strategy_definitions=original_candidate_definitions,
     )
     reference_runs, reference_run_store_summary = build_strategy_runs(
         comparison=comparison,
-        strategy_specs=comparison.reference_strategies,
+        strategy_definitions=original_reference_definitions,
         market_bundles_by_timeframe=market_bundles_by_timeframe,
         market_data_period=comparison.run_spec.market_slice.period,
         metadata_by_timeframe=metadata_by_timeframe,
         run_store=run_store,
         predictor_panels_by_key=predictor_panels_by_key,
-        strategy_definitions=original_reference_definitions,
     )
     required_fields = collect_required_market_fields(
         comparison,
@@ -1005,23 +958,21 @@ def build_strategy_runs_payload(
         )
         sanity_candidate_runs, sanity_candidate_run_store_summary = build_strategy_runs(
             comparison=comparison,
-            strategy_specs=comparison.candidate_strategies,
+            strategy_definitions=original_candidate_definitions,
             market_bundles_by_timeframe=sanity_bundles_by_timeframe,
             market_data_period=period,
             metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
             predictor_panels_by_key=sanity_predictor_panels_by_key,
-            strategy_definitions=original_candidate_definitions,
         )
         sanity_reference_runs, sanity_reference_run_store_summary = build_strategy_runs(
             comparison=comparison,
-            strategy_specs=comparison.reference_strategies,
+            strategy_definitions=original_reference_definitions,
             market_bundles_by_timeframe=sanity_bundles_by_timeframe,
             market_data_period=period,
             metadata_by_timeframe=sanity_metadata_by_timeframe,
             run_store=run_store,
             predictor_panels_by_key=sanity_predictor_panels_by_key,
-            strategy_definitions=original_reference_definitions,
         )
         total_cached_runs += (
             sanity_predictor_run_store_summary.cached_run_count
@@ -1098,7 +1049,6 @@ def build_condition_sweep_payload(
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
-    comparison = normalize_comparison_strategies(comparison)
     run_store = build_run_result_store(comparison)
     strategy_definitions = original_candidate_definitions + original_reference_definitions
     predictor_specs = collect_strategy_predictor_specs(original_candidate_definitions)
@@ -1147,7 +1097,6 @@ def build_ranking_evaluation_payload(
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
-    comparison = normalize_comparison_strategies(comparison)
     run_store = build_run_result_store(comparison)
     (
         market_bundles_by_timeframe,
@@ -1430,7 +1379,6 @@ def generate_parameter_sweep_runs_payload(
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
-    comparison = normalize_comparison_strategies(comparison)
     run_store = build_run_result_store(comparison)
     strategy_definitions = original_candidate_definitions + original_reference_definitions
     predictor_specs = collect_strategy_predictor_specs(strategy_definitions)
@@ -1950,37 +1898,33 @@ def compact_predictor_run_record(record: dict) -> dict:
 def build_strategy_runs(
     *,
     comparison: ComparisonSpec,
-    strategy_specs: list,
+    strategy_definitions: list[StrategyDefinition],
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
     metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
     predictor_panels_by_key: dict[str, object] | None = None,
-    strategy_definitions: list | None = None,
 ) -> tuple[list[dict], RunStoreSummary]:
     serialized_execution_assumptions = serialize_execution_assumptions(comparison)
-    effective_strategy_definitions = strategy_definitions or strategy_specs
-    predictor_specs = collect_strategy_predictor_specs(effective_strategy_definitions)
+    predictor_specs = collect_strategy_predictor_specs(strategy_definitions)
     required_fields = collect_required_market_fields(
         comparison,
         predictor_specs,
-        strategy_definitions=effective_strategy_definitions,
+        strategy_definitions=strategy_definitions,
     )
     runs: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
 
-    for strategy_spec, strategy_definition in zip(strategy_specs, effective_strategy_definitions, strict=True):
+    for strategy_definition in strategy_definitions:
         market_data_timeframe = resolve_strategy_market_data_timeframe(strategy_definition)
         timeframe_key = market_data_timeframe.key
         dataset_metadata = metadata_by_timeframe[timeframe_key]
-        serialized_strategy = serialize_strategy_spec(strategy_spec)
         serialized_strategy_definition = serialize_strategy_definition_payload(strategy_definition)
+        _selection_contexts, predictor_context = get_strategy_definition_signal_execution_contexts(strategy_definition)
         predictor_panel = None
-        if strategy_spec.predictor_use is not None:
-            predictor_key = strategy_spec.predictor_use.predictor_key
-            predictor_panel = None if predictor_panels_by_key is None else predictor_panels_by_key.get(predictor_key)
-        signal_execution_contexts = get_strategy_definition_signal_execution_contexts(strategy_definition)
+        if predictor_context is not None and predictor_panels_by_key is not None:
+            predictor_panel = predictor_panels_by_key.get(str(predictor_context["predictorKey"]))
         market_bundle = market_bundles_by_timeframe[timeframe_key]
         strategy_market_slice = {
             "period": market_data_period,
@@ -1989,7 +1933,6 @@ def build_strategy_runs(
         }
         run_spec = build_run_spec(
             run_kind="strategy_run",
-            strategy=serialized_strategy,
             market_slice=strategy_market_slice,
             evaluation=serialize_evaluation(
                 comparison,
@@ -2009,17 +1952,16 @@ def build_strategy_runs(
             runs.append(cached_run)
             continue
 
-        run = evaluate_strategy_run(
+        run = evaluate_strategy_definition_run(
             closes=market_bundle["closes"],
             volumes=market_bundle["volumes"],
-            strategy=strategy_spec,
+            strategy_definition=strategy_definition,
             bars_per_year=market_data_timeframe.bars_per_year,
             initial_capital=comparison.run_spec.capital_base,
             split_ratio=comparison.run_spec.evaluation.evaluation_settings.split_ratio,
             execution_assumptions=serialized_execution_assumptions,
             portfolio_state=comparison.run_spec.portfolio_state,
             predictor_panel=predictor_panel,
-            signal_execution_contexts=signal_execution_contexts,
         )
         run_store.save(run_spec, run)
         computed_run_count += 1
@@ -2029,7 +1971,6 @@ def build_strategy_runs(
         cached_run_count=cached_run_count,
         computed_run_count=computed_run_count,
     )
-
 
 def build_predictor_runs(
     *,
@@ -2126,7 +2067,7 @@ def build_condition_sweep_runs(
     market_data_period: str,
     metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
-    strategy_definitions: list | None = None,
+    strategy_definitions: list[StrategyDefinition] | None = None,
 ) -> tuple[list[dict], RunStoreSummary]:
     results: list[dict] = []
     cached_run_count = 0
@@ -2140,11 +2081,7 @@ def build_condition_sweep_runs(
         strategy_definitions=all_strategy_definitions,
     )
 
-    for strategy_spec, strategy_definition in zip(
-        comparison.candidate_strategies,
-        comparison_strategy_definitions,
-        strict=True,
-    ):
+    for strategy_definition in comparison_strategy_definitions:
         market_data_timeframe = resolve_strategy_market_data_timeframe(strategy_definition)
         timeframe_key = market_data_timeframe.key
         market_bundle = market_bundles_by_timeframe[timeframe_key]
@@ -2154,17 +2091,11 @@ def build_condition_sweep_runs(
                 max_investment_ratio=condition_variant.max_investment_ratio,
                 max_weight=condition_variant.max_weight,
             )
-            effective_strategy = replace(
-                strategy_spec,
-                risk_controls=effective_risk_controls,
-            )
             effective_strategy_definition = replace(
                 strategy_definition,
                 risk_controls=effective_risk_controls,
             )
-            effective_evaluation = replace(
-                comparison.run_spec.evaluation,
-            )
+            effective_evaluation = replace(comparison.run_spec.evaluation)
             effective_execution_assumptions = replace(
                 comparison.run_spec.execution_assumptions,
                 cost_model=replace(
@@ -2175,7 +2106,6 @@ def build_condition_sweep_runs(
                     },
                 ),
             )
-            serialized_strategy = serialize_strategy_spec(effective_strategy)
             serialized_strategy_definition = serialize_strategy_definition_payload(effective_strategy_definition)
             serialized_evaluation = serialize_evaluation(
                 comparison,
@@ -2197,7 +2127,6 @@ def build_condition_sweep_runs(
             serialized_condition_variant = serialize_condition_variant(condition_variant)
             run_spec = build_run_spec(
                 run_kind="condition_sweep",
-                strategy=serialized_strategy,
                 market_slice={
                     "period": market_data_period,
                     "timeframe": serialize_timeframe(market_data_timeframe),
@@ -2215,21 +2144,19 @@ def build_condition_sweep_runs(
                 results.append(cached_run)
                 continue
 
-            signal_execution_contexts = get_strategy_definition_signal_execution_contexts(effective_strategy_definition)
-            run = evaluate_strategy_run(
+            run = evaluate_strategy_definition_run(
                 closes=market_bundle["closes"],
                 volumes=market_bundle["volumes"],
-                strategy=effective_strategy,
+                strategy_definition=effective_strategy_definition,
                 bars_per_year=market_data_timeframe.bars_per_year,
                 initial_capital=comparison.run_spec.capital_base,
                 split_ratio=effective_evaluation.evaluation_settings.split_ratio,
                 execution_assumptions=serialized_execution_assumptions,
                 portfolio_state=comparison.run_spec.portfolio_state,
-                signal_execution_contexts=signal_execution_contexts,
             )
             compact_run = compact_condition_sweep_run(
                 run=run,
-                key=f"{strategy_spec.key}__{condition_variant.key}",
+                key=f"{strategy_definition.key}__{condition_variant.key}",
                 condition_variant=serialized_condition_variant,
             )
             run_store.save(run_spec, compact_run)
@@ -2249,7 +2176,6 @@ def build_condition_sweep_runs(
         computed_run_count=computed_run_count,
     )
 
-
 def build_ranking_evaluation_runs(
     *,
     comparison: ComparisonSpec,
@@ -2258,7 +2184,10 @@ def build_ranking_evaluation_runs(
     metadata_by_timeframe: dict[str, dict[str, str]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
-    ranking_specs = build_asset_ranking_specs(comparison.candidate_strategies)
+    ranking_specs = build_asset_ranking_specs([
+        build_executable_strategy_spec_from_definition(strategy_definition)
+        for strategy_definition in comparison.candidate_strategies
+    ])
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -2402,19 +2331,27 @@ def build_parameter_sweep_runs(
                         for strategy in comparison.candidate_strategies
                         if strategy.portfolio_model.model_type == "hierarchical_risk_parity"
                     )
+                    base_market_data_timeframe = resolve_strategy_market_data_timeframe(base_strategy)
                     effective_strategy = build_strategy_spec(
+                        timeframe=base_market_data_timeframe,
                         investment_universe=base_strategy.investment_universe,
                         selection=selection_spec,
                         portfolio_model=base_strategy.portfolio_model,
+                        execution_policy=build_execution_policy_spec(
+                            key=base_strategy.execution_plan.key,
+                            label=base_strategy.execution_plan.label,
+                            entry="train_once_then_periodic_rebalance",
+                            rebalance_schedule=base_strategy.execution_plan.rebalance_schedule,
+                        ),
                         risk_controls=build_risk_controls_spec(
                             max_investment_ratio=1.0,
                             max_weight=max_weight,
                         ),
+                        decision_schedule=base_strategy.execution_plan.decision_schedule,
                     )
                     effective_strategy_definition = build_strategy_definition_from_strategy_spec(
                         effective_strategy
                     )
-                    serialized_strategy = serialize_strategy_spec(effective_strategy)
                     serialized_strategy_definition = serialize_strategy_definition_payload(effective_strategy_definition)
                     market_data_timeframe = resolve_strategy_market_data_timeframe(
                         effective_strategy_definition
@@ -2431,7 +2368,6 @@ def build_parameter_sweep_runs(
                     )
                     run_spec = build_run_spec(
                         run_kind="portfolio_comparison",
-                        strategy=serialized_strategy,
                         market_slice={
                             "period": market_data_period,
                             "timeframe": serialize_timeframe(market_data_timeframe),
@@ -2450,19 +2386,15 @@ def build_parameter_sweep_runs(
                         results.append(cached_run)
                         continue
 
-                    signal_execution_contexts = get_strategy_definition_signal_execution_contexts(
-                        effective_strategy_definition
-                    )
-                    run = evaluate_strategy_run(
+                    run = evaluate_strategy_definition_run(
                         closes=market_bundle["closes"],
                         volumes=market_bundle["volumes"],
-                        strategy=effective_strategy,
+                        strategy_definition=effective_strategy_definition,
                         bars_per_year=market_data_timeframe.bars_per_year,
                         initial_capital=comparison.run_spec.capital_base,
                         split_ratio=base_evaluation.evaluation_settings.split_ratio,
                         execution_assumptions=serialize_execution_assumptions(comparison),
                         portfolio_state=comparison.run_spec.portfolio_state,
-                        signal_execution_contexts=signal_execution_contexts,
                     )
                     compact_run = compact_parameter_sweep_run(
                         run=run,
@@ -2472,7 +2404,7 @@ def build_parameter_sweep_runs(
                         macro_weight=macro_weight,
                         max_weight=max_weight,
                         window_spec=family_spec["windowSpec"],
-                        strategy=serialized_strategy,
+                        strategy=serialized_strategy_definition,
                     )
                     run_store.save(run_spec, compact_run)
                     computed_run_count += 1

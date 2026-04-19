@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.portfolio import build_risk_controls_spec, build_strategy_spec
+from app.portfolio import build_risk_controls_spec, build_strategy_definition_from_strategy_spec, build_strategy_spec
 from app.strategy_presets import (
     DEFAULT_INVESTMENT_UNIVERSE,
     EQUAL_WEIGHT,
@@ -9,7 +9,7 @@ from app.strategy_presets import (
 )
 
 
-REFERENCE_EQUAL_WEIGHT_WITH_CASH = build_strategy_spec(
+_REFERENCE_EQUAL_WEIGHT_WITH_CASH_SPEC = build_strategy_spec(
     strategy_id="ref-fu-eq-cash",
     investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
     selection=FULL_UNIVERSE,
@@ -21,6 +21,11 @@ REFERENCE_EQUAL_WEIGHT_WITH_CASH = build_strategy_spec(
     ),
     label="等金額買い持ち + CASH",
     description="全資産を等金額で買い持ちし、15% を CASH に残す参照用 Strategy",
+)
+
+
+REFERENCE_EQUAL_WEIGHT_WITH_CASH = build_strategy_definition_from_strategy_spec(
+    _REFERENCE_EQUAL_WEIGHT_WITH_CASH_SPEC
 )
 
 

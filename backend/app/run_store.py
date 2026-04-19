@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v57"
+RUN_STORE_LOGIC_VERSION = "v58"
 RUN_STORE_INDEX_FILENAME = "_index.json"
 
 
@@ -321,7 +321,7 @@ class FileRunResultStore:
 def build_compact_run_record(record: dict) -> dict:
     run_spec = record["runSpec"]
     result = record["result"]
-    strategy = run_spec.get("strategy", {})
+    strategy = run_spec.get("strategyDefinition") or run_spec.get("strategy", {})
     execution_assumptions = run_spec.get("executionAssumptions", {})
     market_slice = run_spec.get("marketSlice", {})
     evaluation = run_spec.get("evaluation", {})
@@ -343,7 +343,10 @@ def build_compact_run_record(record: dict) -> dict:
         "investmentUniverseLabel": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("label"),
         "investmentUniverseAssetCount": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("assetCount"),
         "portfolioModelLabel": strategy.get("components", {}).get("core", {}).get("portfolioModel", {}).get("label"),
-        "executionLabel": strategy.get("components", {}).get("core", {}).get("executionPolicy", {}).get("label"),
+        "executionLabel": (
+            strategy.get("components", {}).get("core", {}).get("executionPlan", {}).get("label")
+            or strategy.get("components", {}).get("core", {}).get("executionPolicy", {}).get("label")
+        ),
         "period": market_slice.get("period"),
         "timeframe": strategy.get("components", {}).get("core", {}).get("dataResolution", {}).get("key")
         or market_slice.get("timeframe", {}).get("key"),
@@ -437,7 +440,7 @@ def build_run_fingerprint(payload: object) -> str:
 
 def build_run_spec_fingerprints(
     *,
-    strategy: dict,
+    strategy: dict | None,
     strategy_definition: dict | None,
     market_slice: dict,
     evaluation: dict,
@@ -470,21 +473,22 @@ def build_run_spec_fingerprints(
 def build_run_spec(
     *,
     run_kind: str,
-    strategy: dict,
     market_slice: dict,
     evaluation: dict,
     execution_assumptions: dict,
     portfolio_state: dict,
     capital_base: float,
     generation: dict | None = None,
+    strategy: dict | None = None,
     strategy_definition: dict | None = None,
 ) -> dict:
+    if strategy is None and strategy_definition is None:
+        raise ValueError("run spec must include strategy or strategy_definition.")
     run_spec = {
         "kind": "run_spec",
         "schemaVersion": "v1",
         "logicVersion": RUN_STORE_LOGIC_VERSION,
         "runKind": run_kind,
-        "strategy": strategy,
         "marketSlice": market_slice,
         "portfolioState": portfolio_state,
         "capitalBase": capital_base,
@@ -501,6 +505,10 @@ def build_run_spec(
             generation=generation,
         ),
     }
+    if strategy_definition is not None:
+        run_spec["strategyDefinition"] = strategy_definition
+    if strategy is not None:
+        run_spec["strategy"] = strategy
     if generation is not None:
         run_spec["generation"] = generation
     return run_spec

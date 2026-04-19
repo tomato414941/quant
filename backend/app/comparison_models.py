@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.portfolio import PortfolioState, StrategyDefinition, StrategySpec
+from app.portfolio import PortfolioState, StrategyDefinition
 
 
 @dataclass
@@ -129,9 +129,6 @@ class ConditionVariant:
     max_weight: float | None = None
 
 
-ComparisonStrategyDefinition = StrategySpec | StrategyDefinition
-
-
 @dataclass
 class ComparisonSpec:
     comparison_id: str
@@ -139,7 +136,7 @@ class ComparisonSpec:
     question: str
     run_spec: RunSpec
     selection_policy: SelectionPolicy
-    candidate_strategies: list[ComparisonStrategyDefinition]
-    reference_strategies: list[ComparisonStrategyDefinition] = field(default_factory=list)
+    candidate_strategies: list[StrategyDefinition]
+    reference_strategies: list[StrategyDefinition] = field(default_factory=list)
     condition_variants: list[ConditionVariant] = field(default_factory=list)
     result_store_dir: str = "backend/data/run_results"

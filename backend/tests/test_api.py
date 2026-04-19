@@ -19,7 +19,7 @@ from app.portfolio import (
     build_executable_strategy_spec_from_definition,
 )
 from app.strategy_candidate_predictors import PREDICTOR_CANDIDATE_DEFINITIONS
-from app.timeframe_models import DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME, build_timeframe_spec
+from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME, build_timeframe_spec
 
 
 client = TestClient(app)
@@ -343,15 +343,11 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is True
     assert payload["comparison"]["candidateStrategies"][0]["components"]["optional"]["signals"][0]["sourceKind"] == "selection_signal"
     assert (
-        payload["candidateRuns"][5]["strategy"]["components"]["optional"]["assetRankingModel"][
-            "parameters"
-        ]["windowSpec"]["unit"]
+        payload["candidateRuns"][5]["strategy"]["components"]["optional"]["signals"][0]["signalParameters"]["scoreParameters"]["windowSpec"]["unit"]
         == "months"
     )
     assert (
-        payload["candidateRuns"][5]["strategy"]["components"]["optional"]["assetRankingModel"][
-            "parameters"
-        ]["windowSpec"]["value"]
+        payload["candidateRuns"][5]["strategy"]["components"]["optional"]["signals"][0]["signalParameters"]["scoreParameters"]["windowSpec"]["value"]
         == 12
     )
     assert any(
@@ -365,7 +361,7 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert len(payload["referenceRuns"]) == expected_reference_count
     assert len(payload["predictorRuns"]) == expected_predictor_count
     assert {
-        run["strategy"]["components"]["core"]["dataResolution"]["key"]
+        run["strategy"]["components"]["optional"]["signals"][0]["dataTimeframe"]["key"]
         for run in payload["candidateRuns"]
     } == {"1d", "1w", "1mo"}
     assert payload["candidateRuns"][0]["splitAnalysis"]["config"]["splitRatioPct"] == 70.0
@@ -440,7 +436,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["recordCount"] == min(10, expected_predictor_count * 2)
     assert index_payload["sortBy"] == "test_rank_ic"
     assert index_payload["records"][0]["runKind"] == "predictor_run"
-    assert index_payload["records"][0]["logicVersion"] == "v57"
+    assert index_payload["records"][0]["logicVersion"] == "v58"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
     assert index_payload["records"][0]["evaluationFingerprint"]
@@ -460,7 +456,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "predictor_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "predictor_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v57"
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v58"
     assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "marketData", "evaluation"}
 
     fingerprint_filtered_response = client.get(
@@ -578,28 +574,31 @@ def test_comparison_endpoint_supports_explicit_strategy_signal_context_without_e
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
     strategy = normalize_strategy_definition(config.candidate_strategies[0])
-    strategy = replace(
-        strategy,
-        timeframe=DEFAULT_WEEKLY_TIMEFRAME,
-        signal_execution_contexts=(
-            {
-                "signalKey": "selection_signal",
-                "signalLabel": strategy.label,
-                "description": strategy.description,
-                "sourceKind": "selection_signal",
-                "selectionKey": strategy.selection.key,
-                "strategyType": strategy.selection.strategy_type,
-                "scoreParameters": dict(strategy.selection.ranking_signal.score_parameters),
-                "dataTimeframe": "1d",
-                "signalTimeframe": "1w",
-                "alignmentPolicy": {"key": "weekly", "label": "Weekly", "method": "asof_last", "parameters": {}},
-                "weight": 1.0,
-            },
+    definition = build_strategy_definition_from_strategy_spec(strategy)
+    definition = replace(
+        definition,
+        signals=(
+            replace(
+                definition.signals[0],
+                data_timeframe=DEFAULT_DAILY_TIMEFRAME,
+                signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+                alignment_policy=build_alignment_policy_spec(
+                    key="weekly",
+                    label="Weekly",
+                    method="asof_last",
+                ),
+            ),
+            *definition.signals[1:],
         ),
-        decision_schedule="every_bar",
+        execution_plan=build_strategy_execution_plan_spec(
+            key=definition.execution_plan.key,
+            label=definition.execution_plan.label,
+            decision_schedule="every_bar",
+            rebalance_schedule=definition.execution_plan.rebalance_schedule,
+        ),
         extensions=(),
     )
-    config = replace(config, candidate_strategies=[strategy, *config.candidate_strategies[1:]])
+    config = replace(config, candidate_strategies=[definition, *config.candidate_strategies[1:]])
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     response = client.get("/api/comparison")
@@ -607,11 +606,11 @@ def test_comparison_endpoint_supports_explicit_strategy_signal_context_without_e
     assert response.status_code == 200
     payload = response.json()
     direct_run = payload["candidateRuns"][0]
-    assert direct_run["strategy"]["components"]["core"]["dataResolution"]["key"] == "1w"
-    assert direct_run["strategy"]["components"]["core"]["decisionSchedule"] == "every_bar"
-    selection_contexts = direct_run["strategy"]["components"]["optional"]["signalExecutionContexts"]["selectionSignals"]
-    assert selection_contexts[0]["dataTimeframe"] == "1d"
-    assert selection_contexts[0]["signalTimeframe"] == "1w"
+    assert direct_run["strategy"]["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"
+    assert direct_run["strategy"]["components"]["core"]["executionPlan"]["decisionSchedule"] == "every_bar"
+    signal = direct_run["strategy"]["components"]["optional"]["signals"][0]
+    assert signal["dataTimeframe"]["key"] == "1d"
+    assert signal["signalTimeframe"]["key"] == "1w"
     market_contexts = payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
     assert any(context["timeframe"]["key"] == "1d" for context in market_contexts)
 
@@ -658,12 +657,11 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
     assert direct_signal_contexts[0]["dataTimeframe"]["key"] == "1d"
     assert direct_signal_contexts[0]["signalTimeframe"]["key"] == "1w"
     strategy_payload = payload["candidateRuns"][0]["strategy"]
-    assert strategy_payload["components"]["core"]["dataResolution"]["key"] == "1w"
-    assert strategy_payload["components"]["core"]["executionMode"] == "direct_signal_timeframe"
-    assert strategy_payload["components"]["core"]["decisionSchedule"] == "every_bar"
-    assert strategy_payload["components"]["core"]["executionPolicy"]["rebalanceSchedule"] == "month_end"
-    assert strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][0]["dataTimeframe"] == "1d"
-    assert strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][0]["signalTimeframe"] == "1w"
+    assert strategy_payload["kind"] == "strategy_definition"
+    assert strategy_payload["components"]["core"]["executionPlan"]["decisionSchedule"] == "every_bar"
+    assert strategy_payload["components"]["core"]["executionPlan"]["rebalanceSchedule"] == "month_end"
+    assert strategy_payload["components"]["optional"]["signals"][0]["dataTimeframe"]["key"] == "1d"
+    assert strategy_payload["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"
 
 
 def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_execution(monkeypatch, tmp_path) -> None:
@@ -768,9 +766,9 @@ def test_comparison_endpoint_accepts_direct_execution_multi_selection_definition
     payload = response.json()
     strategy_payload = payload["candidateRuns"][0]["strategy"]
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
-    selection_contexts = strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"]
-    assert selection_contexts[1]["selectionKey"] == "secondary_momo6"
-    assert selection_contexts[1]["signalTimeframe"] == "1w"
+    selection_signals = strategy_payload["components"]["optional"]["signals"]
+    assert selection_signals[1]["signalParameters"]["selectionKey"] == "secondary_momo6"
+    assert selection_signals[1]["signalTimeframe"]["key"] == "1w"
 
 
 def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_direct_execution_multi_selection_candidates(monkeypatch, tmp_path) -> None:
@@ -837,9 +835,9 @@ def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_dir
 
     assert response.status_code == 200
     payload = response.json()
-    selection_contexts = payload["candidateRuns"][0]["strategy"]["components"]["optional"]["signalExecutionContexts"]["selectionSignals"]
-    assert selection_contexts[0]["alignmentPolicy"]["method"] == "asof_last"
-    assert selection_contexts[1]["alignmentPolicy"]["method"] == "end_of_period"
+    signals = payload["candidateRuns"][0]["strategy"]["components"]["optional"]["signals"]
+    assert signals[0]["alignmentPolicy"]["method"] == "asof_last"
+    assert signals[1]["alignmentPolicy"]["method"] == "end_of_period"
 
 
 def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_direct_execution_candidates(monkeypatch, tmp_path) -> None:
@@ -878,8 +876,8 @@ def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_dire
 
     assert response.status_code == 200
     payload = response.json()
-    predictor_context = payload["candidateRuns"][0]["strategy"]["components"]["optional"]["signalExecutionContexts"]["predictorSignal"]
-    assert predictor_context["alignmentPolicy"]["method"] == "calendar_resample"
+    predictor_signal = payload["candidateRuns"][0]["strategy"]["components"]["optional"]["signals"][1]
+    assert predictor_signal["alignmentPolicy"]["method"] == "calendar_resample"
 
 
 def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candidates_with_multi_selection(monkeypatch, tmp_path) -> None:
@@ -931,8 +929,9 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candi
     assert response.status_code == 200
     payload = response.json()
     strategy_payload = payload["candidateRuns"][0]["strategy"]
-    assert strategy_payload["components"]["optional"]["predictor"]["predictorKey"] == predictor_definition.signals[1].predictor_key
-    assert strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][1]["selectionKey"] == "secondary_momo6"
+    signals = strategy_payload["components"]["optional"]["signals"]
+    assert signals[2]["predictorKey"] == predictor_definition.signals[1].predictor_key
+    assert signals[1]["signalParameters"]["selectionKey"] == "secondary_momo6"
 
 
 def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candidates(monkeypatch, tmp_path) -> None:
@@ -966,11 +965,11 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candi
     strategy_payload = payload["candidateRuns"][0]["strategy"]
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is False
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
-    assert strategy_payload["components"]["core"]["executionMode"] == "direct_signal_timeframe"
-    assert strategy_payload["components"]["core"]["dataResolution"]["key"] == "1w"
-    assert strategy_payload["components"]["optional"]["predictor"]["predictorKey"] == predictor_definition.signals[1].predictor_key
-    assert strategy_payload["components"]["core"]["decisionSchedule"] == "every_bar"
-    assert strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][0]["dataTimeframe"] == "1d"
+    assert strategy_payload["kind"] == "strategy_definition"
+    assert strategy_payload["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"
+    assert strategy_payload["components"]["optional"]["signals"][1]["predictorKey"] == predictor_definition.signals[1].predictor_key
+    assert strategy_payload["components"]["core"]["executionPlan"]["decisionSchedule"] == "every_bar"
+    assert strategy_payload["components"]["optional"]["signals"][0]["dataTimeframe"]["key"] == "1d"
 
 
 def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_path) -> None:
@@ -1047,7 +1046,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["totalCount"] == (expected_strategy_count + expected_reference_count) * 2
     assert index_payload["recordCount"] == 10
     assert index_payload["records"][0]["runKind"] == "strategy_run"
-    assert index_payload["records"][0]["logicVersion"] == "v57"
+    assert index_payload["records"][0]["logicVersion"] == "v58"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
     assert index_payload["records"][0]["evaluationFingerprint"]
@@ -1059,7 +1058,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "strategy_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "strategy_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v57"
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v58"
     assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "marketData", "evaluation"}
 
     fingerprint_filtered_response = client.get(
@@ -1107,19 +1106,23 @@ def test_comparison_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp
         recording_fetch_market_universe_bundle,
     )
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
-    weekly_strategy = replace(
-        normalize_strategy_definition(config.candidate_strategies[0]),
+    weekly_timeframe = build_timeframe_spec(
+        key="1w",
+        label="週次",
+        yfinance_interval="1wk",
+        bar_seconds=604_800,
+        bars_per_year=52,
+    )
+    weekly_definition = replace(
+        config.candidate_strategies[0],
         strategy_id="stg-fu-eq-weekly",
         label="全資産 × 等金額配分 × 週次データ",
-        timeframe=build_timeframe_spec(
-            key="1w",
-            label="週次",
-            yfinance_interval="1wk",
-            bar_seconds=604_800,
-            bars_per_year=52,
+        signals=tuple(
+            replace(signal, data_timeframe=weekly_timeframe, signal_timeframe=weekly_timeframe)
+            for signal in config.candidate_strategies[0].signals
         ),
     )
-    config.candidate_strategies = [config.candidate_strategies[0], weekly_strategy]
+    config.candidate_strategies = [config.candidate_strategies[0], weekly_definition]
     config.reference_strategies = []
     config.result_store_dir = str(tmp_path / "run_results")
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
@@ -1142,7 +1145,7 @@ def test_comparison_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp
         "1d",
         "1w",
     ]
-    assert {run["strategy"]["components"]["core"]["dataResolution"]["key"] for run in payload["candidateRuns"]} == {
+    assert {run["strategy"]["components"]["optional"]["signals"][0]["dataTimeframe"]["key"] for run in payload["candidateRuns"]} == {
         "1d",
         "1w",
     }
@@ -1305,7 +1308,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["limit"] == 5
     assert payload["runKind"] == "strategy_run"
     assert payload["recordCount"] == 5
-    assert payload["records"][0]["logicVersion"] == "v57"
+    assert payload["records"][0]["logicVersion"] == "v58"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]
     assert payload["records"][0]["evaluationFingerprint"]

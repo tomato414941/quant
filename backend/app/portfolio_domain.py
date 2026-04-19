@@ -970,7 +970,10 @@ def serialize_strategy_signal_spec(signal: StrategySignalSpec) -> dict:
         "sourceKind": signal.source_kind,
         "weight": signal.weight,
         "predictorKey": signal.predictor_key,
-        "signalParameters": {key: value for key, value in signal.signal_parameters},
+        "signalParameters": {
+            key: thaw_strategy_parameter_value(value)
+            for key, value in signal.signal_parameters
+        },
         "observationSpec": serialize_observation_spec(signal.observation_spec),
         "dataSource": None if signal.data_source_spec is None else {
             "key": signal.data_source_spec.key,

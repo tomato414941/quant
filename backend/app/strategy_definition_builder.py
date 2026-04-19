@@ -10,19 +10,19 @@ from app.portfolio import (
     RiskControlsSpec,
     SelectionSpec,
     StrategyDataSourceSpec,
-    StrategyBlueprintSpec,
+    StrategyDefinition,
     StrategyFeatureDefinitionSpec,
     build_observation_spec,
-    build_strategy_blueprint_spec,
+    build_strategy_definition,
     build_strategy_execution_plan_spec,
     build_strategy_signal_spec,
-    build_strategy_spec_from_blueprint,
+    build_strategy_spec_from_definition,
 )
 from app.timeframe_models import TimeframeSpec
 
 
 @dataclass(frozen=True)
-class SelectionBlueprintDefinition:
+class SelectionDefinitionDefinition:
     strategy_id: str
     selection: SelectionSpec
     portfolio_model: PortfolioModelSpec
@@ -41,7 +41,7 @@ class SelectionBlueprintDefinition:
 
 
 @dataclass(frozen=True)
-class PredictorBlueprintDefinition:
+class PredictorDefinitionDefinition:
     strategy_id: str
     selection: SelectionSpec
     portfolio_model: PortfolioModelSpec
@@ -121,9 +121,9 @@ def build_selection_signal_parameters(selection: SelectionSpec) -> dict[str, obj
     }
 
 
-def build_selection_strategy_blueprint(
-    definition: SelectionBlueprintDefinition,
-) -> StrategyBlueprintSpec:
+def build_selection_strategy_definition(
+    definition: SelectionDefinitionDefinition,
+) -> StrategyDefinition:
     selection = definition.selection
     selection_signal = build_strategy_signal_spec(
         key=f"signal__{definition.strategy_id}__selection",
@@ -143,7 +143,7 @@ def build_selection_strategy_blueprint(
         alignment_policy=definition.alignment_policy,
         signal_parameters=build_selection_signal_parameters(selection),
     )
-    return build_strategy_blueprint_spec(
+    return build_strategy_definition(
         strategy_id=definition.strategy_id,
         label=definition.label,
         hypothesis=definition.hypothesis,
@@ -163,9 +163,9 @@ def build_selection_strategy_blueprint(
     )
 
 
-def build_predictor_strategy_blueprint(
-    definition: PredictorBlueprintDefinition,
-) -> StrategyBlueprintSpec:
+def build_predictor_strategy_definition(
+    definition: PredictorDefinitionDefinition,
+) -> StrategyDefinition:
     selection = definition.selection
     selection_signal = build_strategy_signal_spec(
         key=f"signal__{definition.strategy_id}__selection",
@@ -218,7 +218,7 @@ def build_predictor_strategy_blueprint(
         },
         predictor_key=definition.predictor_key,
     )
-    return build_strategy_blueprint_spec(
+    return build_strategy_definition(
         strategy_id=definition.strategy_id,
         label=definition.label,
         hypothesis=definition.hypothesis,
@@ -238,25 +238,25 @@ def build_predictor_strategy_blueprint(
     )
 
 
-def build_selection_strategy_blueprints(
-    definitions: list[SelectionBlueprintDefinition] | tuple[SelectionBlueprintDefinition, ...],
-) -> list[StrategyBlueprintSpec]:
-    return [build_selection_strategy_blueprint(definition) for definition in definitions]
+def build_selection_strategy_definitions(
+    definitions: list[SelectionDefinitionDefinition] | tuple[SelectionDefinitionDefinition, ...],
+) -> list[StrategyDefinition]:
+    return [build_selection_strategy_definition(definition) for definition in definitions]
 
 
-def build_predictor_strategy_blueprints(
-    definitions: list[PredictorBlueprintDefinition] | tuple[PredictorBlueprintDefinition, ...],
-) -> list[StrategyBlueprintSpec]:
-    return [build_predictor_strategy_blueprint(definition) for definition in definitions]
+def build_predictor_strategy_definitions(
+    definitions: list[PredictorDefinitionDefinition] | tuple[PredictorDefinitionDefinition, ...],
+) -> list[StrategyDefinition]:
+    return [build_predictor_strategy_definition(definition) for definition in definitions]
 
 
-def build_strategy_specs_from_blueprints(
-    blueprints: list[StrategyBlueprintSpec] | tuple[StrategyBlueprintSpec, ...],
+def build_strategy_specs_from_definitions(
+    definitions: list[StrategyDefinition] | tuple[StrategyDefinition, ...],
 ):
-    return [build_strategy_spec_from_blueprint(strategy_blueprint) for strategy_blueprint in blueprints]
+    return [build_strategy_spec_from_definition(strategy_definition) for strategy_definition in definitions]
 
 
-def build_selection_strategy_blueprint_product(
+def build_selection_strategy_definition_product(
     *,
     strategy_id_pattern: str,
     selection_variants: list[SelectionVariantDefinition] | tuple[SelectionVariantDefinition, ...],
@@ -264,14 +264,14 @@ def build_selection_strategy_blueprint_product(
     execution_variants: list[ExecutionVariantDefinition] | tuple[ExecutionVariantDefinition, ...],
     investment_universe: InvestmentUniverseSpec,
     risk_controls: RiskControlsSpec,
-) -> list[StrategyBlueprintSpec]:
-    blueprints: list[StrategyBlueprintSpec] = []
+) -> list[StrategyDefinition]:
+    definitions: list[StrategyDefinition] = []
     for selection_variant in selection_variants:
         for portfolio_model_variant in portfolio_model_variants:
             for execution_variant in execution_variants:
-                blueprints.append(
-                    build_selection_strategy_blueprint(
-                        SelectionBlueprintDefinition(
+                definitions.append(
+                    build_selection_strategy_definition(
+                        SelectionDefinitionDefinition(
                             strategy_id=strategy_id_pattern.format(
                                 selection=selection_variant.key,
                                 portfolio_model=portfolio_model_variant.key,
@@ -301,11 +301,11 @@ def build_selection_strategy_blueprint_product(
                         )
                     )
                 )
-    return blueprints
+    return definitions
 
 
 
-def build_predictor_strategy_blueprint_product(
+def build_predictor_strategy_definition_product(
     *,
     strategy_id_pattern: str,
     selection_variants: list[SelectionVariantDefinition] | tuple[SelectionVariantDefinition, ...],
@@ -314,15 +314,15 @@ def build_predictor_strategy_blueprint_product(
     execution_variants: list[ExecutionVariantDefinition] | tuple[ExecutionVariantDefinition, ...],
     investment_universe: InvestmentUniverseSpec,
     risk_controls: RiskControlsSpec,
-) -> list[StrategyBlueprintSpec]:
-    blueprints: list[StrategyBlueprintSpec] = []
+) -> list[StrategyDefinition]:
+    definitions: list[StrategyDefinition] = []
     for selection_variant in selection_variants:
         for predictor_variant in predictor_variants:
             for portfolio_model_variant in portfolio_model_variants:
                 for execution_variant in execution_variants:
-                    blueprints.append(
-                        build_predictor_strategy_blueprint(
-                            PredictorBlueprintDefinition(
+                    definitions.append(
+                        build_predictor_strategy_definition(
+                            PredictorDefinitionDefinition(
                                 strategy_id=strategy_id_pattern.format(
                                     selection=selection_variant.key,
                                     predictor=predictor_variant.key,
@@ -361,4 +361,4 @@ def build_predictor_strategy_blueprint_product(
                             )
                         )
                     )
-    return blueprints
+    return definitions

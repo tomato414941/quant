@@ -269,7 +269,7 @@ class StrategySpec:
 
 
 @dataclass(frozen=True)
-class StrategyBlueprintSpec:
+class StrategyDefinition:
     strategy_id: str
     version: str
     label: str
@@ -1007,7 +1007,7 @@ def serialize_strategy_signal_spec(signal: StrategySignalSpec) -> dict:
     }
 
 
-def build_strategy_blueprint_spec(
+def build_strategy_definition(
     *,
     investment_universe: InvestmentUniverseSpec,
     signals: list[StrategySignalSpec] | tuple[StrategySignalSpec, ...],
@@ -1021,13 +1021,13 @@ def build_strategy_blueprint_spec(
     key: str | None = None,
     label: str | None = None,
     description: str | None = None,
-) -> StrategyBlueprintSpec:
+) -> StrategyDefinition:
     resolved_strategy_id = strategy_id or key or portfolio_model.key
     if strategy_id is not None and key is not None and strategy_id != key:
         raise ValueError("strategy_id and key must match when both are provided.")
     resolved_signals = tuple(signals)
     if len(resolved_signals) < 1:
-        raise ValueError("Strategy blueprint must contain at least one signal.")
+        raise ValueError("Strategy definition must contain at least one signal.")
     universe_tickers = set(investment_universe.tickers)
     for signal in resolved_signals:
         unknown_tickers = set(signal.observation_spec.tickers) - universe_tickers
@@ -1035,7 +1035,7 @@ def build_strategy_blueprint_spec(
             raise ValueError("Strategy signal observation tickers must be contained in the investment universe.")
     strategy_label = label or " + ".join(signal.label for signal in resolved_signals)
     strategy_description = description or " / ".join(signal.description for signal in resolved_signals)
-    return StrategyBlueprintSpec(
+    return StrategyDefinition(
         strategy_id=resolved_strategy_id,
         version=version,
         label=strategy_label,
@@ -1050,11 +1050,11 @@ def build_strategy_blueprint_spec(
     )
 
 
-def serialize_strategy_blueprint_spec(strategy: StrategyBlueprintSpec) -> dict:
-    compatibility_issues = get_legacy_strategy_blueprint_compatibility_issues(strategy)
-    direct_execution_issues = get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+def serialize_strategy_definition(strategy: StrategyDefinition) -> dict:
+    compatibility_issues = get_legacy_strategy_definition_compatibility_issues(strategy)
+    direct_execution_issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
     return {
-        "kind": "strategy_blueprint_spec",
+        "kind": "strategy_definition",
         "schemaVersion": "v1",
         "strategyId": strategy.strategy_id,
         "version": strategy.version,
@@ -1113,7 +1113,7 @@ def build_alignment_policy_spec_from_payload(
     )
 
 
-def build_strategy_blueprint_from_strategy_spec(strategy: StrategySpec) -> StrategyBlueprintSpec:
+def build_strategy_definition_from_strategy_spec(strategy: StrategySpec) -> StrategyDefinition:
     selection_contexts = [dict(context) for context in strategy.signal_execution_contexts]
     predictor_context = (
         None
@@ -1232,7 +1232,7 @@ def build_strategy_blueprint_from_strategy_spec(strategy: StrategySpec) -> Strat
                 ) or (None if strategy.predictor_use is None else strategy.predictor_use.predictor_key),
             )
         )
-    return build_strategy_blueprint_spec(
+    return build_strategy_definition(
         strategy_id=strategy.strategy_id,
         version=strategy.version,
         hypothesis=strategy.hypothesis,
@@ -1265,8 +1265,8 @@ def serialize_alignment_policy_spec(
     }
 
 
-def build_strategy_signal_execution_contexts_from_blueprint(
-    strategy: StrategyBlueprintSpec,
+def build_strategy_signal_execution_contexts_from_definition(
+    strategy: StrategyDefinition,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None]:
     selection_contexts: list[dict[str, object]] = []
     predictor_context: dict[str, object] | None = None
@@ -1323,8 +1323,8 @@ def thaw_strategy_parameter_value(value: object) -> object:
     return value
 
 
-def get_legacy_strategy_blueprint_compatibility_issues(
-    strategy: StrategyBlueprintSpec,
+def get_legacy_strategy_definition_compatibility_issues(
+    strategy: StrategyDefinition,
 ) -> list[str]:
     issues: list[str] = []
     selection_signals = [
@@ -1366,15 +1366,15 @@ def get_legacy_strategy_blueprint_compatibility_issues(
 
 
 
-def is_legacy_compatible_strategy_blueprint(
-    strategy: StrategyBlueprintSpec,
+def is_legacy_compatible_strategy_definition(
+    strategy: StrategyDefinition,
 ) -> bool:
-    return not get_legacy_strategy_blueprint_compatibility_issues(strategy)
+    return not get_legacy_strategy_definition_compatibility_issues(strategy)
 
 
 
-def get_direct_execution_strategy_blueprint_compatibility_issues(
-    strategy: StrategyBlueprintSpec,
+def get_direct_execution_strategy_definition_compatibility_issues(
+    strategy: StrategyDefinition,
 ) -> list[str]:
     issues: list[str] = []
     selection_signals = [
@@ -1448,16 +1448,16 @@ def get_direct_execution_strategy_blueprint_compatibility_issues(
     return issues
 
 
-def is_direct_execution_compatible_strategy_blueprint(
-    strategy: StrategyBlueprintSpec,
+def is_direct_execution_compatible_strategy_definition(
+    strategy: StrategyDefinition,
 ) -> bool:
-    return not get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+    return not get_direct_execution_strategy_definition_compatibility_issues(strategy)
 
 
-def build_direct_execution_strategy_spec_from_blueprint(
-    strategy: StrategyBlueprintSpec,
+def build_direct_execution_strategy_spec_from_definition(
+    strategy: StrategyDefinition,
 ) -> StrategySpec:
-    issues = get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+    issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
     if issues:
         raise ValueError(
             "Direct execution incompatibilities: " + "; ".join(issues)
@@ -1465,7 +1465,7 @@ def build_direct_execution_strategy_spec_from_blueprint(
 
     selection_signals = [signal for signal in strategy.signals if signal.source_kind == "selection_signal"]
     selection_signal = selection_signals[0]
-    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_blueprint(strategy)
+    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_definition(strategy)
     primary_selection_context = selection_contexts[0]
     strategy_type = str(primary_selection_context["strategyType"])
     score_parameters = primary_selection_context["scoreParameters"]
@@ -1510,17 +1510,17 @@ def build_direct_execution_strategy_spec_from_blueprint(
     )
 
 
-def build_executable_strategy_spec_from_blueprint(strategy: StrategyBlueprintSpec) -> StrategySpec:
-    legacy_issues = get_legacy_strategy_blueprint_compatibility_issues(strategy)
+def build_executable_strategy_spec_from_definition(strategy: StrategyDefinition) -> StrategySpec:
+    legacy_issues = get_legacy_strategy_definition_compatibility_issues(strategy)
     if not legacy_issues:
-        return build_strategy_spec_from_blueprint(strategy)
+        return build_strategy_spec_from_definition(strategy)
 
-    direct_execution_issues = get_direct_execution_strategy_blueprint_compatibility_issues(strategy)
+    direct_execution_issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
     if not direct_execution_issues:
-        return build_direct_execution_strategy_spec_from_blueprint(strategy)
+        return build_direct_execution_strategy_spec_from_definition(strategy)
 
     raise ValueError(
-        "Strategy blueprint is not executable: "
+        "Strategy definition is not executable: "
         + "legacy adapter incompatibilities: "
         + "; ".join(legacy_issues)
         + " | direct execution incompatibilities: "
@@ -1528,14 +1528,14 @@ def build_executable_strategy_spec_from_blueprint(strategy: StrategyBlueprintSpe
     )
 
 
-def build_strategy_spec_from_blueprint(strategy: StrategyBlueprintSpec) -> StrategySpec:
-    issues = get_legacy_strategy_blueprint_compatibility_issues(strategy)
+def build_strategy_spec_from_definition(strategy: StrategyDefinition) -> StrategySpec:
+    issues = get_legacy_strategy_definition_compatibility_issues(strategy)
     if issues:
         raise ValueError(
             "Legacy strategy adapter incompatibilities: " + "; ".join(issues)
         )
 
-    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_blueprint(strategy)
+    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_definition(strategy)
     selection_signals = [signal for signal in strategy.signals if signal.source_kind == "selection_signal"]
     predictor_signals = [signal for signal in strategy.signals if signal.source_kind == "predictor_overlay"]
     selection_signal = selection_signals[0]

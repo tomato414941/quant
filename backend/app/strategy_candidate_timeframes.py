@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from app.strategy_blueprint_builder import (
+from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
-    SelectionBlueprintDefinition,
+    SelectionDefinitionDefinition,
     SelectionVariantDefinition,
-    build_selection_strategy_blueprint_product,
-    build_selection_strategy_blueprints,
+    build_selection_strategy_definition_product,
+    build_selection_strategy_definitions,
 )
 from app.strategy_presets import (
     DEFAULT_DAILY_TIMEFRAME,
@@ -22,8 +22,8 @@ from app.strategy_presets import (
 )
 
 
-TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS = [
-    *build_selection_strategy_blueprint_product(
+TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS = [
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="stg-fu-momo9-top035-hrp-{execution}",
         selection_variants=[
             SelectionVariantDefinition(key="momo9", selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_9M),
@@ -52,8 +52,8 @@ TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *build_selection_strategy_blueprints([
-        SelectionBlueprintDefinition(
+    *build_selection_strategy_definitions([
+        SelectionDefinitionDefinition(
             strategy_id="stg-fu-momo2-top035-hrp-month",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=HIERARCHICAL_RISK_PARITY,
@@ -71,5 +71,5 @@ TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS = [
 
 
 __all__ = [
-    "TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS",
+    "TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS",
 ]

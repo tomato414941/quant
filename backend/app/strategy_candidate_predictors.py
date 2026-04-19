@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from app.strategy_blueprint_builder import (
+from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
     PredictorVariantDefinition,
     SelectionVariantDefinition,
-    build_predictor_strategy_blueprint_product,
+    build_predictor_strategy_definition_product,
 )
 from app.strategy_presets import (
     DEFAULT_DAILY_TIMEFRAME,
@@ -18,8 +18,8 @@ from app.strategy_presets import (
 )
 
 
-PREDICTOR_CANDIDATE_BLUEPRINTS = [
-    *build_predictor_strategy_blueprint_product(
+PREDICTOR_CANDIDATE_DEFINITIONS = [
+    *build_predictor_strategy_definition_product(
         strategy_id_pattern="stg-fu-{selection}-{predictor}-{portfolio_model}-{execution}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -54,7 +54,7 @@ PREDICTOR_CANDIDATE_BLUEPRINTS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *build_predictor_strategy_blueprint_product(
+    *build_predictor_strategy_definition_product(
         strategy_id_pattern="stg-fu-{selection}-{predictor}-{portfolio_model}-{execution}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -102,5 +102,5 @@ PREDICTOR_CANDIDATE_BLUEPRINTS = [
 
 
 __all__ = [
-    "PREDICTOR_CANDIDATE_BLUEPRINTS",
+    "PREDICTOR_CANDIDATE_DEFINITIONS",
 ]

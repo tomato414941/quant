@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from app.strategy_blueprint_builder import (
+from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
     SelectionVariantDefinition,
-    build_selection_strategy_blueprint_product,
+    build_selection_strategy_definition_product,
 )
 from app.strategy_presets import (
     DEFAULT_ANNUAL_EXECUTION_POLICY,
@@ -36,8 +36,8 @@ from app.strategy_presets import (
 )
 
 
-FULL_UNIVERSE_CANDIDATE_BLUEPRINTS = [
-    *build_selection_strategy_blueprint_product(
+FULL_UNIVERSE_CANDIDATE_DEFINITIONS = [
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="stg-fu-{portfolio_model}",
         selection_variants=[
             SelectionVariantDefinition(key="fu", selection=FULL_UNIVERSE),
@@ -58,7 +58,7 @@ FULL_UNIVERSE_CANDIDATE_BLUEPRINTS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *build_selection_strategy_blueprint_product(
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="stg-fu-{selection}-hrp",
         selection_variants=[
             SelectionVariantDefinition(
@@ -120,7 +120,7 @@ FULL_UNIVERSE_CANDIDATE_BLUEPRINTS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *build_selection_strategy_blueprint_product(
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="{selection}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -161,7 +161,7 @@ FULL_UNIVERSE_CANDIDATE_BLUEPRINTS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *build_selection_strategy_blueprint_product(
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="stg-fu-momo12-top035-{portfolio_model}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -188,5 +188,5 @@ FULL_UNIVERSE_CANDIDATE_BLUEPRINTS = [
 
 
 __all__ = [
-    "FULL_UNIVERSE_CANDIDATE_BLUEPRINTS",
+    "FULL_UNIVERSE_CANDIDATE_DEFINITIONS",
 ]

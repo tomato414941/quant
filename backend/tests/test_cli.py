@@ -194,8 +194,8 @@ def test_comparison_run_spec_command_json(monkeypatch, tmp_path, capsys) -> None
     assert payload["selectionPolicy"]["primaryMetric"] == config.selection_policy.primary_metric
     assert len(payload["candidateStrategies"]) == len(config.candidate_strategies)
     assert len(payload["referenceStrategies"]) == len(config.reference_strategies)
-    assert payload["candidateStrategies"][0]["kind"] == "strategy_blueprint_spec"
-    assert payload["referenceStrategies"][0]["kind"] == "strategy_blueprint_spec"
+    assert payload["candidateStrategies"][0]["kind"] == "strategy_definition"
+    assert payload["referenceStrategies"][0]["kind"] == "strategy_definition"
 
 
 def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> None:

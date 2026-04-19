@@ -105,8 +105,8 @@ def extract_predictor_signal_payload(strategy: StrategySpec) -> dict[str, object
 def get_strategy_definition_signal_execution_contexts(
     strategy_definition,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None]:
-    if isinstance(strategy_definition, StrategyBlueprintSpec):
-        return build_strategy_signal_execution_contexts_from_blueprint(strategy_definition)
+    if isinstance(strategy_definition, StrategyDefinition):
+        return build_strategy_signal_execution_contexts_from_definition(strategy_definition)
 
     if strategy_definition.signal_execution_contexts or strategy_definition.predictor_signal_execution_context is not None:
         return (

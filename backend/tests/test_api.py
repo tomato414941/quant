@@ -9,16 +9,16 @@ from app import main as main_module
 from app.comparison_models import ConditionVariant
 from app.main import app
 from app.portfolio import (
-    StrategyBlueprintSpec,
+    StrategyDefinition,
     build_alignment_policy_spec,
     build_asset_ranking_specs,
-    build_strategy_blueprint_from_strategy_spec,
+    build_strategy_definition_from_strategy_spec,
     build_strategy_execution_plan_spec,
     build_strategy_signal_spec,
-    build_strategy_spec_from_blueprint,
-    build_executable_strategy_spec_from_blueprint,
+    build_strategy_spec_from_definition,
+    build_executable_strategy_spec_from_definition,
 )
-from app.strategy_candidate_predictors import PREDICTOR_CANDIDATE_BLUEPRINTS
+from app.strategy_candidate_predictors import PREDICTOR_CANDIDATE_DEFINITIONS
 from app.timeframe_models import DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME, build_timeframe_spec
 
 
@@ -26,8 +26,8 @@ client = TestClient(app)
 
 
 def normalize_strategy_definition(strategy):
-    if isinstance(strategy, StrategyBlueprintSpec):
-        return build_executable_strategy_spec_from_blueprint(strategy)
+    if isinstance(strategy, StrategyDefinition):
+        return build_executable_strategy_spec_from_definition(strategy)
     return strategy
 
 
@@ -227,8 +227,8 @@ def test_comparison_run_spec_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["referenceStrategyCount"] == len(config.reference_strategies)
     assert len(payload["candidateStrategies"]) == len(config.candidate_strategies)
     assert len(payload["referenceStrategies"]) == len(config.reference_strategies)
-    assert payload["candidateStrategies"][0]["kind"] == "strategy_blueprint_spec"
-    assert payload["referenceStrategies"][0]["kind"] == "strategy_blueprint_spec"
+    assert payload["candidateStrategies"][0]["kind"] == "strategy_definition"
+    assert payload["referenceStrategies"][0]["kind"] == "strategy_definition"
     assert payload["conditionVariants"][0]["key"]
 
 
@@ -333,7 +333,7 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["runSpec"]["portfolioState"]["weights"][0]["weightPct"] == 15.0
     assert len(payload["comparison"]["candidateStrategies"]) == expected_strategy_count
     assert len(payload["comparison"]["referenceStrategies"]) == expected_reference_count
-    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_blueprint_spec"
+    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
     assert payload["comparison"]["candidateStrategies"][0]["schemaVersion"] == "v1"
     assert payload["comparison"]["candidateStrategies"][0]["components"]["core"]["investmentUniverse"]["label"]
     assert (
@@ -540,15 +540,15 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 
-def test_comparison_endpoint_accepts_blueprint_candidates(monkeypatch, tmp_path) -> None:
+def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
     first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    blueprint = build_strategy_blueprint_from_strategy_spec(first_candidate)
+    definition = build_strategy_definition_from_strategy_spec(first_candidate)
     config = replace(
         config,
-        candidate_strategies=[blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -556,19 +556,19 @@ def test_comparison_endpoint_accepts_blueprint_candidates(monkeypatch, tmp_path)
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_blueprint_spec"
-    assert payload["comparison"]["candidateStrategies"][0]["strategyId"] == blueprint.strategy_id
+    assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
+    assert payload["comparison"]["candidateStrategies"][0]["strategyId"] == definition.strategy_id
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["legacyAdapterCompatible"] is True
     signal_market_data_contexts = [
         context
         for context in payload["comparison"]["runSpec"]["evaluation"]["signalMarketDataContexts"]
-        if context["strategyId"] == blueprint.strategy_id
+        if context["strategyId"] == definition.strategy_id
     ]
-    assert len(signal_market_data_contexts) == len(blueprint.signals)
-    assert signal_market_data_contexts[0]["signalKey"] == blueprint.signals[0].key
-    assert signal_market_data_contexts[0]["dataTimeframe"]["key"] == blueprint.signals[0].data_timeframe.key
-    assert signal_market_data_contexts[0]["signalTimeframe"]["key"] == blueprint.signals[0].signal_timeframe.key
-    assert payload["candidateRuns"][0]["strategy"]["strategyId"] == blueprint.strategy_id
+    assert len(signal_market_data_contexts) == len(definition.signals)
+    assert signal_market_data_contexts[0]["signalKey"] == definition.signals[0].key
+    assert signal_market_data_contexts[0]["dataTimeframe"]["key"] == definition.signals[0].data_timeframe.key
+    assert signal_market_data_contexts[0]["signalTimeframe"]["key"] == definition.signals[0].signal_timeframe.key
+    assert payload["candidateRuns"][0]["strategy"]["strategyId"] == definition.strategy_id
     assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
 
 
@@ -616,31 +616,31 @@ def test_comparison_endpoint_supports_explicit_strategy_signal_context_without_e
     assert any(context["timeframe"]["key"] == "1d" for context in market_contexts)
 
 
-def test_comparison_endpoint_accepts_direct_execution_blueprint_candidates(monkeypatch, tmp_path) -> None:
+def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
     first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    blueprint = build_strategy_blueprint_from_strategy_spec(first_candidate)
-    direct_blueprint = replace(
-        blueprint,
+    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    direct_definition = replace(
+        definition,
         signals=[
             replace(
-                blueprint.signals[0],
+                definition.signals[0],
                 signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
             ),
-            *blueprint.signals[1:],
+            *definition.signals[1:],
         ],
         execution_plan=build_strategy_execution_plan_spec(
-            key=blueprint.execution_plan.key,
-            label=blueprint.execution_plan.label,
+            key=definition.execution_plan.key,
+            label=definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -653,7 +653,7 @@ def test_comparison_endpoint_accepts_direct_execution_blueprint_candidates(monke
     direct_signal_contexts = [
         context
         for context in payload["comparison"]["runSpec"]["evaluation"]["signalMarketDataContexts"]
-        if context["strategyId"] == direct_blueprint.strategy_id
+        if context["strategyId"] == direct_definition.strategy_id
     ]
     assert direct_signal_contexts[0]["dataTimeframe"]["key"] == "1d"
     assert direct_signal_contexts[0]["signalTimeframe"]["key"] == "1w"
@@ -677,26 +677,26 @@ def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_executio
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
     first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    blueprint = build_strategy_blueprint_from_strategy_spec(first_candidate)
-    direct_blueprint = replace(
-        blueprint,
+    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    direct_definition = replace(
+        definition,
         signals=[
             replace(
-                blueprint.signals[0],
+                definition.signals[0],
                 signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
             ),
-            *blueprint.signals[1:],
+            *definition.signals[1:],
         ],
         execution_plan=build_strategy_execution_plan_spec(
-            key=blueprint.execution_plan.key,
-            label=blueprint.execution_plan.label,
+            key=definition.execution_plan.key,
+            label=definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -714,7 +714,7 @@ def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_executio
     assert "1wk" in requested_timeframes
 
 
-def test_comparison_endpoint_accepts_direct_execution_multi_selection_blueprint_candidates(monkeypatch, tmp_path) -> None:
+def test_comparison_endpoint_accepts_direct_execution_multi_selection_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
@@ -723,13 +723,13 @@ def test_comparison_endpoint_accepts_direct_execution_multi_selection_blueprint_
         for strategy in normalize_strategy_definitions(config.candidate_strategies)
         if strategy.selection.strategy_type == "full_universe_momentum_tilt"
     )
-    blueprint = build_strategy_blueprint_from_strategy_spec(first_candidate)
+    definition = build_strategy_definition_from_strategy_spec(first_candidate)
     secondary_signal = build_strategy_signal_spec(
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=blueprint.signals[0].observation_spec,
-        data_timeframe=blueprint.signals[0].data_timeframe,
+        observation_spec=definition.signals[0].observation_spec,
+        data_timeframe=definition.signals[0].data_timeframe,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
         weight=0.4,
@@ -743,22 +743,22 @@ def test_comparison_endpoint_accepts_direct_execution_multi_selection_blueprint_
             },
         },
     )
-    direct_blueprint = replace(
-        blueprint,
+    direct_definition = replace(
+        definition,
         signals=(
-            replace(blueprint.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME, weight=0.6),
+            replace(definition.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME, weight=0.6),
             secondary_signal,
         ),
         execution_plan=build_strategy_execution_plan_spec(
-            key=blueprint.execution_plan.key,
-            label=blueprint.execution_plan.label,
+            key=definition.execution_plan.key,
+            label=definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -782,9 +782,9 @@ def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_dir
         for strategy in normalize_strategy_definitions(config.candidate_strategies)
         if strategy.selection.strategy_type == "full_universe_momentum_tilt"
     )
-    blueprint = build_strategy_blueprint_from_strategy_spec(first_candidate)
+    definition = build_strategy_definition_from_strategy_spec(first_candidate)
     primary_signal = replace(
-        blueprint.signals[0],
+        definition.signals[0],
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         weight=0.6,
         alignment_policy=build_alignment_policy_spec(
@@ -797,8 +797,8 @@ def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_dir
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=blueprint.signals[0].observation_spec,
-        data_timeframe=blueprint.signals[0].data_timeframe,
+        observation_spec=definition.signals[0].observation_spec,
+        data_timeframe=definition.signals[0].data_timeframe,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
         weight=0.4,
@@ -817,19 +817,19 @@ def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_dir
             },
         },
     )
-    direct_blueprint = replace(
-        blueprint,
+    direct_definition = replace(
+        definition,
         signals=(primary_signal, secondary_signal),
         execution_plan=build_strategy_execution_plan_spec(
-            key=blueprint.execution_plan.key,
-            label=blueprint.execution_plan.label,
+            key=definition.execution_plan.key,
+            label=definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -846,13 +846,13 @@ def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_dire
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    predictor_blueprint = PREDICTOR_CANDIDATE_BLUEPRINTS[0]
-    direct_predictor_blueprint = replace(
-        predictor_blueprint,
+    predictor_definition = PREDICTOR_CANDIDATE_DEFINITIONS[0]
+    direct_predictor_definition = replace(
+        predictor_definition,
         signals=(
-            replace(predictor_blueprint.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
+            replace(predictor_definition.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
             replace(
-                predictor_blueprint.signals[1],
+                predictor_definition.signals[1],
                 signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
                 alignment_policy=build_alignment_policy_spec(
                     key="predictor_calendar_resample",
@@ -862,15 +862,15 @@ def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_dire
             ),
         ),
         execution_plan=build_strategy_execution_plan_spec(
-            key=predictor_blueprint.execution_plan.key,
-            label=predictor_blueprint.execution_plan.label,
+            key=predictor_definition.execution_plan.key,
+            label=predictor_definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_predictor_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_predictor_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -882,17 +882,17 @@ def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_dire
     assert predictor_context["alignmentPolicy"]["method"] == "calendar_resample"
 
 
-def test_comparison_endpoint_accepts_direct_execution_predictor_blueprint_candidates_with_multi_selection(monkeypatch, tmp_path) -> None:
+def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candidates_with_multi_selection(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    predictor_blueprint = PREDICTOR_CANDIDATE_BLUEPRINTS[0]
+    predictor_definition = PREDICTOR_CANDIDATE_DEFINITIONS[0]
     secondary_signal = build_strategy_signal_spec(
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=predictor_blueprint.signals[0].observation_spec,
-        data_timeframe=predictor_blueprint.signals[0].data_timeframe,
+        observation_spec=predictor_definition.signals[0].observation_spec,
+        data_timeframe=predictor_definition.signals[0].data_timeframe,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
         weight=0.4,
@@ -906,23 +906,23 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_blueprint_candid
             },
         },
     )
-    direct_predictor_blueprint = replace(
-        predictor_blueprint,
+    direct_predictor_definition = replace(
+        predictor_definition,
         signals=(
-            replace(predictor_blueprint.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME, weight=0.6),
+            replace(predictor_definition.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME, weight=0.6),
             secondary_signal,
-            replace(predictor_blueprint.signals[1], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
+            replace(predictor_definition.signals[1], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
         ),
         execution_plan=build_strategy_execution_plan_spec(
-            key=predictor_blueprint.execution_plan.key,
-            label=predictor_blueprint.execution_plan.label,
+            key=predictor_definition.execution_plan.key,
+            label=predictor_definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_predictor_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_predictor_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -931,31 +931,31 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_blueprint_candid
     assert response.status_code == 200
     payload = response.json()
     strategy_payload = payload["candidateRuns"][0]["strategy"]
-    assert strategy_payload["components"]["optional"]["predictor"]["predictorKey"] == predictor_blueprint.signals[1].predictor_key
+    assert strategy_payload["components"]["optional"]["predictor"]["predictorKey"] == predictor_definition.signals[1].predictor_key
     assert strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][1]["selectionKey"] == "secondary_momo6"
 
 
-def test_comparison_endpoint_accepts_direct_execution_predictor_blueprint_candidates(monkeypatch, tmp_path) -> None:
+def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    predictor_blueprint = PREDICTOR_CANDIDATE_BLUEPRINTS[0]
-    direct_predictor_blueprint = replace(
-        predictor_blueprint,
+    predictor_definition = PREDICTOR_CANDIDATE_DEFINITIONS[0]
+    direct_predictor_definition = replace(
+        predictor_definition,
         signals=[
-            replace(predictor_blueprint.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
-            replace(predictor_blueprint.signals[1], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
+            replace(predictor_definition.signals[0], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
+            replace(predictor_definition.signals[1], signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME),
         ],
         execution_plan=build_strategy_execution_plan_spec(
-            key=predictor_blueprint.execution_plan.key,
-            label=predictor_blueprint.execution_plan.label,
+            key=predictor_definition.execution_plan.key,
+            label=predictor_definition.execution_plan.label,
             decision_schedule="every_bar",
             rebalance_schedule="month_end",
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[direct_predictor_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[direct_predictor_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
@@ -968,43 +968,43 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_blueprint_candid
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     assert strategy_payload["components"]["core"]["executionMode"] == "direct_signal_timeframe"
     assert strategy_payload["components"]["core"]["dataResolution"]["key"] == "1w"
-    assert strategy_payload["components"]["optional"]["predictor"]["predictorKey"] == predictor_blueprint.signals[1].predictor_key
+    assert strategy_payload["components"]["optional"]["predictor"]["predictorKey"] == predictor_definition.signals[1].predictor_key
     assert strategy_payload["components"]["core"]["decisionSchedule"] == "every_bar"
     assert strategy_payload["components"]["optional"]["signalExecutionContexts"]["selectionSignals"][0]["dataTimeframe"] == "1d"
 
 
-def test_comparison_endpoint_reports_incompatible_blueprint(monkeypatch, tmp_path) -> None:
+def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
     first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    blueprint = build_strategy_blueprint_from_strategy_spec(first_candidate)
-    incompatible_blueprint = replace(
-        blueprint,
+    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    incompatible_definition = replace(
+        definition,
         signals=[
             replace(
-                blueprint.signals[0],
+                definition.signals[0],
                 signal_timeframe=DEFAULT_MONTHLY_TIMEFRAME,
             ),
-            *blueprint.signals[1:],
+            *definition.signals[1:],
         ],
         execution_plan=build_strategy_execution_plan_spec(
-            key=blueprint.execution_plan.key,
-            label=blueprint.execution_plan.label,
+            key=definition.execution_plan.key,
+            label=definition.execution_plan.label,
             decision_schedule="quarter_end",
-            rebalance_schedule=blueprint.execution_plan.rebalance_schedule,
+            rebalance_schedule=definition.execution_plan.rebalance_schedule,
         ),
     )
     config = replace(
         config,
-        candidate_strategies=[incompatible_blueprint, *config.candidate_strategies[1:]],
+        candidate_strategies=[incompatible_definition, *config.candidate_strategies[1:]],
     )
     monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
 
     response = client.get("/api/comparison")
 
     assert response.status_code == 400
-    assert incompatible_blueprint.strategy_id in response.json()["detail"]
+    assert incompatible_definition.strategy_id in response.json()["detail"]
     assert "not executable" in response.json()["detail"]
     assert "legacy adapter incompatibilities" in response.json()["detail"]
     assert "decision_schedule to match rebalance_schedule or be every_bar" in response.json()["detail"]

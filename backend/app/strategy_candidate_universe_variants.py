@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from app.strategy_blueprint_builder import (
+from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
     SelectionVariantDefinition,
-    build_selection_strategy_blueprint_product,
+    build_selection_strategy_definition_product,
 )
 from app.strategy_presets import (
     DEFAULT_ANNUAL_EXECUTION_POLICY,
@@ -16,7 +16,7 @@ from app.strategy_presets import (
 )
 
 
-UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS = build_selection_strategy_blueprint_product(
+UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS = build_selection_strategy_definition_product(
     strategy_id_pattern="{selection}",
     selection_variants=[
         SelectionVariantDefinition(
@@ -44,5 +44,5 @@ UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS = build_selection_strategy_blueprint_produ
 
 
 __all__ = [
-    "UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS",
+    "UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS",
 ]

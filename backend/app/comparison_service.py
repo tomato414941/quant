@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.portfolio import (
-    StrategyBlueprintSpec,
+    StrategyDefinition,
     build_alignment_policy_spec,
     build_asset_ranking_specs,
     build_execution_policy_spec,
@@ -14,15 +14,15 @@ from app.portfolio import (
     build_portfolio_state,
     build_risk_controls_spec,
     build_selection_spec,
-    build_strategy_blueprint_from_strategy_spec,
-    build_strategy_blueprint_spec,
+    build_strategy_definition_from_strategy_spec,
+    build_strategy_definition,
     build_strategy_data_source_spec,
     build_strategy_execution_plan_spec,
     build_strategy_feature_definition_spec,
     build_strategy_signal_spec,
     build_strategy_spec,
-    build_strategy_spec_from_blueprint,
-    build_executable_strategy_spec_from_blueprint,
+    build_strategy_spec_from_definition,
+    build_executable_strategy_spec_from_definition,
     compute_predictor_panel,
     deserialize_predictor_panel,
     evaluate_asset_ranking_spec,
@@ -33,7 +33,7 @@ from app.portfolio import (
     serialize_predictor_spec,
     serialize_predictor_panel,
     serialize_portfolio_state,
-    serialize_strategy_blueprint_spec,
+    serialize_strategy_definition as serialize_canonical_strategy_definition,
     serialize_strategy_spec,
 )
 from app.predictor_registry import REGISTERED_PREDICTOR_SPECS_BY_KEY
@@ -83,27 +83,27 @@ def resolve_strategy_market_data_timeframe(strategy_spec) -> TimeframeSpec:
     return resolve_timeframe_spec_by_key(strategy_spec.timeframe.key)
 
 
-def serialize_strategy_definition(strategy_definition):
-    if isinstance(strategy_definition, StrategyBlueprintSpec):
-        return serialize_strategy_blueprint_spec(strategy_definition)
+def serialize_strategy_definition_payload(strategy_definition):
+    if isinstance(strategy_definition, StrategyDefinition):
+        return serialize_canonical_strategy_definition(strategy_definition)
     return serialize_strategy_spec(strategy_definition)
 
 
 def serialize_reproducible_strategy_definition(strategy_definition):
-    if isinstance(strategy_definition, StrategyBlueprintSpec):
-        return serialize_strategy_blueprint_spec(strategy_definition)
-    return serialize_strategy_blueprint_spec(
-        build_strategy_blueprint_from_strategy_spec(strategy_definition)
+    if isinstance(strategy_definition, StrategyDefinition):
+        return serialize_canonical_strategy_definition(strategy_definition)
+    return serialize_canonical_strategy_definition(
+        build_strategy_definition_from_strategy_spec(strategy_definition)
     )
 
 
 def normalize_strategy_spec(strategy_spec):
-    if isinstance(strategy_spec, StrategyBlueprintSpec):
+    if isinstance(strategy_spec, StrategyDefinition):
         try:
-            return build_executable_strategy_spec_from_blueprint(strategy_spec)
+            return build_executable_strategy_spec_from_definition(strategy_spec)
         except ValueError as exc:
             raise ValueError(
-                f"Strategy blueprint {strategy_spec.strategy_id} is not executable: {exc}"
+                f"Strategy definition {strategy_spec.strategy_id} is not executable: {exc}"
             ) from exc
     return strategy_spec
 
@@ -150,7 +150,7 @@ def collect_comparison_timeframes(
 ) -> list[TimeframeSpec]:
     seen: dict[str, TimeframeSpec] = {}
     for strategy_definition in (strategy_definitions or (comparison.candidate_strategies + comparison.reference_strategies)):
-        if isinstance(strategy_definition, StrategyBlueprintSpec):
+        if isinstance(strategy_definition, StrategyDefinition):
             for signal_spec in strategy_definition.signals:
                 seen.setdefault(signal_spec.signal_timeframe.key, signal_spec.signal_timeframe)
                 seen.setdefault(signal_spec.data_timeframe.key, signal_spec.data_timeframe)
@@ -171,7 +171,7 @@ def collect_required_market_fields(
 ) -> list[str]:
     fields: dict[str, None] = {"close": None}
     for strategy_definition in (strategy_definitions or (comparison.candidate_strategies + comparison.reference_strategies)):
-        if isinstance(strategy_definition, StrategyBlueprintSpec):
+        if isinstance(strategy_definition, StrategyDefinition):
             for signal_spec in strategy_definition.signals:
                 for field in signal_spec.observation_spec.fields:
                     fields.setdefault(field, None)
@@ -469,35 +469,35 @@ def deserialize_strategy_signal_spec_payload(payload: dict[str, object]):
     )
 
 
-def deserialize_strategy_definition(payload: dict[str, object]):
-    if str(payload.get("kind")) != "strategy_blueprint_spec":
+def deserialize_strategy_definition_payload(payload: dict[str, object]):
+    if str(payload.get("kind")) != "strategy_definition":
         raise ValueError(
-            "Only strategy_blueprint_spec payloads are supported. Regenerate comparison-run-spec with the latest CLI."
+            "Only strategy_definition payloads are supported. Regenerate comparison-run-spec with the latest CLI."
         )
     components = payload.get("components")
     if not isinstance(components, dict):
-        raise ValueError("Strategy blueprint payload must include components.")
+        raise ValueError("Strategy definition payload must include components.")
     core = components.get("core")
     optional = components.get("optional")
     if not isinstance(core, dict) or not isinstance(optional, dict):
-        raise ValueError("Strategy blueprint components must include core and optional objects.")
+        raise ValueError("Strategy definition components must include core and optional objects.")
     investment_universe = core.get("investmentUniverse")
     portfolio_model = core.get("portfolioModel")
     execution_plan = core.get("executionPlan")
     signals = optional.get("signals")
     risk_controls = optional.get("riskControls")
     if not isinstance(investment_universe, dict):
-        raise ValueError("Strategy blueprint must include investmentUniverse.")
+        raise ValueError("Strategy definition must include investmentUniverse.")
     if not isinstance(portfolio_model, dict):
-        raise ValueError("Strategy blueprint must include portfolioModel.")
+        raise ValueError("Strategy definition must include portfolioModel.")
     if not isinstance(execution_plan, dict):
-        raise ValueError("Strategy blueprint must include executionPlan.")
+        raise ValueError("Strategy definition must include executionPlan.")
     if not isinstance(signals, list):
-        raise ValueError("Strategy blueprint must include signals.")
+        raise ValueError("Strategy definition must include signals.")
     if not isinstance(risk_controls, dict):
-        raise ValueError("Strategy blueprint must include riskControls.")
+        raise ValueError("Strategy definition must include riskControls.")
 
-    return build_strategy_blueprint_spec(
+    return build_strategy_definition(
         strategy_id=str(payload["strategyId"]),
         version=str(payload["version"]),
         label=str(payload["label"]),
@@ -588,12 +588,12 @@ def deserialize_comparison_run_spec_payload(payload: dict[str, object]) -> Compa
         raise ValueError("Run spec must include portfolioState.")
 
     candidate_strategies = [
-        deserialize_strategy_definition(strategy_payload)
+        deserialize_strategy_definition_payload(strategy_payload)
         for strategy_payload in payload.get("candidateStrategies", ())
         if isinstance(strategy_payload, dict)
     ]
     reference_strategies = [
-        deserialize_strategy_definition(strategy_payload)
+        deserialize_strategy_definition_payload(strategy_payload)
         for strategy_payload in payload.get("referenceStrategies", ())
         if isinstance(strategy_payload, dict)
     ]
@@ -1073,11 +1073,11 @@ def build_strategy_runs_payload(
             strategy_definitions=original_candidate_definitions + original_reference_definitions,
         ),
         "candidateStrategies": [
-            serialize_strategy_definition(strategy_spec)
+            serialize_strategy_definition_payload(strategy_spec)
             for strategy_spec in original_candidate_definitions
         ],
         "referenceStrategies": [
-            serialize_strategy_definition(strategy_spec)
+            serialize_strategy_definition_payload(strategy_spec)
             for strategy_spec in original_reference_definitions
         ],
         "predictorRuns": predictor_runs,
@@ -1590,7 +1590,7 @@ def serialize_signal_market_data_contexts(
 ) -> list[dict]:
     contexts: list[dict] = []
     for strategy_definition in strategy_definitions or []:
-        if not isinstance(strategy_definition, StrategyBlueprintSpec):
+        if not isinstance(strategy_definition, StrategyDefinition):
             continue
         for signal_spec in strategy_definition.signals:
             dataset_metadata = metadata_by_timeframe.get(signal_spec.data_timeframe.key)
@@ -1720,11 +1720,11 @@ def serialize_comparison(
             + (reference_strategy_definitions or comparison.reference_strategies),
         ),
         "candidateStrategies": [
-            serialize_strategy_definition(strategy_spec)
+            serialize_strategy_definition_payload(strategy_spec)
             for strategy_spec in (candidate_strategy_definitions or comparison.candidate_strategies)
         ],
         "referenceStrategies": [
-            serialize_strategy_definition(strategy_spec)
+            serialize_strategy_definition_payload(strategy_spec)
             for strategy_spec in (reference_strategy_definitions or comparison.reference_strategies)
         ],
         "conditionVariants": [
@@ -1975,7 +1975,7 @@ def build_strategy_runs(
         timeframe_key = market_data_timeframe.key
         dataset_metadata = metadata_by_timeframe[timeframe_key]
         serialized_strategy = serialize_strategy_spec(strategy_spec)
-        serialized_strategy_definition = serialize_strategy_definition(strategy_definition)
+        serialized_strategy_definition = serialize_strategy_definition_payload(strategy_definition)
         predictor_panel = None
         if strategy_spec.predictor_use is not None:
             predictor_key = strategy_spec.predictor_use.predictor_key
@@ -2176,7 +2176,7 @@ def build_condition_sweep_runs(
                 ),
             )
             serialized_strategy = serialize_strategy_spec(effective_strategy)
-            serialized_strategy_definition = serialize_strategy_definition(effective_strategy_definition)
+            serialized_strategy_definition = serialize_strategy_definition_payload(effective_strategy_definition)
             serialized_evaluation = serialize_evaluation(
                 comparison,
                 {timeframe_key: dataset_metadata},
@@ -2411,11 +2411,11 @@ def build_parameter_sweep_runs(
                             max_weight=max_weight,
                         ),
                     )
-                    effective_strategy_definition = build_strategy_blueprint_from_strategy_spec(
+                    effective_strategy_definition = build_strategy_definition_from_strategy_spec(
                         effective_strategy
                     )
                     serialized_strategy = serialize_strategy_spec(effective_strategy)
-                    serialized_strategy_definition = serialize_strategy_definition(effective_strategy_definition)
+                    serialized_strategy_definition = serialize_strategy_definition_payload(effective_strategy_definition)
                     market_data_timeframe = resolve_strategy_market_data_timeframe(
                         effective_strategy_definition
                     )

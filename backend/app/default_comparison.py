@@ -14,7 +14,7 @@ from app.execution_defaults import (
     DEFAULT_EXECUTION_ASSUMPTIONS,
 )
 from app.strategy_registry import (
-    CANONICAL_CANDIDATE_BLUEPRINTS,
+    CANONICAL_CANDIDATE_DEFINITIONS,
     REFERENCE_EQUAL_WEIGHT_WITH_CASH,
 )
 
@@ -65,7 +65,7 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
         secondary_metric="total_return",
         tertiary_metric="max_drawdown",
     ),
-    candidate_strategies=CANONICAL_CANDIDATE_BLUEPRINTS,
+    candidate_strategies=CANONICAL_CANDIDATE_DEFINITIONS,
     reference_strategies=[REFERENCE_EQUAL_WEIGHT_WITH_CASH],
     condition_variants=DEFAULT_COMPARISON_CONDITION_VARIANTS,
 )

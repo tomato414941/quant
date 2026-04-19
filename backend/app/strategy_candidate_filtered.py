@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from app.strategy_blueprint_builder import (
+from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
     SelectionVariantDefinition,
-    build_selection_strategy_blueprint_product,
+    build_selection_strategy_definition_product,
 )
 from app.strategy_presets import (
     DEFAULT_ANNUAL_EXECUTION_POLICY,
@@ -23,8 +23,8 @@ from app.strategy_presets import (
 )
 
 
-FILTERED_CANDIDATE_BLUEPRINTS = [
-    *build_selection_strategy_blueprint_product(
+FILTERED_CANDIDATE_DEFINITIONS = [
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="stg-top3-{portfolio_model}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -48,7 +48,7 @@ FILTERED_CANDIDATE_BLUEPRINTS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *build_selection_strategy_blueprint_product(
+    *build_selection_strategy_definition_product(
         strategy_id_pattern="{selection}",
         selection_variants=[
             SelectionVariantDefinition(key="stg-dualtop3-hrp", selection=DUAL_MOMENTUM_TOP3),
@@ -74,5 +74,5 @@ FILTERED_CANDIDATE_BLUEPRINTS = [
 
 
 __all__ = [
-    "FILTERED_CANDIDATE_BLUEPRINTS",
+    "FILTERED_CANDIDATE_DEFINITIONS",
 ]

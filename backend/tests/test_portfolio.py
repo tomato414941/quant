@@ -23,9 +23,9 @@ from app.portfolio import (
     build_predictor_spec,
     build_predictor_use_spec,
     build_ranking_feature_recipe_spec,
-    build_strategy_blueprint_from_strategy_spec,
-    build_strategy_signal_execution_contexts_from_blueprint,
-    build_strategy_blueprint_spec,
+    build_strategy_definition_from_strategy_spec,
+    build_strategy_signal_execution_contexts_from_definition,
+    build_strategy_definition,
     build_strategy_execution_plan_spec,
     build_strategy_signal_spec,
     build_training_spec,
@@ -34,12 +34,12 @@ from app.portfolio import (
     build_portfolio_state,
     build_strategy_data_source_spec,
     build_strategy_feature_definition_spec,
-    build_direct_execution_strategy_spec_from_blueprint,
-    build_executable_strategy_spec_from_blueprint,
+    build_direct_execution_strategy_spec_from_definition,
+    build_executable_strategy_spec_from_definition,
     build_execution_policy_spec,
     build_risk_controls_spec,
     build_selection_spec,
-    build_strategy_spec_from_blueprint,
+    build_strategy_spec_from_definition,
     build_strategy_spec,
     compare_portfolio_runs,
     compute_predictor_panel,
@@ -47,12 +47,12 @@ from app.portfolio import (
     compute_trade_cost,
     compute_strategy_score_series,
     evaluate_predictor_spec,
-    get_direct_execution_strategy_blueprint_compatibility_issues,
-    get_legacy_strategy_blueprint_compatibility_issues,
+    get_direct_execution_strategy_definition_compatibility_issues,
+    get_legacy_strategy_definition_compatibility_issues,
     get_strategy_definition_signal_execution_contexts,
     get_strategy_signal_execution_contexts,
-    is_direct_execution_compatible_strategy_blueprint,
-    is_legacy_compatible_strategy_blueprint,
+    is_direct_execution_compatible_strategy_definition,
+    is_legacy_compatible_strategy_definition,
     prepare_strategy_market_data,
     prepare_strategy_predictor_panel,
     prepare_strategy_signal_data,
@@ -67,38 +67,38 @@ from app.portfolio import (
     select_assets,
     should_rebalance,
 )
-from app.strategy_blueprint_builder import (
+from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
-    PredictorBlueprintDefinition,
+    PredictorDefinitionDefinition,
     PredictorVariantDefinition,
-    SelectionBlueprintDefinition,
+    SelectionDefinitionDefinition,
     SelectionVariantDefinition,
-    build_predictor_strategy_blueprint,
-    build_predictor_strategy_blueprint_product,
-    build_selection_strategy_blueprint,
-    build_selection_strategy_blueprint_product,
-    build_strategy_specs_from_blueprints,
+    build_predictor_strategy_definition,
+    build_predictor_strategy_definition_product,
+    build_selection_strategy_definition,
+    build_selection_strategy_definition_product,
+    build_strategy_specs_from_definitions,
 )
 from app.strategy_candidate_baselines import (
-    BASELINE_CANDIDATE_BLUEPRINTS,
+    BASELINE_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_filtered import (
-    FILTERED_CANDIDATE_BLUEPRINTS,
+    FILTERED_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_predictors import (
-    PREDICTOR_CANDIDATE_BLUEPRINTS,
+    PREDICTOR_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_full_universe import (
-    FULL_UNIVERSE_CANDIDATE_BLUEPRINTS,
+    FULL_UNIVERSE_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_timeframes import (
-    TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS,
+    TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_universe_variants import (
-    UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS,
+    UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS,
 )
-from app.strategy_catalog import CANONICAL_CANDIDATE_BLUEPRINTS
+from app.strategy_catalog import CANONICAL_CANDIDATE_DEFINITIONS
 from app.strategy_presets import FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
 
@@ -260,7 +260,7 @@ def make_predictor_spec(
     )
 
 
-def test_build_strategy_blueprint_supports_multiple_signal_timeframes() -> None:
+def test_build_strategy_definition_supports_multiple_signal_timeframes() -> None:
     universe = build_investment_universe_spec(
         tickers=["SPY", "QQQ", "TLT"],
         key="multi_tf_universe",
@@ -297,10 +297,10 @@ def test_build_strategy_blueprint_supports_multiple_signal_timeframes() -> None:
         signal_parameters={"overlay": "regime"},
     )
 
-    blueprint = build_strategy_blueprint_spec(
-        strategy_id="blueprint__multi_timeframe",
-        label="Daily plus monthly blueprint",
-        description="Combine fast and slow signals in one strategy blueprint.",
+    definition = build_strategy_definition(
+        strategy_id="definition__multi_timeframe",
+        label="Daily plus monthly definition",
+        description="Combine fast and slow signals in one strategy definition.",
         investment_universe=universe,
         signals=[daily_signal, monthly_signal],
         portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -313,15 +313,15 @@ def test_build_strategy_blueprint_supports_multiple_signal_timeframes() -> None:
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
     )
 
-    assert blueprint.strategy_id == "blueprint__multi_timeframe"
-    assert len(blueprint.signals) == 2
-    assert blueprint.signals[0].data_timeframe.key == "1d"
-    assert blueprint.signals[1].data_timeframe.key == "1mo"
-    assert blueprint.execution_plan.decision_schedule == "every_bar"
-    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+    assert definition.strategy_id == "definition__multi_timeframe"
+    assert len(definition.signals) == 2
+    assert definition.signals[0].data_timeframe.key == "1d"
+    assert definition.signals[1].data_timeframe.key == "1mo"
+    assert definition.execution_plan.decision_schedule == "every_bar"
+    assert definition.execution_plan.rebalance_schedule == "month_end"
 
 
-def test_build_strategy_blueprint_rejects_signal_outside_universe() -> None:
+def test_build_strategy_definition_rejects_signal_outside_universe() -> None:
     universe = build_investment_universe_spec(
         tickers=["SPY", "QQQ"],
         key="small_universe",
@@ -342,8 +342,8 @@ def test_build_strategy_blueprint_rejects_signal_outside_universe() -> None:
     )
 
     try:
-        build_strategy_blueprint_spec(
-            strategy_id="blueprint__invalid",
+        build_strategy_definition(
+            strategy_id="definition__invalid",
             investment_universe=universe,
             signals=[foreign_signal],
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -358,10 +358,10 @@ def test_build_strategy_blueprint_rejects_signal_outside_universe() -> None:
     except ValueError as exc:
         assert "investment universe" in str(exc)
     else:
-        raise AssertionError("Expected build_strategy_blueprint_spec to reject out-of-universe tickers.")
+        raise AssertionError("Expected build_strategy_definition to reject out-of-universe tickers.")
 
 
-def test_build_strategy_blueprint_from_strategy_spec_maps_predictor_overlay() -> None:
+def test_build_strategy_definition_from_strategy_spec_maps_predictor_overlay() -> None:
     predictor_use = build_predictor_use_spec(
         predictor_key="pred__overlay",
         signal_weight=0.6,
@@ -430,44 +430,44 @@ def test_build_strategy_blueprint_from_strategy_spec_maps_predictor_overlay() ->
         decision_schedule="every_bar",
     )
 
-    blueprint = build_strategy_blueprint_from_strategy_spec(strategy)
+    definition = build_strategy_definition_from_strategy_spec(strategy)
 
-    assert blueprint.strategy_id == strategy.strategy_id
-    assert blueprint.execution_plan.decision_schedule == "every_bar"
-    assert blueprint.execution_plan.rebalance_schedule == "month_end"
-    assert len(blueprint.signals) == 2
-    assert blueprint.signals[0].source_kind == "selection_signal"
-    assert blueprint.signals[0].weight == 0.6
-    assert blueprint.signals[0].data_timeframe.key == "1d"
-    assert blueprint.signals[0].signal_timeframe.key == "1w"
-    assert blueprint.signals[0].alignment_policy is not None
-    assert blueprint.signals[0].alignment_policy.method == "asof_last"
-    assert blueprint.signals[1].source_kind == "predictor_overlay"
-    assert blueprint.signals[1].predictor_key == "pred__overlay"
-    assert blueprint.signals[1].weight == 0.4
-    assert blueprint.signals[1].data_timeframe.key == "1d"
-    assert blueprint.signals[1].signal_timeframe.key == "1w"
-    assert blueprint.signals[1].alignment_policy is not None
-    assert blueprint.signals[1].alignment_policy.method == "calendar_resample"
+    assert definition.strategy_id == strategy.strategy_id
+    assert definition.execution_plan.decision_schedule == "every_bar"
+    assert definition.execution_plan.rebalance_schedule == "month_end"
+    assert len(definition.signals) == 2
+    assert definition.signals[0].source_kind == "selection_signal"
+    assert definition.signals[0].weight == 0.6
+    assert definition.signals[0].data_timeframe.key == "1d"
+    assert definition.signals[0].signal_timeframe.key == "1w"
+    assert definition.signals[0].alignment_policy is not None
+    assert definition.signals[0].alignment_policy.method == "asof_last"
+    assert definition.signals[1].source_kind == "predictor_overlay"
+    assert definition.signals[1].predictor_key == "pred__overlay"
+    assert definition.signals[1].weight == 0.4
+    assert definition.signals[1].data_timeframe.key == "1d"
+    assert definition.signals[1].signal_timeframe.key == "1w"
+    assert definition.signals[1].alignment_policy is not None
+    assert definition.signals[1].alignment_policy.method == "calendar_resample"
 
 
-def test_build_strategy_blueprint_from_strategy_spec_without_predictor_keeps_single_signal() -> None:
+def test_build_strategy_definition_from_strategy_spec_without_predictor_keeps_single_signal() -> None:
     strategy = make_strategy(
         "full_universe",
         "equal_weight",
         max_investment_ratio=0.8,
     )
 
-    blueprint = build_strategy_blueprint_from_strategy_spec(strategy)
+    definition = build_strategy_definition_from_strategy_spec(strategy)
 
-    assert blueprint.strategy_id == strategy.strategy_id
-    assert len(blueprint.signals) == 1
-    assert blueprint.signals[0].source_kind == "selection_signal"
-    assert blueprint.signals[0].weight == 1.0
-    assert blueprint.execution_plan.rebalance_schedule == strategy.execution_policy.rebalance_schedule
+    assert definition.strategy_id == strategy.strategy_id
+    assert len(definition.signals) == 1
+    assert definition.signals[0].source_kind == "selection_signal"
+    assert definition.signals[0].weight == 1.0
+    assert definition.execution_plan.rebalance_schedule == strategy.execution_policy.rebalance_schedule
 
 
-def test_build_strategy_spec_from_blueprint_round_trips_legacy_strategy() -> None:
+def test_build_strategy_spec_from_definition_round_trips_legacy_strategy() -> None:
     predictor_use = build_predictor_use_spec(
         predictor_key="pred__overlay",
         signal_weight=0.6,
@@ -478,7 +478,7 @@ def test_build_strategy_spec_from_blueprint_round_trips_legacy_strategy() -> Non
         version="v7",
         hypothesis="Round-trip legacy adapter.",
         label="Round trip strategy",
-        description="Legacy strategy for blueprint round-trip tests.",
+        description="Legacy strategy for definition round-trip tests.",
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ", "TLT"],
             key="round_trip_universe",
@@ -505,8 +505,8 @@ def test_build_strategy_spec_from_blueprint_round_trips_legacy_strategy() -> Non
         extensions={"source": "test"},
     )
 
-    rebuilt = build_strategy_spec_from_blueprint(
-        build_strategy_blueprint_from_strategy_spec(strategy)
+    rebuilt = build_strategy_spec_from_definition(
+        build_strategy_definition_from_strategy_spec(strategy)
     )
 
     assert rebuilt.strategy_id == strategy.strategy_id
@@ -531,9 +531,9 @@ def test_build_strategy_spec_from_blueprint_round_trips_legacy_strategy() -> Non
     assert dict(rebuilt.extensions) == dict(strategy.extensions)
 
 
-def test_build_strategy_spec_from_blueprint_rejects_split_execution_plan() -> None:
-    blueprint = build_strategy_blueprint_spec(
-        strategy_id="blueprint__split_execution",
+def test_build_strategy_spec_from_definition_rejects_split_execution_plan() -> None:
+    definition = build_strategy_definition(
+        strategy_id="definition__split_execution",
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ"],
             key="split_execution_universe",
@@ -570,16 +570,16 @@ def test_build_strategy_spec_from_blueprint_rejects_split_execution_plan() -> No
     )
 
     try:
-        build_strategy_spec_from_blueprint(blueprint)
+        build_strategy_spec_from_definition(definition)
     except ValueError as exc:
         assert "matching decision and rebalance schedules" in str(exc)
     else:
         raise AssertionError("Expected split execution plan to be rejected.")
 
 
-def test_build_strategy_spec_from_blueprint_rejects_mismatched_signal_timeframe() -> None:
-    blueprint = build_strategy_blueprint_spec(
-        strategy_id="blueprint__mismatched_signal_timeframe",
+def test_build_strategy_spec_from_definition_rejects_mismatched_signal_timeframe() -> None:
+    definition = build_strategy_definition(
+        strategy_id="definition__mismatched_signal_timeframe",
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ"],
             key="mismatched_signal_timeframe_universe",
@@ -617,28 +617,28 @@ def test_build_strategy_spec_from_blueprint_rejects_mismatched_signal_timeframe(
     )
 
     try:
-        build_strategy_spec_from_blueprint(blueprint)
+        build_strategy_spec_from_definition(definition)
     except ValueError as exc:
         assert "requires matching selection data and signal timeframes" in str(exc)
     else:
         raise AssertionError("Expected mismatched signal timeframe to be rejected.")
 
 
-def test_full_universe_candidates_are_derived_from_blueprints() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(FULL_UNIVERSE_CANDIDATE_BLUEPRINTS)
-    assert len(FULL_UNIVERSE_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_full_universe_candidates_are_derived_from_definitions() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(FULL_UNIVERSE_CANDIDATE_DEFINITIONS)
+    assert len(FULL_UNIVERSE_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
     ] == [
-        blueprint.strategy_id for blueprint in FULL_UNIVERSE_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in FULL_UNIVERSE_CANDIDATE_DEFINITIONS
     ]
 
-    core_candidate = FULL_UNIVERSE_CANDIDATE_BLUEPRINTS[8]
+    core_candidate = FULL_UNIVERSE_CANDIDATE_DEFINITIONS[8]
     assert core_candidate.execution_plan.decision_schedule == "year_end"
     assert core_candidate.execution_plan.rebalance_schedule == "year_end"
     assert core_candidate.signals[0].data_timeframe.key == "1d"
 
-    rebuilt = build_strategy_spec_from_blueprint(core_candidate)
+    rebuilt = build_strategy_spec_from_definition(core_candidate)
     assert rebuilt == derived_strategies[8]
 
 
@@ -697,9 +697,9 @@ def test_strategy_signal_builder_infers_alignment_policy_for_mismatched_timefram
 
 
 
-def test_selection_blueprint_builder_creates_legacy_compatible_blueprint() -> None:
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+def test_selection_definition_builder_creates_legacy_compatible_definition() -> None:
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -722,11 +722,11 @@ def test_selection_blueprint_builder_creates_legacy_compatible_blueprint() -> No
         )
     )
 
-    assert blueprint.strategy_id == "builder__selection"
-    assert blueprint.signals[0].source_kind == "selection_signal"
-    assert blueprint.signals[0].data_timeframe.key == "1d"
+    assert definition.strategy_id == "builder__selection"
+    assert definition.signals[0].source_kind == "selection_signal"
+    assert definition.signals[0].data_timeframe.key == "1d"
 
-    rebuilt = build_strategy_spec_from_blueprint(blueprint)
+    rebuilt = build_strategy_spec_from_definition(definition)
     assert rebuilt.selection.strategy_type == FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.strategy_type
     assert rebuilt.execution_policy.rebalance_schedule == "month_end"
     assert rebuilt.decision_schedule == "month_end"
@@ -734,9 +734,9 @@ def test_selection_blueprint_builder_creates_legacy_compatible_blueprint() -> No
     assert rebuilt.signal_execution_contexts[0]["signalTimeframe"] == "1d"
 
 
-def test_predictor_blueprint_builder_creates_overlay_signal() -> None:
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+def test_predictor_definition_builder_creates_overlay_signal() -> None:
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -762,12 +762,12 @@ def test_predictor_blueprint_builder_creates_overlay_signal() -> None:
         )
     )
 
-    assert len(blueprint.signals) == 2
-    assert blueprint.signals[0].weight == 0.6
-    assert blueprint.signals[1].source_kind == "predictor_overlay"
-    assert blueprint.signals[1].predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
+    assert len(definition.signals) == 2
+    assert definition.signals[0].weight == 0.6
+    assert definition.signals[1].source_kind == "predictor_overlay"
+    assert definition.signals[1].predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
 
-    rebuilt = build_strategy_spec_from_blueprint(blueprint)
+    rebuilt = build_strategy_spec_from_definition(definition)
     assert rebuilt.predictor_use is not None
     assert rebuilt.predictor_use.predictor_weight == 0.4
     assert rebuilt.predictor_signal_execution_context is not None
@@ -775,15 +775,15 @@ def test_predictor_blueprint_builder_creates_overlay_signal() -> None:
 
 
 
-def test_selection_blueprint_builder_accepts_explicit_signal_metadata() -> None:
+def test_selection_definition_builder_accepts_explicit_signal_metadata() -> None:
     observation_spec = build_observation_spec(
         key="observation__builder_metadata",
         label="Builder metadata observation",
         tickers=("SPY", "QQQ", "TLT"),
         fields=("close", "volume"),
     )
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection__metadata",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -823,7 +823,7 @@ def test_selection_blueprint_builder_accepts_explicit_signal_metadata() -> None:
         )
     )
 
-    signal = blueprint.signals[0]
+    signal = definition.signals[0]
     assert signal.data_source_spec is not None
     assert signal.data_source_spec.kind == "market_panel"
     assert signal.feature_definition_spec is not None
@@ -832,9 +832,9 @@ def test_selection_blueprint_builder_accepts_explicit_signal_metadata() -> None:
     assert signal.alignment_policy.method == "end_of_period"
 
 
-def test_selection_blueprint_builder_supports_distinct_signal_timeframe() -> None:
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+def test_selection_definition_builder_supports_distinct_signal_timeframe() -> None:
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection__multi_tf",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -856,14 +856,14 @@ def test_selection_blueprint_builder_supports_distinct_signal_timeframe() -> Non
         )
     )
 
-    assert blueprint.signals[0].data_timeframe.key == "1d"
-    assert blueprint.signals[0].signal_timeframe.key == "1w"
-    assert blueprint.execution_plan.decision_schedule == "every_bar"
-    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+    assert definition.signals[0].data_timeframe.key == "1d"
+    assert definition.signals[0].signal_timeframe.key == "1w"
+    assert definition.execution_plan.decision_schedule == "every_bar"
+    assert definition.execution_plan.rebalance_schedule == "month_end"
 
 
 
-def test_predictor_blueprint_builder_accepts_explicit_signal_metadata() -> None:
+def test_predictor_definition_builder_accepts_explicit_signal_metadata() -> None:
     selection_observation_spec = build_observation_spec(
         key="observation__builder_predictor_selection_metadata",
         label="Predictor selection observation",
@@ -876,8 +876,8 @@ def test_predictor_blueprint_builder_accepts_explicit_signal_metadata() -> None:
         tickers=("SPY", "QQQ", "TLT"),
         fields=("close", "volume"),
     )
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor__metadata",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -937,7 +937,7 @@ def test_predictor_blueprint_builder_accepts_explicit_signal_metadata() -> None:
         )
     )
 
-    selection_signal, predictor_signal = blueprint.signals
+    selection_signal, predictor_signal = definition.signals
     assert selection_signal.data_source_spec is not None
     assert selection_signal.data_source_spec.kind == "selection_panel"
     assert predictor_signal.data_source_spec is not None
@@ -948,9 +948,9 @@ def test_predictor_blueprint_builder_accepts_explicit_signal_metadata() -> None:
     assert predictor_signal.alignment_policy.method == "calendar_resample"
 
 
-def test_predictor_blueprint_builder_supports_distinct_predictor_timeframes() -> None:
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+def test_predictor_definition_builder_supports_distinct_predictor_timeframes() -> None:
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor__multi_tf",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -980,18 +980,18 @@ def test_predictor_blueprint_builder_supports_distinct_predictor_timeframes() ->
         )
     )
 
-    assert blueprint.signals[0].data_timeframe.key == "1d"
-    assert blueprint.signals[0].signal_timeframe.key == "1w"
-    assert blueprint.signals[1].data_timeframe.key == "1mo"
-    assert blueprint.signals[1].signal_timeframe.key == "1mo"
-    assert blueprint.execution_plan.decision_schedule == "every_bar"
-    assert blueprint.execution_plan.rebalance_schedule == "month_end"
+    assert definition.signals[0].data_timeframe.key == "1d"
+    assert definition.signals[0].signal_timeframe.key == "1w"
+    assert definition.signals[1].data_timeframe.key == "1mo"
+    assert definition.signals[1].signal_timeframe.key == "1mo"
+    assert definition.execution_plan.decision_schedule == "every_bar"
+    assert definition.execution_plan.rebalance_schedule == "month_end"
 
 
 
-def test_direct_execution_blueprint_compatibility_helper_accepts_signal_timeframe_execution() -> None:
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+def test_direct_execution_definition_compatibility_helper_accepts_signal_timeframe_execution() -> None:
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection__direct_execution",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1013,12 +1013,12 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_signal_timefram
         )
     )
 
-    assert is_legacy_compatible_strategy_blueprint(blueprint) is False
-    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
-    assert get_direct_execution_strategy_blueprint_compatibility_issues(blueprint) == []
+    assert is_legacy_compatible_strategy_definition(definition) is False
+    assert is_direct_execution_compatible_strategy_definition(definition) is True
+    assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
-    direct_strategy = build_direct_execution_strategy_spec_from_blueprint(blueprint)
-    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    direct_strategy = build_direct_execution_strategy_spec_from_definition(definition)
+    executable_strategy = build_executable_strategy_spec_from_definition(definition)
     assert direct_strategy.timeframe.key == "1w"
     assert executable_strategy.timeframe.key == "1w"
     assert executable_strategy.execution_mode == "direct_signal_timeframe"
@@ -1028,9 +1028,9 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_signal_timefram
     assert executable_strategy.execution_policy.rebalance_schedule == "month_end"
 
 
-def test_direct_execution_blueprint_compatibility_helper_accepts_multi_selection_blend() -> None:
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+def test_direct_execution_definition_compatibility_helper_accepts_multi_selection_blend() -> None:
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection__multi_signal_direct_execution",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1055,7 +1055,7 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_multi_selection
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=blueprint.signals[0].observation_spec,
+        observation_spec=definition.signals[0].observation_spec,
         data_timeframe=DEFAULT_DAILY_TIMEFRAME,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
@@ -1070,10 +1070,10 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_multi_selection
             },
         },
     )
-    blueprint = replace(blueprint, signals=(blueprint.signals[0], secondary_signal))
+    definition = replace(definition, signals=(definition.signals[0], secondary_signal))
 
-    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
-    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    assert is_direct_execution_compatible_strategy_definition(definition) is True
+    executable_strategy = build_executable_strategy_spec_from_definition(definition)
     assert executable_strategy.timeframe.key == "1w"
     assert len(executable_strategy.signal_execution_contexts) == 2
     assert executable_strategy.signal_execution_contexts[1]["selectionKey"] == "secondary_momo6"
@@ -1146,9 +1146,9 @@ def test_prepare_signal_component_data_uses_alignment_policy_for_signal_returns(
     assert str(calendar_volumes.index[0].date()) == "2025-01-17"
 
 
-def test_direct_execution_blueprint_compatibility_helper_preserves_selection_alignment_policy_payloads() -> None:
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+def test_direct_execution_definition_compatibility_helper_preserves_selection_alignment_policy_payloads() -> None:
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection__alignment_payloads",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1178,7 +1178,7 @@ def test_direct_execution_blueprint_compatibility_helper_preserves_selection_ali
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=blueprint.signals[0].observation_spec,
+        observation_spec=definition.signals[0].observation_spec,
         data_timeframe=DEFAULT_DAILY_TIMEFRAME,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
@@ -1198,9 +1198,9 @@ def test_direct_execution_blueprint_compatibility_helper_preserves_selection_ali
             },
         },
     )
-    blueprint = replace(blueprint, signals=(blueprint.signals[0], secondary_signal))
+    definition = replace(definition, signals=(definition.signals[0], secondary_signal))
 
-    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    executable_strategy = build_executable_strategy_spec_from_definition(definition)
 
     assert executable_strategy.signal_execution_contexts[0]["alignmentPolicy"]["method"] == "asof_last"
     assert executable_strategy.signal_execution_contexts[1]["alignmentPolicy"]["method"] == "end_of_period"
@@ -1208,9 +1208,9 @@ def test_direct_execution_blueprint_compatibility_helper_preserves_selection_ali
     assert executable_strategy.signal_execution_contexts[1]["signalTimeframe"] == "1w"
 
 
-def test_build_strategy_signal_execution_contexts_from_blueprint_returns_selection_and_predictor_contexts() -> None:
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+def test_build_strategy_signal_execution_contexts_from_definition_returns_selection_and_predictor_contexts() -> None:
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor__execution_contexts",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1248,7 +1248,7 @@ def test_build_strategy_signal_execution_contexts_from_blueprint_returns_selecti
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=blueprint.signals[0].observation_spec,
+        observation_spec=definition.signals[0].observation_spec,
         data_timeframe=DEFAULT_DAILY_TIMEFRAME,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
@@ -1268,9 +1268,9 @@ def test_build_strategy_signal_execution_contexts_from_blueprint_returns_selecti
             },
         },
     )
-    blueprint = replace(blueprint, signals=(blueprint.signals[0], secondary_signal, blueprint.signals[1]))
+    definition = replace(definition, signals=(definition.signals[0], secondary_signal, definition.signals[1]))
 
-    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_blueprint(blueprint)
+    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_definition(definition)
 
     assert len(selection_contexts) == 2
     assert isinstance(selection_contexts[0]["selectionKey"], str)
@@ -1596,9 +1596,9 @@ def test_compare_portfolio_runs_uses_explicit_signal_execution_contexts() -> Non
     assert len(runs) == 1
     assert runs[0]["key"] == strategy.key
 
-def test_direct_execution_blueprint_compatibility_helper_preserves_predictor_alignment_policy_payload() -> None:
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+def test_direct_execution_definition_compatibility_helper_preserves_predictor_alignment_policy_payload() -> None:
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor__alignment_payload",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1633,7 +1633,7 @@ def test_direct_execution_blueprint_compatibility_helper_preserves_predictor_ali
         )
     )
 
-    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    executable_strategy = build_executable_strategy_spec_from_definition(definition)
     predictor_payload = extract_predictor_signal_payload(executable_strategy)
 
     assert executable_strategy.predictor_signal_execution_context is not None
@@ -1643,9 +1643,9 @@ def test_direct_execution_blueprint_compatibility_helper_preserves_predictor_ali
     assert predictor_payload["signalTimeframe"] == "1w"
 
 
-def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overlay_with_multi_selection_blend() -> None:
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+def test_direct_execution_definition_compatibility_helper_accepts_predictor_overlay_with_multi_selection_blend() -> None:
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor__multi_selection_direct_execution",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1678,7 +1678,7 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overl
         key="selection__secondary",
         label="Secondary momentum signal",
         description="Secondary momentum signal",
-        observation_spec=blueprint.signals[0].observation_spec,
+        observation_spec=definition.signals[0].observation_spec,
         data_timeframe=DEFAULT_DAILY_TIMEFRAME,
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
         source_kind="selection_signal",
@@ -1693,21 +1693,21 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overl
             },
         },
     )
-    blueprint = replace(
-        blueprint,
-        signals=(blueprint.signals[0], secondary_signal, blueprint.signals[1]),
+    definition = replace(
+        definition,
+        signals=(definition.signals[0], secondary_signal, definition.signals[1]),
     )
 
-    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
-    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    assert is_direct_execution_compatible_strategy_definition(definition) is True
+    executable_strategy = build_executable_strategy_spec_from_definition(definition)
     assert executable_strategy.predictor_use is not None
     assert executable_strategy.predictor_use.predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
     assert executable_strategy.signal_execution_contexts[1]["selectionKey"] == "secondary_momo6"
 
 
-def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overlay() -> None:
-    blueprint = build_predictor_strategy_blueprint(
-        PredictorBlueprintDefinition(
+def test_direct_execution_definition_compatibility_helper_accepts_predictor_overlay() -> None:
+    definition = build_predictor_strategy_definition(
+        PredictorDefinitionDefinition(
             strategy_id="builder__predictor__direct_execution",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1737,11 +1737,11 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overl
         )
     )
 
-    assert is_legacy_compatible_strategy_blueprint(blueprint) is False
-    assert is_direct_execution_compatible_strategy_blueprint(blueprint) is True
-    assert get_direct_execution_strategy_blueprint_compatibility_issues(blueprint) == []
+    assert is_legacy_compatible_strategy_definition(definition) is False
+    assert is_direct_execution_compatible_strategy_definition(definition) is True
+    assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
-    executable_strategy = build_executable_strategy_spec_from_blueprint(blueprint)
+    executable_strategy = build_executable_strategy_spec_from_definition(definition)
     assert executable_strategy.timeframe.key == "1w"
     assert executable_strategy.predictor_use is not None
     assert executable_strategy.predictor_use.predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
@@ -1749,9 +1749,9 @@ def test_direct_execution_blueprint_compatibility_helper_accepts_predictor_overl
     assert executable_strategy.execution_mode == "direct_signal_timeframe"
 
 
-def test_legacy_blueprint_compatibility_helper_reports_blockers() -> None:
-    blueprint = build_selection_strategy_blueprint(
-        SelectionBlueprintDefinition(
+def test_legacy_definition_compatibility_helper_reports_blockers() -> None:
+    definition = build_selection_strategy_definition(
+        SelectionDefinitionDefinition(
             strategy_id="builder__selection__incompatible",
             selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
             portfolio_model=build_portfolio_model_spec("hierarchical_risk_parity"),
@@ -1773,13 +1773,13 @@ def test_legacy_blueprint_compatibility_helper_reports_blockers() -> None:
         )
     )
 
-    issues = get_legacy_strategy_blueprint_compatibility_issues(blueprint)
-    assert is_legacy_compatible_strategy_blueprint(blueprint) is False
+    issues = get_legacy_strategy_definition_compatibility_issues(definition)
+    assert is_legacy_compatible_strategy_definition(definition) is False
     assert "requires matching decision and rebalance schedules" in issues
     assert "requires matching selection data and signal timeframes" in issues
 
     try:
-        build_strategy_spec_from_blueprint(blueprint)
+        build_strategy_spec_from_definition(definition)
     except ValueError as exc:
         assert "Legacy strategy adapter incompatibilities" in str(exc)
         assert "requires matching decision and rebalance schedules" in str(exc)
@@ -1788,8 +1788,8 @@ def test_legacy_blueprint_compatibility_helper_reports_blockers() -> None:
 
 
 
-def test_selection_blueprint_product_builder_generates_cross_product() -> None:
-    blueprints = build_selection_strategy_blueprint_product(
+def test_selection_definition_product_builder_generates_cross_product() -> None:
+    definitions = build_selection_strategy_definition_product(
         strategy_id_pattern="prod-{selection}-{portfolio_model}-{execution}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -1837,7 +1837,7 @@ def test_selection_blueprint_product_builder_generates_cross_product() -> None:
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
     )
 
-    assert [blueprint.strategy_id for blueprint in blueprints] == [
+    assert [definition.strategy_id for definition in definitions] == [
         "prod-momo2-eq-month",
         "prod-momo2-eq-daily",
         "prod-momo2-hrp-month",
@@ -1846,8 +1846,8 @@ def test_selection_blueprint_product_builder_generates_cross_product() -> None:
 
 
 
-def test_predictor_blueprint_product_builder_generates_cross_product() -> None:
-    blueprints = build_predictor_strategy_blueprint_product(
+def test_predictor_definition_product_builder_generates_cross_product() -> None:
+    definitions = build_predictor_strategy_definition_product(
         strategy_id_pattern="prod-{selection}-{predictor}-{portfolio_model}-{execution}",
         selection_variants=[
             SelectionVariantDefinition(
@@ -1904,98 +1904,98 @@ def test_predictor_blueprint_product_builder_generates_cross_product() -> None:
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0, max_weight=0.45),
     )
 
-    assert [blueprint.strategy_id for blueprint in blueprints] == [
+    assert [definition.strategy_id for definition in definitions] == [
         "prod-momo2-pred5050-hrp-month",
         "prod-momo2-pred5050-hrp-daily",
     ]
-    assert [blueprint.label for blueprint in blueprints] == [
+    assert [definition.label for definition in definitions] == [
         "Predictor blend × 月次",
         "Predictor blend × 毎バー",
     ]
 
 
 
-def test_filtered_candidates_are_derived_from_blueprints() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(FILTERED_CANDIDATE_BLUEPRINTS)
-    assert len(FILTERED_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_filtered_candidates_are_derived_from_definitions() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(FILTERED_CANDIDATE_DEFINITIONS)
+    assert len(FILTERED_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
     ] == [
-        blueprint.strategy_id for blueprint in FILTERED_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in FILTERED_CANDIDATE_DEFINITIONS
     ]
 
-    rebuilt = build_strategy_spec_from_blueprint(FILTERED_CANDIDATE_BLUEPRINTS[0])
+    rebuilt = build_strategy_spec_from_definition(FILTERED_CANDIDATE_DEFINITIONS[0])
     assert rebuilt == derived_strategies[0]
 
 
-def test_universe_variant_candidates_are_derived_from_blueprints() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS)
-    assert len(UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_universe_variant_candidates_are_derived_from_definitions() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS)
+    assert len(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
     ] == [
-        blueprint.strategy_id for blueprint in UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS
     ]
 
-    rebuilt = build_strategy_spec_from_blueprint(UNIVERSE_VARIANT_CANDIDATE_BLUEPRINTS[0])
+    rebuilt = build_strategy_spec_from_definition(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS[0])
     assert rebuilt == derived_strategies[0]
 
 
-def test_predictor_candidates_are_derived_from_blueprints() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(PREDICTOR_CANDIDATE_BLUEPRINTS)
-    assert len(PREDICTOR_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_predictor_candidates_are_derived_from_definitions() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(PREDICTOR_CANDIDATE_DEFINITIONS)
+    assert len(PREDICTOR_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
     ] == [
-        blueprint.strategy_id for blueprint in PREDICTOR_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in PREDICTOR_CANDIDATE_DEFINITIONS
     ]
 
-    predictor_candidate = PREDICTOR_CANDIDATE_BLUEPRINTS[1]
+    predictor_candidate = PREDICTOR_CANDIDATE_DEFINITIONS[1]
     assert predictor_candidate.execution_plan.decision_schedule == "month_end"
     assert predictor_candidate.signals[0].weight == 0.6
     assert predictor_candidate.signals[1].source_kind == "predictor_overlay"
     assert predictor_candidate.signals[1].predictor_key is not None
 
-    rebuilt = build_strategy_spec_from_blueprint(predictor_candidate)
+    rebuilt = build_strategy_spec_from_definition(predictor_candidate)
     assert rebuilt == derived_strategies[1]
 
 
-def test_baseline_blueprint_catalog_matches_strategy_catalog() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(BASELINE_CANDIDATE_BLUEPRINTS)
-    assert len(BASELINE_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_baseline_definition_catalog_matches_strategy_catalog() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(BASELINE_CANDIDATE_DEFINITIONS)
+    assert len(BASELINE_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
-        blueprint.strategy_id for blueprint in BASELINE_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in BASELINE_CANDIDATE_DEFINITIONS
     ] == [
         strategy.strategy_id for strategy in derived_strategies
     ]
 
 
-def test_canonical_blueprint_catalog_matches_strategy_catalog() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(CANONICAL_CANDIDATE_BLUEPRINTS)
-    assert len(CANONICAL_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_canonical_definition_catalog_matches_strategy_catalog() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(CANONICAL_CANDIDATE_DEFINITIONS)
+    assert len(CANONICAL_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
-        blueprint.strategy_id for blueprint in CANONICAL_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in CANONICAL_CANDIDATE_DEFINITIONS
     ] == [
         strategy.strategy_id for strategy in derived_strategies
     ]
 
 
 
-def test_timeframe_variant_candidates_are_derived_from_blueprints() -> None:
-    derived_strategies = build_strategy_specs_from_blueprints(TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS)
-    assert len(TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS) == len(derived_strategies)
+def test_timeframe_variant_candidates_are_derived_from_definitions() -> None:
+    derived_strategies = build_strategy_specs_from_definitions(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS)
+    assert len(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
     ] == [
-        blueprint.strategy_id for blueprint in TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS
+        definition.strategy_id for definition in TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS
     ]
 
-    monthly_candidate = TIMEFRAME_VARIANT_CANDIDATE_BLUEPRINTS[2]
+    monthly_candidate = TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS[2]
     assert monthly_candidate.execution_plan.decision_schedule == "month_end"
     assert monthly_candidate.execution_plan.rebalance_schedule == "month_end"
     assert monthly_candidate.signals[0].data_timeframe.key == "1d"
 
-    rebuilt = build_strategy_spec_from_blueprint(monthly_candidate)
+    rebuilt = build_strategy_spec_from_definition(monthly_candidate)
     assert rebuilt == derived_strategies[2]
 
 

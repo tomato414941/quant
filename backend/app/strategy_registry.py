@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from app.strategy_catalog import (
-    CANONICAL_CANDIDATE_BLUEPRINTS,
+    CANONICAL_CANDIDATE_DEFINITIONS,
     REFERENCE_EQUAL_WEIGHT_WITH_CASH,
 )
 from app.strategy_presets import *
 
 
 __all__ = [
-    "CANONICAL_CANDIDATE_BLUEPRINTS",
+    "CANONICAL_CANDIDATE_DEFINITIONS",
     "DEFAULT_INVESTMENT_UNIVERSE",
     "DEFAULT_RISK_CONTROLS",
     "DUAL_MOMENTUM_TOP3",

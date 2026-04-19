@@ -11,6 +11,8 @@ def fake_fetch_market_universe_bundle(
     tickers: list[str],
     period: str,
     timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple[dict, dict]:
     if period == "3y":
         closes = pd.DataFrame(

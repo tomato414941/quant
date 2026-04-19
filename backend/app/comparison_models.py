@@ -9,6 +9,8 @@ from app.portfolio import PortfolioState, StrategyDefinition
 class MarketSliceSpec:
     period: str
     sanity_periods: list[str] = field(default_factory=list)
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 @dataclass

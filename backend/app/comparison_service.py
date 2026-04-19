@@ -269,11 +269,24 @@ def fetch_market_data_by_timeframe(
     bundles_by_timeframe: dict[str, dict] = {}
     metadata_by_timeframe: dict[str, dict] = {}
 
+    start_date = (
+        comparison.run_spec.market_slice.start_date
+        if period == comparison.run_spec.market_slice.period
+        else None
+    )
+    end_date = (
+        comparison.run_spec.market_slice.end_date
+        if period == comparison.run_spec.market_slice.period
+        else None
+    )
+
     for timeframe in timeframes:
         market_bundle, metadata = fetch_market_universe_bundle(
             tickers=comparison_tickers,
             period=period,
             timeframe=timeframe.yfinance_interval,
+            start_date=start_date,
+            end_date=end_date,
         )
         bundles_by_timeframe[timeframe.key] = market_bundle
         metadata_by_timeframe[timeframe.key] = metadata
@@ -641,6 +654,16 @@ def deserialize_comparison_run_spec_payload(payload: dict[str, object]) -> Compa
             market_slice=MarketSliceSpec(
                 period=str(market_slice_payload["period"]),
                 sanity_periods=[str(period) for period in market_slice_payload.get("sanityPeriods", ())],
+                start_date=(
+                    str(market_slice_payload["startDate"])
+                    if market_slice_payload.get("startDate") is not None
+                    else None
+                ),
+                end_date=(
+                    str(market_slice_payload["endDate"])
+                    if market_slice_payload.get("endDate") is not None
+                    else None
+                ),
             ),
             portfolio_state=deserialize_portfolio_state(portfolio_state_payload),
             capital_base=float(run_spec_payload["capitalBase"]),
@@ -1514,6 +1537,41 @@ def serialize_timeframe(timeframe: TimeframeSpec) -> dict:
     }
 
 
+def serialize_market_slice_run_spec(
+    comparison: ComparisonSpec,
+    timeframes: list[TimeframeSpec],
+    fields: list[str],
+) -> dict:
+    payload = {
+        "period": comparison.run_spec.market_slice.period,
+        "sanityPeriods": comparison.run_spec.market_slice.sanity_periods,
+        "timeframes": [serialize_timeframe(timeframe) for timeframe in timeframes],
+        "fields": fields,
+    }
+    add_market_slice_dates(payload, comparison)
+    return payload
+
+
+def should_include_market_slice_dates(
+    comparison: ComparisonSpec,
+    period_override: str | None = None,
+) -> bool:
+    return period_override is None or period_override == comparison.run_spec.market_slice.period
+
+
+def add_market_slice_dates(
+    payload: dict,
+    comparison: ComparisonSpec,
+    period_override: str | None = None,
+) -> None:
+    if not should_include_market_slice_dates(comparison, period_override):
+        return
+    if comparison.run_spec.market_slice.start_date is not None:
+        payload["startDate"] = comparison.run_spec.market_slice.start_date
+    if comparison.run_spec.market_slice.end_date is not None:
+        payload["endDate"] = comparison.run_spec.market_slice.end_date
+
+
 def serialize_market_slice_context(
     *,
     comparison: ComparisonSpec,
@@ -1532,6 +1590,7 @@ def serialize_market_slice_context(
         "alignedEndDate": dataset_metadata["aligned_end_date"],
         "rowCount": dataset_metadata["row_count"],
     }
+    add_market_slice_dates(payload, comparison, period_override)
     failed_tickers = dataset_metadata.get("failed_tickers")
     if failed_tickers:
         payload["failedTickers"] = failed_tickers
@@ -1576,6 +1635,8 @@ def serialize_signal_market_data_context(
     dataset_metadata: dict[str, object],
     period: str,
     sanity_periods: list[str],
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> dict:
     payload = {
         "strategyId": strategy_id,
@@ -1592,6 +1653,10 @@ def serialize_signal_market_data_context(
         "alignedEndDate": dataset_metadata["aligned_end_date"],
         "rowCount": dataset_metadata["row_count"],
     }
+    if start_date is not None:
+        payload["startDate"] = start_date
+    if end_date is not None:
+        payload["endDate"] = end_date
     if signal_spec.alignment_policy is not None:
         payload["alignmentPolicy"] = {
             "key": signal_spec.alignment_policy.key,
@@ -1613,6 +1678,8 @@ def serialize_signal_market_data_contexts(
     *,
     period: str,
     sanity_periods: list[str],
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> list[dict]:
     contexts: list[dict] = []
     for strategy_definition in strategy_definitions or []:
@@ -1629,6 +1696,8 @@ def serialize_signal_market_data_contexts(
                     dataset_metadata=dataset_metadata,
                     period=period,
                     sanity_periods=sanity_periods,
+                    start_date=start_date,
+                    end_date=end_date,
                 )
             )
     return contexts
@@ -1664,6 +1733,16 @@ def serialize_evaluation(
         metadata_by_timeframe,
         period=period_override or comparison.run_spec.market_slice.period,
         sanity_periods=comparison.run_spec.market_slice.sanity_periods,
+        start_date=(
+            comparison.run_spec.market_slice.start_date
+            if should_include_market_slice_dates(comparison, period_override)
+            else None
+        ),
+        end_date=(
+            comparison.run_spec.market_slice.end_date
+            if should_include_market_slice_dates(comparison, period_override)
+            else None
+        ),
     )
     if signal_market_data_contexts:
         payload["signalMarketDataContexts"] = signal_market_data_contexts
@@ -1689,12 +1768,7 @@ def serialize_run_spec(
     return {
         "kind": "comparison_run_spec",
         "schemaVersion": "v1",
-        "marketSlice": {
-            "period": comparison.run_spec.market_slice.period,
-            "sanityPeriods": comparison.run_spec.market_slice.sanity_periods,
-            "timeframes": [serialize_timeframe(timeframe) for timeframe in timeframes],
-            "fields": fields,
-        },
+        "marketSlice": serialize_market_slice_run_spec(comparison, timeframes, fields),
         "portfolioState": serialize_portfolio_state(comparison.run_spec.portfolio_state),
         "capitalBase": round(comparison.run_spec.capital_base, 2),
         "executionAssumptions": serialize_execution_assumptions(comparison),

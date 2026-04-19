@@ -72,6 +72,8 @@ def fake_fetch_market_universe(
     tickers: list[str],
     period: str,
     timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     if period == "3y":
         frame = pd.DataFrame(
@@ -167,8 +169,10 @@ def fake_fetch_market_universe_bundle(
     tickers: list[str],
     period: str,
     timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple[dict, dict]:
-    closes, metadata = fake_fetch_market_universe(tickers, period, timeframe)
+    closes, metadata = fake_fetch_market_universe(tickers, period, timeframe, start_date, end_date)
     volumes = pd.DataFrame(
         {
             ticker: [1_000_000 + index * 10_000 + offset * 1_000 for index in range(len(closes))]
@@ -183,6 +187,8 @@ def fake_fetch_market_universe_bundle_extended(
     tickers: list[str],
     period: str,
     timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple[dict, dict]:
     if timeframe == "1wk":
         index = pd.date_range("2024-01-05", periods=20, freq="W-FRI")
@@ -242,6 +248,9 @@ def test_comparison_run_spec_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparisonId"] == config.comparison_id
     assert payload["kind"] == "comparison_run_spec_payload"
     assert payload["runSpec"]["kind"] == "comparison_run_spec"
+    assert payload["runSpec"]["marketSlice"]["period"] == config.run_spec.market_slice.period
+    assert payload["runSpec"]["marketSlice"]["startDate"] == config.run_spec.market_slice.start_date
+    assert payload["runSpec"]["marketSlice"]["endDate"] == config.run_spec.market_slice.end_date
     assert payload["comparisonFingerprint"]
     assert payload["runSpecFingerprint"]
     assert payload["selectionPolicy"]["primaryMetric"] == config.selection_policy.primary_metric
@@ -304,7 +313,7 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     expected_reference_count = len(config.reference_strategies)
     expected_predictor_count = count_predictor_specs(config.candidate_strategies)
 
-    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert payload["comparison"]["selectionPolicy"]["primaryMetric"] == "sharpe_ratio"
     assert payload["comparison"]["runSpec"]["kind"] == "comparison_run_spec"
     assert payload["comparison"]["runSpec"]["executionAssumptions"]["kind"] == "close_execution_assumptions"
@@ -339,7 +348,15 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert {
         context["period"]
         for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
-    } == {"10y"}
+    } == {config.run_spec.market_slice.period}
+    assert {
+        context["startDate"]
+        for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
+    } == {config.run_spec.market_slice.start_date}
+    assert {
+        context["endDate"]
+        for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
+    } == {config.run_spec.market_slice.end_date}
     assert all(context["sanityPeriods"] == ["3y"] for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"])
     assert all(context["alignedStartDate"] == "2025-01-01" for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"])
     assert all(context["alignedEndDate"] == "2025-01-07" for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"])
@@ -443,7 +460,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     payload = response.json()
     expected_predictor_count = count_predictor_specs(config.candidate_strategies + config.reference_strategies)
     assert payload["kind"] == "predictor_run_collection"
-    assert payload["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert payload["runSpec"]["kind"] == "comparison_run_spec"
     assert len(payload["predictorSpecs"]) == expected_predictor_count
     assert len(payload["predictorRuns"]) == expected_predictor_count
@@ -696,9 +713,21 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
 def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_execution(monkeypatch, tmp_path) -> None:
     requested_timeframes: list[str] = []
 
-    def tracking_fetch_market_universe_bundle(tickers: list[str], period: str, timeframe: str = "1d"):
+    def tracking_fetch_market_universe_bundle(
+        tickers: list[str],
+        period: str,
+        timeframe: str = "1d",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ):
         requested_timeframes.append(timeframe)
-        return fake_fetch_market_universe_bundle_extended(tickers, period, timeframe)
+        return fake_fetch_market_universe_bundle_extended(
+            tickers,
+            period,
+            timeframe,
+            start_date,
+            end_date,
+        )
 
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", tracking_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1049,7 +1078,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     expected_reference_count = len(config.reference_strategies)
     expected_predictor_count = count_predictor_specs(config.candidate_strategies)
     assert payload["kind"] == "strategy_run_collection"
-    assert payload["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert payload["runSpec"]["kind"] == "comparison_run_spec"
     assert len(payload["candidateStrategies"]) == expected_strategy_count
     assert len(payload["referenceStrategies"]) == expected_reference_count
@@ -1123,9 +1152,17 @@ def test_comparison_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp
         tickers: list[str],
         period: str,
         timeframe: str = "1d",
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> tuple[dict, dict]:
         fetch_calls.append((period, timeframe))
-        return fake_fetch_market_universe_bundle(tickers, period, timeframe)
+        return fake_fetch_market_universe_bundle(
+            tickers,
+            period,
+            timeframe,
+            start_date,
+            end_date,
+        )
 
     monkeypatch.setattr(
         "app.main.fetch_market_universe_bundle",
@@ -1158,8 +1195,8 @@ def test_comparison_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp
     assert response.status_code == 200
     payload = response.json()
     assert {(period, timeframe) for period, timeframe in fetch_calls} == {
-        ("10y", "1d"),
-        ("10y", "1wk"),
+        (config.run_spec.market_slice.period, "1d"),
+        (config.run_spec.market_slice.period, "1wk"),
         ("3y", "1d"),
         ("3y", "1wk"),
     }
@@ -1244,7 +1281,7 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
 
     assert first_response.status_code == 200
     first_payload = first_response.json()
-    assert first_payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
+    assert first_payload["comparison"]["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert first_payload["resultCount"] == 2
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 2
@@ -1330,7 +1367,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert payload["limit"] == 5
     assert payload["runKind"] == "strategy_run"
     assert payload["recordCount"] == 5
@@ -1376,7 +1413,7 @@ def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert payload["generation"]["method"] == "parameter_sweep"
     assert payload["generation"]["batchKey"] == "local_tilt_search_9m_v1"
     assert payload["generation"]["spec"]["families"][0]["windowSpec"]["unit"] == "months"
@@ -1427,7 +1464,7 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
             normalize_strategy_definitions(config.candidate_strategies)
         )
     )
-    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
+    assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_2015_2025"
     assert payload["resultCount"] == expected_ranking_count
     assert payload["runStoreSummary"]["cachedRunCount"] == 0
     assert payload["runStoreSummary"]["computedRunCount"] == expected_ranking_count

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import time
 from typing import Protocol
 
@@ -13,6 +14,8 @@ class MarketDataRequest:
     tickers: tuple[str, ...]
     period: str
     timeframe: str = "1d"
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 class MarketDataProvider(Protocol):
@@ -41,6 +44,8 @@ class YFinanceMarketDataProvider:
                 ticker=ticker,
                 period=request.period,
                 timeframe=request.timeframe,
+                start_date=request.start_date,
+                end_date=request.end_date,
             )
             if data is None:
                 failed_tickers[ticker] = failure_reason or "unknown_download_failure"
@@ -77,14 +82,21 @@ class YFinanceMarketDataProvider:
                 f"Failures: {failed_details}"
             )
 
-        closes = pd.concat(close_series_by_ticker.values(), axis=1, join="inner").sort_index()
+        base_index = next(iter(close_series_by_ticker.values())).index
+        closes = pd.concat(
+            [align_series_to_index(series, base_index).ffill() for series in close_series_by_ticker.values()],
+            axis=1,
+        ).sort_index()
         closes = closes.dropna()
         if len(closes) < 3:
             raise ValueError(
                 "At least 3 aligned rows are required for a portfolio backtest after "
                 f"provider filtering. Available tickers: {list(close_series_by_ticker)}"
             )
-        volumes = pd.concat(volume_series_by_ticker.values(), axis=1, join="inner").sort_index()
+        volumes = pd.concat(
+            [align_series_to_index(series, base_index) for series in volume_series_by_ticker.values()],
+            axis=1,
+        ).sort_index()
         volumes = volumes.reindex(closes.index).fillna(0.0)
 
         metadata = {
@@ -92,6 +104,8 @@ class YFinanceMarketDataProvider:
             "requested_tickers": unique_tickers,
             "failed_tickers": failed_tickers,
             "period": request.period,
+            "start_date": request.start_date,
+            "end_date": request.end_date,
             "timeframe": request.timeframe,
             "source": self.source_label,
             "aligned_start_date": str(closes.index[0]),
@@ -106,18 +120,25 @@ class YFinanceMarketDataProvider:
         ticker: str,
         period: str,
         timeframe: str,
+        start_date: str | None,
+        end_date: str | None,
     ) -> tuple[pd.DataFrame | None, str | None]:
         last_failure_reason: str | None = None
         for attempt in range(1, self.max_attempts + 1):
             try:
-                data = yf.download(
-                    tickers=ticker,
-                    period=period,
-                    interval=timeframe,
-                    auto_adjust=True,
-                    progress=False,
-                    threads=False,
-                )
+                download_kwargs = {
+                    "tickers": ticker,
+                    "interval": timeframe,
+                    "auto_adjust": True,
+                    "progress": False,
+                    "threads": False,
+                }
+                if start_date is not None or end_date is not None:
+                    download_kwargs["start"] = start_date
+                    download_kwargs["end"] = exclusive_yfinance_end_date(end_date) if end_date is not None else None
+                else:
+                    download_kwargs["period"] = period
+                data = yf.download(**download_kwargs)
             except Exception as exc:
                 last_failure_reason = f"download_exception:{type(exc).__name__}"
             else:
@@ -167,15 +188,24 @@ def normalize_tickers(tickers: tuple[str, ...] | list[str]) -> list[str]:
     return unique_tickers
 
 
+def align_series_to_index(series: pd.Series, target_index) -> pd.Series:
+    combined_index = series.index.union(target_index)
+    return series.reindex(combined_index).sort_index().ffill().reindex(target_index)
+
+
 def fetch_market_universe(
     tickers: list[str],
     period: str,
     timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, str | list[str]]]:
     bundle, metadata = fetch_market_universe_bundle(
         tickers=tickers,
         period=period,
         timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
     )
     return bundle["closes"], metadata
 
@@ -184,13 +214,24 @@ def fetch_market_universe_bundle(
     tickers: list[str],
     period: str,
     timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, str | list[str]]]:
     request = MarketDataRequest(
         tickers=tuple(tickers),
         period=period,
         timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
     )
     return DEFAULT_MARKET_DATA_PROVIDER.fetch_bundle(request)
+
+
+def exclusive_yfinance_end_date(end_date: str | None) -> str | None:
+    if end_date is None:
+        return None
+    parsed_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+    return (parsed_date + timedelta(days=1)).isoformat()
 
 
 def format_market_date(raw_value) -> str:

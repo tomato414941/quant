@@ -19,13 +19,15 @@ from app.strategy_registry import (
 )
 
 DEFAULT_COMPARISON_SPEC = ComparisonSpec(
-    comparison_id="etf_portfolio_models_10y",
+    comparison_id="etf_portfolio_models_2015_2025",
     title="有望Strategyの探索",
     question="共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",
     run_spec=RunSpec(
         market_slice=MarketSliceSpec(
-            period="10y",
+            period="2015_2025",
             sanity_periods=["3y"],
+            start_date="2015-01-01",
+            end_date="2025-12-31",
         ),
         portfolio_state=build_portfolio_state(
             current_weights={

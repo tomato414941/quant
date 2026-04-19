@@ -16,7 +16,7 @@ from app.portfolio import (
     build_strategy_definition,
     build_strategy_execution_plan_spec,
     build_strategy_signal_spec,
-    build_strategy_spec_from_definition,
+    build_executable_strategy_spec_from_definition,
 )
 from app.timeframe_models import TimeframeSpec
 
@@ -250,10 +250,13 @@ def build_predictor_strategy_definitions(
     return [build_predictor_strategy_definition(definition) for definition in definitions]
 
 
-def build_strategy_specs_from_definitions(
+def build_evaluator_strategy_specs_from_definitions(
     definitions: list[StrategyDefinition] | tuple[StrategyDefinition, ...],
 ):
-    return [build_strategy_spec_from_definition(strategy_definition) for strategy_definition in definitions]
+    return [
+        build_executable_strategy_spec_from_definition(strategy_definition)
+        for strategy_definition in definitions
+    ]
 
 
 def build_selection_strategy_definition_product(

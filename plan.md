@@ -30,13 +30,14 @@
 - canonical candidate catalog の正本は strategy definitions
 - `comparison_service` は `StrategyDefinition` を直接実行入口として扱う
 - `StrategySpec` は公開正本ではなく、低レベル evaluator 用の内部 DTO として残る
+- `comparison_service` は strategy / condition / parameter / predictor / ranking の runSpec を `StrategyDefinition` 正本で生成する
 - runtime の `extensions` fallback は通常実行経路から削除済み
 - `evaluate_strategy_definition_run` が multi-timeframe / predictor / multi-selection を通す
 - run store は `v59` で `strategyDefinition` と `evaluationSubject` の fingerprint を正本化した
 - strategy / condition / parameter / predictor / ranking run は新規 runSpec で legacy `strategy` payload を生成しない
 - predictor / ranking run は由来を `strategyDefinition`、評価対象を `evaluationSubject` として分離する
 - 外部入口は `comparison` 系に統一済み
-- 現在の全体テスト: `106 passed`
+- 現在の全体テスト: `107 passed`
 
 ## 21 Steps
 
@@ -76,6 +77,9 @@
 - predictor / ranking run は `evaluationSubject` で実評価対象を再現可能にした
 - rerun は definition-only payload を前提にする
 - `StrategySpec.extensions` は runtime context の復元元ではない
+- `comparison_service` から `StrategySpec` 変換の直接 import を削除済み
+- parameter sweep は `StrategySpec` を経由せず `StrategyDefinition` を直接生成する
+- ranking 用の evaluator DTO 変換は `portfolio.py` の helper に閉じた
 - 個別 subject fingerprint filter は必要になった段階で追加する
 
 ## Remaining Duplication
@@ -92,6 +96,6 @@
 
 ## Near-Term Next Steps
 
-1. low-level evaluator の `StrategySpec` DTO bridge をさらに薄くする
-2. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する
-3. `plan.md` の完了条件を step ごとにより厳密に固定する
+1. low-level evaluator 内部の `StrategySpec` DTO bridge をさらに薄くする
+2. `legacyAdapterCompatible` など互換表示の名前を、必要なら実態に合わせて整理する
+3. 必要になった段階で `evaluationSubjectFingerprint` filter を API / CLI に追加する

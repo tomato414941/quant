@@ -6,23 +6,18 @@ from pathlib import Path
 from app.portfolio import (
     StrategyDefinition,
     build_alignment_policy_spec,
-    build_asset_ranking_specs,
-    build_execution_policy_spec,
+    build_asset_ranking_specs_from_strategy_definitions,
     build_investment_universe_spec,
     build_observation_spec,
     build_portfolio_model_spec,
     build_portfolio_state,
     build_risk_controls_spec,
     build_selection_spec,
-    build_strategy_definition_from_strategy_spec,
     build_strategy_definition,
     build_strategy_data_source_spec,
     build_strategy_execution_plan_spec,
     build_strategy_feature_definition_spec,
     build_strategy_signal_spec,
-    build_strategy_spec,
-    build_strategy_spec_from_definition,
-    build_executable_strategy_spec_from_definition,
     compute_predictor_panel,
     deserialize_predictor_panel,
     evaluate_asset_ranking_spec,
@@ -196,12 +191,62 @@ def collect_ranking_source_definitions(
 ) -> dict[str, StrategyDefinition]:
     source_definitions: dict[str, StrategyDefinition] = {}
     for strategy_definition in strategy_definitions:
-        ranking_specs = build_asset_ranking_specs([
-            build_executable_strategy_spec_from_definition(strategy_definition)
-        ])
+        ranking_specs = build_asset_ranking_specs_from_strategy_definitions([strategy_definition])
         for ranking_spec in ranking_specs:
             source_definitions.setdefault(ranking_spec.key, strategy_definition)
     return source_definitions
+
+
+def build_parameter_sweep_strategy_definition(
+    *,
+    base_strategy: StrategyDefinition,
+    selection_spec,
+    market_data_timeframe: TimeframeSpec,
+    max_weight: float,
+) -> StrategyDefinition:
+    strategy_id = "__".join([selection_spec.key, base_strategy.portfolio_model.key])
+    selection_signal = build_strategy_signal_spec(
+        key=f"signal__{strategy_id}__selection",
+        label=selection_spec.label,
+        description=selection_spec.description,
+        observation_spec=build_observation_spec(
+            key=f"observation__{strategy_id}__selection",
+            label=f"{selection_spec.label} observation",
+            tickers=base_strategy.investment_universe.tickers,
+            fields=selection_spec.ranking_signal.feature_inputs,
+        ),
+        data_timeframe=market_data_timeframe,
+        signal_timeframe=market_data_timeframe,
+        source_kind="selection_signal",
+        signal_parameters={
+            "selectionKey": selection_spec.key,
+            "strategyType": selection_spec.strategy_type,
+            "scoreModelKind": selection_spec.ranking_signal.score_model.kind,
+            "scoreParameters": dict(selection_spec.ranking_signal.score_parameters),
+            "featureInputs": list(selection_spec.ranking_signal.feature_inputs),
+            "universePolicyKey": selection_spec.universe_policy.key,
+            "filterRuleKeys": [filter_rule.key for filter_rule in selection_spec.filter_rules],
+            "fallbackRuleKey": selection_spec.fallback_rule.key,
+        },
+    )
+    return build_strategy_definition(
+        strategy_id=strategy_id,
+        label=" × ".join([selection_spec.label, base_strategy.portfolio_model.label]),
+        description=selection_spec.description,
+        investment_universe=base_strategy.investment_universe,
+        signals=[selection_signal],
+        portfolio_model=base_strategy.portfolio_model,
+        execution_plan=build_strategy_execution_plan_spec(
+            key=f"execution_plan__{base_strategy.execution_plan.key}",
+            label=base_strategy.execution_plan.label,
+            decision_schedule=base_strategy.execution_plan.decision_schedule,
+            rebalance_schedule=base_strategy.execution_plan.rebalance_schedule,
+        ),
+        risk_controls=build_risk_controls_spec(
+            max_investment_ratio=1.0,
+            max_weight=max_weight,
+        ),
+    )
 
 
 def fetch_market_data_by_timeframe(
@@ -2225,10 +2270,9 @@ def build_ranking_evaluation_runs(
 ) -> tuple[list[dict], RunStoreSummary]:
     candidate_strategy_definitions = list(comparison.candidate_strategies)
     ranking_source_definitions = collect_ranking_source_definitions(candidate_strategy_definitions)
-    ranking_specs = build_asset_ranking_specs([
-        build_executable_strategy_spec_from_definition(strategy_definition)
-        for strategy_definition in candidate_strategy_definitions
-    ])
+    ranking_specs = build_asset_ranking_specs_from_strategy_definitions(
+        candidate_strategy_definitions
+    )
     results: list[dict] = []
     cached_run_count = 0
     computed_run_count = 0
@@ -2377,25 +2421,11 @@ def build_parameter_sweep_runs(
                         if strategy.portfolio_model.model_type == "hierarchical_risk_parity"
                     )
                     base_market_data_timeframe = resolve_strategy_market_data_timeframe(base_strategy)
-                    effective_strategy = build_strategy_spec(
-                        timeframe=base_market_data_timeframe,
-                        investment_universe=base_strategy.investment_universe,
-                        selection=selection_spec,
-                        portfolio_model=base_strategy.portfolio_model,
-                        execution_policy=build_execution_policy_spec(
-                            key=base_strategy.execution_plan.key,
-                            label=base_strategy.execution_plan.label,
-                            entry="train_once_then_periodic_rebalance",
-                            rebalance_schedule=base_strategy.execution_plan.rebalance_schedule,
-                        ),
-                        risk_controls=build_risk_controls_spec(
-                            max_investment_ratio=1.0,
-                            max_weight=max_weight,
-                        ),
-                        decision_schedule=base_strategy.execution_plan.decision_schedule,
-                    )
-                    effective_strategy_definition = build_strategy_definition_from_strategy_spec(
-                        effective_strategy
+                    effective_strategy_definition = build_parameter_sweep_strategy_definition(
+                        base_strategy=base_strategy,
+                        selection_spec=selection_spec,
+                        market_data_timeframe=base_market_data_timeframe,
+                        max_weight=max_weight,
                     )
                     serialized_strategy_definition = serialize_strategy_definition_payload(effective_strategy_definition)
                     market_data_timeframe = resolve_strategy_market_data_timeframe(

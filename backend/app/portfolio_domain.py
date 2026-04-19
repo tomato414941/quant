@@ -1524,7 +1524,7 @@ def build_executable_strategy_spec_from_definition(strategy: StrategyDefinition)
 
     raise ValueError(
         "Strategy definition is not executable: "
-        + "legacy adapter incompatibilities: "
+        + "StrategySpec adapter incompatibilities: "
         + "; ".join(legacy_issues)
         + " | direct execution incompatibilities: "
         + "; ".join(direct_execution_issues)
@@ -1535,7 +1535,7 @@ def build_strategy_spec_from_definition(strategy: StrategyDefinition) -> Strateg
     issues = get_legacy_strategy_definition_compatibility_issues(strategy)
     if issues:
         raise ValueError(
-            "Legacy strategy adapter incompatibilities: " + "; ".join(issues)
+            "StrategySpec adapter incompatibilities: " + "; ".join(issues)
         )
 
     selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_definition(strategy)

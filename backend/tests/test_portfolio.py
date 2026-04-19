@@ -78,7 +78,7 @@ from app.strategy_definition_builder import (
     build_predictor_strategy_definition_product,
     build_selection_strategy_definition,
     build_selection_strategy_definition_product,
-    build_strategy_specs_from_definitions,
+    build_evaluator_strategy_specs_from_definitions,
 )
 from app.strategy_candidate_baselines import (
     BASELINE_CANDIDATE_DEFINITIONS,
@@ -625,7 +625,7 @@ def test_build_strategy_spec_from_definition_rejects_mismatched_signal_timeframe
 
 
 def test_full_universe_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(FULL_UNIVERSE_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(FULL_UNIVERSE_CANDIDATE_DEFINITIONS)
     assert len(FULL_UNIVERSE_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
@@ -1797,7 +1797,7 @@ def test_legacy_definition_compatibility_helper_reports_blockers() -> None:
     try:
         build_strategy_spec_from_definition(definition)
     except ValueError as exc:
-        assert "Legacy strategy adapter incompatibilities" in str(exc)
+        assert "StrategySpec adapter incompatibilities" in str(exc)
         assert "requires matching decision and rebalance schedules" in str(exc)
     else:
         raise AssertionError("Expected legacy adapter incompatibility error")
@@ -1932,7 +1932,7 @@ def test_predictor_definition_product_builder_generates_cross_product() -> None:
 
 
 def test_filtered_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(FILTERED_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(FILTERED_CANDIDATE_DEFINITIONS)
     assert len(FILTERED_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
@@ -1945,7 +1945,7 @@ def test_filtered_candidates_are_derived_from_definitions() -> None:
 
 
 def test_universe_variant_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS)
     assert len(UNIVERSE_VARIANT_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
@@ -1958,7 +1958,7 @@ def test_universe_variant_candidates_are_derived_from_definitions() -> None:
 
 
 def test_predictor_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(PREDICTOR_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(PREDICTOR_CANDIDATE_DEFINITIONS)
     assert len(PREDICTOR_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies
@@ -1977,7 +1977,7 @@ def test_predictor_candidates_are_derived_from_definitions() -> None:
 
 
 def test_baseline_definition_catalog_matches_strategy_catalog() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(BASELINE_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(BASELINE_CANDIDATE_DEFINITIONS)
     assert len(BASELINE_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         definition.strategy_id for definition in BASELINE_CANDIDATE_DEFINITIONS
@@ -1987,7 +1987,7 @@ def test_baseline_definition_catalog_matches_strategy_catalog() -> None:
 
 
 def test_canonical_definition_catalog_matches_strategy_catalog() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(CANONICAL_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(CANONICAL_CANDIDATE_DEFINITIONS)
     assert len(CANONICAL_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         definition.strategy_id for definition in CANONICAL_CANDIDATE_DEFINITIONS
@@ -1998,7 +1998,7 @@ def test_canonical_definition_catalog_matches_strategy_catalog() -> None:
 
 
 def test_timeframe_variant_candidates_are_derived_from_definitions() -> None:
-    derived_strategies = build_strategy_specs_from_definitions(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS)
+    derived_strategies = build_evaluator_strategy_specs_from_definitions(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS)
     assert len(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS) == len(derived_strategies)
     assert [
         strategy.strategy_id for strategy in derived_strategies

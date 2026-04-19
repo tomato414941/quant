@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from app.strategy_definition_builder import build_strategy_specs_from_definitions
 from app.strategy_candidate_baselines import BASELINE_CANDIDATE_DEFINITIONS
 from app.strategy_candidate_predictors import PREDICTOR_CANDIDATE_DEFINITIONS
 from app.strategy_candidate_timeframes import TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS

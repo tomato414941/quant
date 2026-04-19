@@ -1,6 +1,7 @@
 import copy
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -12,12 +13,11 @@ from app.main import app
 from app.portfolio import (
     StrategyDefinition,
     build_alignment_policy_spec,
-    build_asset_ranking_specs,
+    build_asset_ranking_specs_from_strategy_definitions,
     build_strategy_definition_from_strategy_spec,
     build_strategy_execution_plan_spec,
     build_strategy_signal_spec,
-    build_strategy_spec_from_definition,
-    build_executable_strategy_spec_from_definition,
+    get_strategy_definition_signal_execution_contexts,
 )
 from app.strategy_candidate_predictors import PREDICTOR_CANDIDATE_DEFINITIONS
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME, build_timeframe_spec
@@ -28,23 +28,44 @@ client = TestClient(app)
 
 def normalize_strategy_definition(strategy):
     if isinstance(strategy, StrategyDefinition):
-        return build_executable_strategy_spec_from_definition(strategy)
-    return strategy
+        return strategy
+    return build_strategy_definition_from_strategy_spec(strategy)
 
 
 def normalize_strategy_definitions(strategies):
     return [normalize_strategy_definition(strategy) for strategy in strategies]
 
 
-def count_predictor_specs(strategies) -> int:
-    normalized = normalize_strategy_definitions(strategies)
-    return len(
-        {
-            strategy.predictor_use.predictor_key
-            for strategy in normalized
-            if strategy.predictor_use is not None
-        }
+def strategy_definition_has_selection_type(
+    strategy: StrategyDefinition,
+    strategy_type: str,
+) -> bool:
+    return any(
+        signal.source_kind == "selection_signal"
+        and dict(signal.signal_parameters).get("strategyType") == strategy_type
+        for signal in strategy.signals
     )
+
+
+def count_predictor_specs(strategies) -> int:
+    predictor_keys = set()
+    for strategy in normalize_strategy_definitions(strategies):
+        _selection_contexts, predictor_context = get_strategy_definition_signal_execution_contexts(strategy)
+        if predictor_context is not None:
+            predictor_keys.add(str(predictor_context["predictorKey"]))
+    return len(predictor_keys)
+
+
+def test_comparison_service_does_not_import_strategy_spec_dto_bridge() -> None:
+    source = Path(main_module.__file__).with_name("comparison_service.py").read_text()
+    forbidden_tokens = (
+        "build_strategy_spec_from_definition",
+        "build_executable_strategy_spec_from_definition",
+        "build_strategy_spec(",
+        "build_strategy_definition_from_strategy_spec",
+    )
+    for token in forbidden_tokens:
+        assert token not in source
 
 
 def fake_fetch_market_universe(
@@ -546,8 +567,7 @@ def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    definition = normalize_strategy_definition(config.candidate_strategies[0])
     config = replace(
         config,
         candidate_strategies=[definition, *config.candidate_strategies[1:]],
@@ -579,8 +599,7 @@ def test_comparison_endpoint_supports_explicit_strategy_signal_context_without_e
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    strategy = normalize_strategy_definition(config.candidate_strategies[0])
-    definition = build_strategy_definition_from_strategy_spec(strategy)
+    definition = normalize_strategy_definition(config.candidate_strategies[0])
     definition = replace(
         definition,
         signals=(
@@ -625,8 +644,7 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    definition = normalize_strategy_definition(config.candidate_strategies[0])
     direct_definition = replace(
         definition,
         signals=[
@@ -680,8 +698,7 @@ def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_executio
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", tracking_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    definition = normalize_strategy_definition(config.candidate_strategies[0])
     direct_definition = replace(
         definition,
         signals=[
@@ -722,12 +739,11 @@ def test_comparison_endpoint_accepts_direct_execution_multi_selection_definition
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    first_candidate = next(
+    definition = next(
         strategy
         for strategy in normalize_strategy_definitions(config.candidate_strategies)
-        if strategy.selection.strategy_type == "full_universe_momentum_tilt"
+        if strategy_definition_has_selection_type(strategy, "full_universe_momentum_tilt")
     )
-    definition = build_strategy_definition_from_strategy_spec(first_candidate)
     secondary_signal = build_strategy_signal_spec(
         key="selection__secondary",
         label="Secondary momentum signal",
@@ -781,12 +797,11 @@ def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_dir
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    first_candidate = next(
+    definition = next(
         strategy
         for strategy in normalize_strategy_definitions(config.candidate_strategies)
-        if strategy.selection.strategy_type == "full_universe_momentum_tilt"
+        if strategy_definition_has_selection_type(strategy, "full_universe_momentum_tilt")
     )
-    definition = build_strategy_definition_from_strategy_spec(first_candidate)
     primary_signal = replace(
         definition.signals[0],
         signal_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
@@ -982,8 +997,7 @@ def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_pa
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
     config.result_store_dir = str(tmp_path / "run_results")
-    first_candidate = normalize_strategy_definition(config.candidate_strategies[0])
-    definition = build_strategy_definition_from_strategy_spec(first_candidate)
+    definition = normalize_strategy_definition(config.candidate_strategies[0])
     incompatible_definition = replace(
         definition,
         signals=[
@@ -1011,7 +1025,7 @@ def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_pa
     assert response.status_code == 400
     assert incompatible_definition.strategy_id in response.json()["detail"]
     assert "not executable" in response.json()["detail"]
-    assert "legacy adapter incompatibilities" in response.json()["detail"]
+    assert "StrategySpec adapter incompatibilities" in response.json()["detail"]
     assert "decision_schedule to match rebalance_schedule or be every_bar" in response.json()["detail"]
 
 
@@ -1403,7 +1417,11 @@ def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    expected_ranking_count = len(build_asset_ranking_specs(normalize_strategy_definitions(config.candidate_strategies)))
+    expected_ranking_count = len(
+        build_asset_ranking_specs_from_strategy_definitions(
+            normalize_strategy_definitions(config.candidate_strategies)
+        )
+    )
     assert payload["comparison"]["comparisonId"] == "etf_portfolio_models_10y"
     assert payload["resultCount"] == expected_ranking_count
     assert payload["runStoreSummary"]["cachedRunCount"] == 0

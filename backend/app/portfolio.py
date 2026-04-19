@@ -550,6 +550,17 @@ def build_asset_ranking_specs(
     return ranking_specs
 
 
+def build_asset_ranking_specs_from_strategy_definitions(
+    strategy_definitions: list[StrategyDefinition],
+) -> list[AssetRankingSpec]:
+    return build_asset_ranking_specs(
+        [
+            build_executable_strategy_spec_from_definition(strategy_definition)
+            for strategy_definition in strategy_definitions
+        ]
+    )
+
+
 def build_predictor_specs(
     ranking_specs: list[AssetRankingSpec],
     target_specs: list[PredictionTargetSpec],

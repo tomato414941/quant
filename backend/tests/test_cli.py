@@ -209,6 +209,7 @@ def test_comparison_summary_walk_forward_command(monkeypatch, tmp_path, capsys) 
     assert "Availability policy:" in captured.out
     assert "Market availability:" in captured.out
     assert "Test eligible assets" in captured.out
+    assert "Warnings:" not in captured.out
 
 
 def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -257,6 +258,60 @@ def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, 
     assert exit_code == 0
     assert "BTC-USD" not in tickers
     assert "ETH-USD" not in tickers
+
+
+def test_render_availability_warnings_hides_small_calendar_boundary_differences() -> None:
+    lines = []
+
+    cli_module.render_availability_warnings(
+        lines,
+        [
+            {
+                "kind": "aligned_start_after_requested_start",
+                "timeframe": "1d",
+                "requestedStartDate": "2025-01-01",
+                "alignedStartDate": "2025-01-02",
+                "message": "1d data starts at 2025-01-02, after requested start 2025-01-01.",
+            },
+            {
+                "kind": "asset_unavailable_before_aligned_end",
+                "timeframe": "1d",
+                "asset": "SPY",
+                "lastValidDate": "2025-12-25",
+                "alignedEndDate": "2025-12-29",
+                "message": "SPY last valid data is 2025-12-25, before aligned end 2025-12-29.",
+            },
+        ],
+        {"maxStaleBars": 5},
+    )
+
+    output = "\n".join(lines)
+    assert "Warnings:" not in output
+    assert "Calendar differences:" in output
+    assert "SPY last valid data" not in output
+
+
+def test_render_availability_warnings_keeps_asset_availability_risks() -> None:
+    lines = []
+
+    cli_module.render_availability_warnings(
+        lines,
+        [
+            {
+                "kind": "asset_available_after_aligned_start",
+                "timeframe": "1d",
+                "asset": "ETH-USD",
+                "alignedStartDate": "2015-01-01",
+                "firstValidDate": "2017-11-09",
+                "message": "ETH-USD becomes available on 2017-11-09, after aligned start 2015-01-01.",
+            }
+        ],
+        {"maxStaleBars": 5},
+    )
+
+    output = "\n".join(lines)
+    assert "Warnings:" in output
+    assert "ETH-USD becomes available" in output
 
 
 def test_sort_candidate_runs_uses_test_metrics() -> None:

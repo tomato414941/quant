@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import date
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -188,6 +189,95 @@ def format_percent(value: float) -> str:
     return f"{value:+.2f}%"
 
 
+def parse_iso_date(value: object) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def timeframe_calendar_boundary_days(timeframe_key: object) -> int:
+    if timeframe_key in {"1wk", "1w"}:
+        return 7
+    if timeframe_key == "1mo":
+        return 31
+    return 1
+
+
+def is_small_calendar_gap(
+    warning: dict,
+    availability_policy: dict | None,
+    left_date_key: str,
+    right_date_key: str,
+) -> bool:
+    left_date = parse_iso_date(warning.get(left_date_key))
+    right_date = parse_iso_date(warning.get(right_date_key))
+    if left_date is None or right_date is None:
+        return False
+    max_stale_bars = int((availability_policy or {}).get("maxStaleBars") or 0)
+    boundary_days = timeframe_calendar_boundary_days(warning.get("timeframe"))
+    max_calendar_gap_days = max(max_stale_bars, boundary_days)
+    return abs((right_date - left_date).days) <= max_calendar_gap_days
+
+
+def classify_availability_warning(warning: dict, availability_policy: dict | None) -> str:
+    kind = warning.get("kind")
+    if kind == "requested_asset_unavailable":
+        return "actionable"
+    if kind == "aligned_start_after_requested_start":
+        if is_small_calendar_gap(warning, availability_policy, "requestedStartDate", "alignedStartDate"):
+            return "calendar"
+        return "actionable"
+    if kind == "aligned_end_before_requested_end":
+        if is_small_calendar_gap(warning, availability_policy, "requestedEndDate", "alignedEndDate"):
+            return "calendar"
+        return "actionable"
+    if kind == "asset_available_after_aligned_start":
+        if is_small_calendar_gap(warning, availability_policy, "alignedStartDate", "firstValidDate"):
+            return "calendar"
+        return "actionable"
+    if kind == "asset_unavailable_before_aligned_end":
+        if is_small_calendar_gap(warning, availability_policy, "lastValidDate", "alignedEndDate"):
+            return "calendar"
+        return "actionable"
+    return "actionable"
+
+
+def split_availability_warnings(warnings: list[dict], availability_policy: dict | None) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {
+        "actionable": [],
+        "calendar": [],
+        "info": [],
+    }
+    for warning in warnings:
+        classification = classify_availability_warning(warning, availability_policy)
+        grouped.setdefault(classification, []).append(warning)
+    return grouped
+
+
+def render_availability_warnings(lines: list[str], warnings: list[dict], availability_policy: dict | None) -> None:
+    if not warnings:
+        return
+    grouped_warnings = split_availability_warnings(warnings, availability_policy)
+    actionable_warnings = grouped_warnings["actionable"]
+    calendar_warnings = grouped_warnings["calendar"]
+    if actionable_warnings:
+        lines.append("Warnings:")
+        for warning in actionable_warnings:
+            lines.append(f"- {warning['message']}")
+    if calendar_warnings:
+        if actionable_warnings:
+            lines.append("")
+        lines.append(
+            "Calendar differences: "
+            f"{len(calendar_warnings)} market-calendar boundary warning(s) hidden from Warnings."
+        )
+    if actionable_warnings or calendar_warnings:
+        lines.append("")
+
+
 def portfolio_segment_summary(run: dict, segment: str) -> dict:
     return run["splitAnalysis"][segment]["portfolio"]
 
@@ -229,12 +319,8 @@ def render_comparison_summary(payload: dict, *, top: int) -> str:
         "",
     ]
 
-    warnings = comparison.get("runSpec", {}).get("evaluation", {}).get("warnings", [])
-    if warnings:
-        lines.append("Warnings:")
-        for warning in warnings:
-            lines.append(f"- {warning['message']}")
-        lines.append("")
+    evaluation = comparison.get("runSpec", {}).get("evaluation", {})
+    render_availability_warnings(lines, evaluation.get("warnings", []), evaluation.get("availabilityPolicy"))
 
     lines.append(f"Top {min(top, len(candidate_runs))} candidate runs by test performance:")
 
@@ -310,12 +396,7 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
     if availability_policy or availability_summary:
         lines.append("")
 
-    warnings = evaluation.get("warnings", [])
-    if warnings:
-        lines.append("Warnings:")
-        for warning in warnings:
-            lines.append(f"- {warning['message']}")
-        lines.append("")
+    render_availability_warnings(lines, evaluation.get("warnings", []), availability_policy)
 
     lines.append(f"Top {min(top, len(candidate_results))} candidate strategies by walk-forward test performance:")
     for index, result in enumerate(candidate_results[:top], start=1):

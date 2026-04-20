@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
-from app.comparison_service import build_run_result_store
+from app.comparison_service import build_availability_diagnostics, build_run_result_store
 from app.main import app
 from app.portfolio import (
     StrategyDefinition,
@@ -56,11 +56,37 @@ def count_predictor_specs(strategies) -> int:
     return len(predictor_keys)
 
 
+def test_availability_diagnostics_classifies_calendar_boundaries_and_actionable_risks() -> None:
+    warnings = [
+        {
+            "kind": "aligned_start_after_requested_start",
+            "timeframe": "1d",
+            "requestedStartDate": "2025-01-01",
+            "alignedStartDate": "2025-01-02",
+            "message": "1d data starts at 2025-01-02, after requested start 2025-01-01.",
+        },
+        {
+            "kind": "asset_available_after_aligned_start",
+            "timeframe": "1d",
+            "asset": "ETH-USD",
+            "alignedStartDate": "2015-01-01",
+            "firstValidDate": "2017-11-09",
+            "message": "ETH-USD becomes available on 2017-11-09, after aligned start 2015-01-01.",
+        },
+    ]
+
+    diagnostics = build_availability_diagnostics(warnings, {"maxStaleBars": 5})
+
+    assert diagnostics["warningCount"] == 2
+    assert diagnostics["calendarBoundaryWarningCount"] == 1
+    assert diagnostics["actionableWarningCount"] == 1
+    assert diagnostics["calendarBoundaryWarnings"][0]["kind"] == "aligned_start_after_requested_start"
+    assert diagnostics["actionableWarnings"][0]["asset"] == "ETH-USD"
+
+
 def test_comparison_service_does_not_import_evaluator_strategy_spec_dto_bridge() -> None:
     source = Path(main_module.__file__).with_name("comparison_service.py").read_text()
     forbidden_tokens = (
-        "build_evaluator_strategy_spec_from_definition",
-        "build_executable_evaluator_strategy_spec_from_definition",
         "build_evaluator_strategy_spec(",
         "build_strategy_definition_from_evaluator_strategy_spec",
     )
@@ -372,6 +398,15 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert {warning["alignedStartDate"] for warning in start_warnings} == {"2025-01-01"}
     assert {warning["requestedEndDate"] for warning in end_warnings} == {config.run_spec.market_slice.end_date}
     assert {warning["alignedEndDate"] for warning in end_warnings} == {"2025-01-07"}
+    diagnostics = payload["comparison"]["runSpec"]["evaluation"]["availabilityDiagnostics"]
+    assert diagnostics["warningCount"] == len(warnings)
+    assert diagnostics["actionableWarningCount"] == len(warnings)
+    assert diagnostics["calendarBoundaryWarningCount"] == 0
+    assert diagnostics["calendarBoundaryWarnings"] == []
+    assert {warning["kind"] for warning in diagnostics["actionableWarnings"]} == {
+        "aligned_start_after_requested_start",
+        "aligned_end_before_requested_end",
+    }
     assert {timeframe["key"] for timeframe in payload["comparison"]["runSpec"]["marketSlice"]["timeframes"]} == {"1d", "1w", "1mo"}
     assert payload["comparison"]["runSpec"]["marketSlice"]["fields"] == ["close", "volume"]
     assert (
@@ -391,11 +426,11 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
         == "year_end"
     )
     execution_support = payload["comparison"]["candidateStrategies"][0]["executionSupport"]
-    assert execution_support["evaluatorAdapterCompatible"] is True
+    assert execution_support["directExecutionCompatible"] is True
     assert "strategySpecAdapterCompatible" not in execution_support
     assert "strategySpecAdapterIssues" not in execution_support
-    assert "legacyAdapterCompatible" not in execution_support
-    assert "legacyAdapterIssues" not in execution_support
+    assert "evaluatorAdapterCompatible" not in execution_support
+    assert "evaluatorAdapterIssues" not in execution_support
     assert payload["comparison"]["candidateStrategies"][0]["components"]["optional"]["signals"][0]["sourceKind"] == "selection_signal"
     assert (
         payload["candidateRuns"][5]["strategy"]["components"]["optional"]["signals"][0]["signalParameters"]["scoreParameters"]["windowSpec"]["unit"]
@@ -491,7 +526,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["recordCount"] == min(10, expected_predictor_count * 2)
     assert index_payload["sortBy"] == "test_rank_ic"
     assert index_payload["records"][0]["runKind"] == "predictor_run"
-    assert index_payload["records"][0]["logicVersion"] == "v62"
+    assert index_payload["records"][0]["logicVersion"] == "v63"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
     assert index_payload["records"][0]["evaluationSubjectFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
@@ -512,7 +547,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "predictor_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "predictor_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v62"
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v63"
     assert detail_payload["record"]["runSpec"]["strategyDefinition"]["kind"] == "strategy_definition"
     assert detail_payload["record"]["runSpec"]["evaluationSubject"]["kind"] == "predictor"
     assert detail_payload["record"]["runSpec"]["evaluationSubject"]["predictor"]["kind"] == "predictor_spec"
@@ -613,7 +648,7 @@ def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path
     payload = response.json()
     assert payload["comparison"]["candidateStrategies"][0]["kind"] == "strategy_definition"
     assert payload["comparison"]["candidateStrategies"][0]["strategyId"] == definition.strategy_id
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["evaluatorAdapterCompatible"] is True
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     signal_market_data_contexts = [
         context
         for context in payload["comparison"]["runSpec"]["evaluation"]["signalMarketDataContexts"]
@@ -704,7 +739,7 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["evaluatorAdapterCompatible"] is False
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     direct_signal_contexts = [
         context
@@ -1029,7 +1064,7 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candi
     assert response.status_code == 200
     payload = response.json()
     strategy_payload = payload["candidateRuns"][0]["strategy"]
-    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["evaluatorAdapterCompatible"] is False
+    assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     assert payload["comparison"]["candidateStrategies"][0]["executionSupport"]["directExecutionCompatible"] is True
     assert strategy_payload["kind"] == "strategy_definition"
     assert strategy_payload["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"
@@ -1070,7 +1105,7 @@ def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_pa
     assert response.status_code == 400
     assert incompatible_definition.strategy_id in response.json()["detail"]
     assert "not executable" in response.json()["detail"]
-    assert "Evaluator adapter incompatibilities" in response.json()["detail"]
+    assert "Direct execution incompatibilities" in response.json()["detail"]
     assert "decision_schedule to match rebalance_schedule or be every_bar" in response.json()["detail"]
 
 
@@ -1111,7 +1146,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["totalCount"] == (expected_strategy_count + expected_reference_count) * 2
     assert index_payload["recordCount"] == 10
     assert index_payload["records"][0]["runKind"] == "strategy_run"
-    assert index_payload["records"][0]["logicVersion"] == "v62"
+    assert index_payload["records"][0]["logicVersion"] == "v63"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
     assert index_payload["records"][0]["evaluationSubjectFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
@@ -1124,7 +1159,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "strategy_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "strategy_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v62"
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v63"
     assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "evaluationSubject", "marketData", "evaluation"}
 
     fingerprint_filtered_response = client.get(
@@ -1382,7 +1417,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["limit"] == 5
     assert payload["runKind"] == "strategy_run"
     assert payload["recordCount"] == 5
-    assert payload["records"][0]["logicVersion"] == "v62"
+    assert payload["records"][0]["logicVersion"] == "v63"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

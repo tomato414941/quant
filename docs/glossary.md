@@ -194,7 +194,7 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 補足:
 - `data_timeframe` / `signal_timeframe` / `decision_schedule` / `rebalance_schedule` は分けて扱う
 - runSpec では由来となる戦略を `strategyDefinition`、実評価対象を `evaluationSubject` として分離する
-- `executionSupport.evaluatorAdapter*` は内部 DTO へ変換できるかを表す
+- `executionSupport.directExecution*` は StrategyDefinition を正本の direct execution 経路で実行できるかを表す
 - `executionSupport.directExecution*` は direct execution 経路で評価できるかを表す
 
 要するに、`Strategy` は「何をどう持つか」の仕様であり、  

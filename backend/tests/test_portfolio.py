@@ -40,7 +40,6 @@ from app.portfolio import (
     build_execution_policy_spec,
     build_risk_controls_spec,
     build_selection_spec,
-    build_evaluator_strategy_spec_from_definition,
     build_evaluator_strategy_spec,
     compare_portfolio_runs,
     compute_predictor_panel,
@@ -49,11 +48,9 @@ from app.portfolio import (
     compute_strategy_score_series,
     evaluate_predictor_spec,
     get_direct_execution_strategy_definition_compatibility_issues,
-    get_legacy_strategy_definition_compatibility_issues,
     get_strategy_definition_signal_execution_contexts,
     get_strategy_signal_execution_contexts,
     is_direct_execution_compatible_strategy_definition,
-    is_legacy_compatible_strategy_definition,
     prepare_strategy_market_data,
     prepare_strategy_predictor_panel,
     prepare_strategy_signal_data,
@@ -468,7 +465,7 @@ def test_build_strategy_definition_from_evaluator_strategy_spec_without_predicto
     assert definition.execution_plan.rebalance_schedule == strategy.execution_policy.rebalance_schedule
 
 
-def test_build_evaluator_strategy_spec_from_definition_round_trips_legacy_strategy() -> None:
+def test_build_executable_evaluator_strategy_spec_from_definition_round_trips_direct_strategy() -> None:
     predictor_use = build_predictor_use_spec(
         predictor_key="pred__overlay",
         signal_weight=0.6,
@@ -477,9 +474,9 @@ def test_build_evaluator_strategy_spec_from_definition_round_trips_legacy_strate
     strategy = build_evaluator_strategy_spec(
         strategy_id="strategy__round_trip",
         version="v7",
-        hypothesis="Round-trip Evaluator adapter.",
+        hypothesis="Round-trip direct execution.",
         label="Round trip strategy",
-        description="Evaluator adapter round-trip test strategy.",
+        description="Direct execution round-trip test strategy.",
         investment_universe=build_investment_universe_spec(
             tickers=["SPY", "QQQ", "TLT"],
             key="round_trip_universe",
@@ -506,7 +503,7 @@ def test_build_evaluator_strategy_spec_from_definition_round_trips_legacy_strate
         extensions={"source": "test"},
     )
 
-    rebuilt = build_evaluator_strategy_spec_from_definition(
+    rebuilt = build_executable_evaluator_strategy_spec_from_definition(
         build_strategy_definition_from_evaluator_strategy_spec(strategy)
     )
 
@@ -532,15 +529,15 @@ def test_build_evaluator_strategy_spec_from_definition_round_trips_legacy_strate
     assert dict(rebuilt.extensions) == dict(strategy.extensions)
     payload = serialize_strategy_definition(build_strategy_definition_from_evaluator_strategy_spec(strategy))
     support = payload["executionSupport"]
-    assert support["evaluatorAdapterCompatible"] is True
-    assert support["evaluatorAdapterIssues"] == []
+    assert support["directExecutionCompatible"] is True
+    assert support["directExecutionIssues"] == []
     assert "strategySpecAdapterCompatible" not in support
     assert "strategySpecAdapterIssues" not in support
-    assert "legacyAdapterCompatible" not in support
-    assert "legacyAdapterIssues" not in support
+    assert "evaluatorAdapterCompatible" not in support
+    assert "evaluatorAdapterIssues" not in support
 
 
-def test_build_evaluator_strategy_spec_from_definition_rejects_split_execution_plan() -> None:
+def test_build_executable_evaluator_strategy_spec_from_definition_accepts_split_execution_plan() -> None:
     definition = build_strategy_definition(
         strategy_id="definition__split_execution",
         investment_universe=build_investment_universe_spec(
@@ -552,7 +549,7 @@ def test_build_evaluator_strategy_spec_from_definition_rejects_split_execution_p
             build_strategy_signal_spec(
                 key="signal__selection",
                 label="Selection signal",
-                description="Legacy-compatible selection signal.",
+                description="Selection signal.",
                 observation_spec=build_observation_spec(
                     key="observation__selection",
                     label="Selection observation",
@@ -578,15 +575,14 @@ def test_build_evaluator_strategy_spec_from_definition_rejects_split_execution_p
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
     )
 
-    try:
-        build_evaluator_strategy_spec_from_definition(definition)
-    except ValueError as exc:
-        assert "matching decision and rebalance schedules" in str(exc)
-    else:
-        raise AssertionError("Expected split execution plan to be rejected.")
+    rebuilt = build_executable_evaluator_strategy_spec_from_definition(definition)
+
+    assert rebuilt.decision_schedule == "every_bar"
+    assert rebuilt.execution_policy.rebalance_schedule == "month_end"
+    assert rebuilt.execution_mode == "direct_signal_timeframe"
 
 
-def test_build_evaluator_strategy_spec_from_definition_rejects_mismatched_signal_timeframe() -> None:
+def test_build_executable_evaluator_strategy_spec_from_definition_accepts_mismatched_signal_timeframe() -> None:
     definition = build_strategy_definition(
         strategy_id="definition__mismatched_signal_timeframe",
         investment_universe=build_investment_universe_spec(
@@ -598,7 +594,7 @@ def test_build_evaluator_strategy_spec_from_definition_rejects_mismatched_signal
             build_strategy_signal_spec(
                 key="signal__selection",
                 label="Selection signal",
-                description="Legacy-compatible selection signal.",
+                description="Selection signal.",
                 observation_spec=build_observation_spec(
                     key="observation__selection",
                     label="Selection observation",
@@ -625,12 +621,11 @@ def test_build_evaluator_strategy_spec_from_definition_rejects_mismatched_signal
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
     )
 
-    try:
-        build_evaluator_strategy_spec_from_definition(definition)
-    except ValueError as exc:
-        assert "requires matching selection data and signal timeframes" in str(exc)
-    else:
-        raise AssertionError("Expected mismatched signal timeframe to be rejected.")
+    rebuilt = build_executable_evaluator_strategy_spec_from_definition(definition)
+
+    assert rebuilt.timeframe.key == "1mo"
+    assert rebuilt.signal_execution_contexts[0]["dataTimeframe"] == "1d"
+    assert rebuilt.signal_execution_contexts[0]["signalTimeframe"] == "1mo"
 
 
 def test_full_universe_candidates_are_strategy_definitions() -> None:
@@ -698,7 +693,7 @@ def test_strategy_signal_builder_infers_alignment_policy_for_mismatched_timefram
 
 
 
-def test_selection_definition_builder_creates_legacy_compatible_definition() -> None:
+def test_selection_definition_builder_creates_direct_execution_compatible_definition() -> None:
     definition = build_selection_strategy_definition(
         SelectionDefinitionDefinition(
             strategy_id="builder__selection",
@@ -727,7 +722,7 @@ def test_selection_definition_builder_creates_legacy_compatible_definition() -> 
     assert definition.signals[0].source_kind == "selection_signal"
     assert definition.signals[0].data_timeframe.key == "1d"
 
-    rebuilt = build_evaluator_strategy_spec_from_definition(definition)
+    rebuilt = build_executable_evaluator_strategy_spec_from_definition(definition)
     assert rebuilt.selection.strategy_type == FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.strategy_type
     assert rebuilt.execution_policy.rebalance_schedule == "month_end"
     assert rebuilt.decision_schedule == "month_end"
@@ -768,7 +763,7 @@ def test_predictor_definition_builder_creates_overlay_signal() -> None:
     assert definition.signals[1].source_kind == "predictor_overlay"
     assert definition.signals[1].predictor_key == "pred-fu-momo2-supplement-10bar-linear-momentum-weighted_blend-5050"
 
-    rebuilt = build_evaluator_strategy_spec_from_definition(definition)
+    rebuilt = build_executable_evaluator_strategy_spec_from_definition(definition)
     assert rebuilt.predictor_use is not None
     assert rebuilt.predictor_use.predictor_weight == 0.4
     assert rebuilt.predictor_signal_execution_context is not None
@@ -1014,7 +1009,6 @@ def test_direct_execution_definition_compatibility_helper_accepts_signal_timefra
         )
     )
 
-    assert is_legacy_compatible_strategy_definition(definition) is False
     assert is_direct_execution_compatible_strategy_definition(definition) is True
     assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
@@ -1754,7 +1748,6 @@ def test_direct_execution_definition_compatibility_helper_accepts_predictor_over
         )
     )
 
-    assert is_legacy_compatible_strategy_definition(definition) is False
     assert is_direct_execution_compatible_strategy_definition(definition) is True
     assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
@@ -1766,7 +1759,7 @@ def test_direct_execution_definition_compatibility_helper_accepts_predictor_over
     assert executable_strategy.execution_mode == "direct_signal_timeframe"
 
 
-def test_legacy_definition_compatibility_helper_reports_blockers() -> None:
+def test_direct_execution_definition_compatibility_helper_reports_blockers() -> None:
     definition = build_selection_strategy_definition(
         SelectionDefinitionDefinition(
             strategy_id="builder__selection__incompatible",
@@ -1790,18 +1783,35 @@ def test_legacy_definition_compatibility_helper_reports_blockers() -> None:
         )
     )
 
-    issues = get_legacy_strategy_definition_compatibility_issues(definition)
-    assert is_legacy_compatible_strategy_definition(definition) is False
-    assert "requires matching decision and rebalance schedules" in issues
-    assert "requires matching selection data and signal timeframes" in issues
+    definition = replace(
+        definition,
+        signals=(
+            replace(
+                definition.signals[0],
+                data_timeframe=DEFAULT_WEEKLY_TIMEFRAME,
+                signal_timeframe=DEFAULT_DAILY_TIMEFRAME,
+            ),
+        ),
+        execution_plan=build_strategy_execution_plan_spec(
+            key="execution__incompatible",
+            label="Incompatible execution",
+            decision_schedule="quarter_end",
+            rebalance_schedule="month_end",
+        ),
+    )
+
+    issues = get_direct_execution_strategy_definition_compatibility_issues(definition)
+    assert is_direct_execution_compatible_strategy_definition(definition) is False
+    assert "direct execution requires decision_schedule to match rebalance_schedule or be every_bar" in issues
+    assert "direct execution requires signal_timeframe to be coarser than or equal to data_timeframe" in issues
 
     try:
-        build_evaluator_strategy_spec_from_definition(definition)
+        build_executable_evaluator_strategy_spec_from_definition(definition)
     except ValueError as exc:
-        assert "Evaluator adapter incompatibilities" in str(exc)
-        assert "requires matching decision and rebalance schedules" in str(exc)
+        assert "Direct execution incompatibilities" in str(exc)
+        assert "decision_schedule to match rebalance_schedule or be every_bar" in str(exc)
     else:
-        raise AssertionError("Expected Evaluator adapter incompatibility error")
+        raise AssertionError("Expected direct execution incompatibility error")
 
 
 

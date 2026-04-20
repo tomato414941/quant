@@ -1054,7 +1054,6 @@ def build_strategy_definition(
 
 
 def serialize_strategy_definition(strategy: StrategyDefinition) -> dict:
-    compatibility_issues = get_legacy_strategy_definition_compatibility_issues(strategy)
     direct_execution_issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
     return {
         "kind": "strategy_definition",
@@ -1081,8 +1080,6 @@ def serialize_strategy_definition(strategy: StrategyDefinition) -> dict:
             },
         },
         "executionSupport": {
-            "evaluatorAdapterCompatible": not compatibility_issues,
-            "evaluatorAdapterIssues": compatibility_issues,
             "directExecutionCompatible": not direct_execution_issues,
             "directExecutionIssues": direct_execution_issues,
         },
@@ -1326,56 +1323,6 @@ def thaw_strategy_parameter_value(value: object) -> object:
     return value
 
 
-def get_legacy_strategy_definition_compatibility_issues(
-    strategy: StrategyDefinition,
-) -> list[str]:
-    issues: list[str] = []
-    selection_signals = [
-        signal for signal in strategy.signals if signal.source_kind == "selection_signal"
-    ]
-    predictor_signals = [
-        signal for signal in strategy.signals if signal.source_kind == "predictor_overlay"
-    ]
-    if len(selection_signals) != 1:
-        issues.append("requires exactly one selection_signal")
-    if len(predictor_signals) > 1:
-        issues.append("supports at most one predictor_overlay")
-    if strategy.execution_plan.decision_schedule != strategy.execution_plan.rebalance_schedule:
-        issues.append("requires matching decision and rebalance schedules")
-    if len(selection_signals) != 1:
-        return issues
-
-    selection_signal = selection_signals[0]
-    if selection_signal.data_timeframe.key != selection_signal.signal_timeframe.key:
-        issues.append("requires matching selection data and signal timeframes")
-
-    signal_parameters = thaw_strategy_parameter_value(dict(selection_signal.signal_parameters))
-    score_parameters = signal_parameters.get("scoreParameters")
-    if not isinstance(score_parameters, dict):
-        issues.append("requires scoreParameters in the selection signal")
-
-    if predictor_signals:
-        predictor_signal = predictor_signals[0]
-        if predictor_signal.data_timeframe.key != selection_signal.data_timeframe.key:
-            issues.append("requires predictor and selection signals to share the same data timeframe")
-        if predictor_signal.signal_timeframe.key != selection_signal.signal_timeframe.key:
-            issues.append("requires predictor and selection signals to share the same signal timeframe")
-        predictor_parameters = thaw_strategy_parameter_value(dict(predictor_signal.signal_parameters))
-        predictor_key = predictor_signal.predictor_key or predictor_parameters.get("predictorKey")
-        if predictor_key is None:
-            issues.append("requires predictorKey for predictor overlays")
-
-    return issues
-
-
-
-def is_legacy_compatible_strategy_definition(
-    strategy: StrategyDefinition,
-) -> bool:
-    return not get_legacy_strategy_definition_compatibility_issues(strategy)
-
-
-
 def get_direct_execution_strategy_definition_compatibility_issues(
     strategy: StrategyDefinition,
 ) -> list[str]:
@@ -1514,79 +1461,7 @@ def build_direct_execution_evaluator_strategy_spec_from_definition(
 
 
 def build_executable_evaluator_strategy_spec_from_definition(strategy: StrategyDefinition) -> EvaluatorStrategySpec:
-    legacy_issues = get_legacy_strategy_definition_compatibility_issues(strategy)
-    if not legacy_issues:
-        return build_evaluator_strategy_spec_from_definition(strategy)
-
-    direct_execution_issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
-    if not direct_execution_issues:
-        return build_direct_execution_evaluator_strategy_spec_from_definition(strategy)
-
-    raise ValueError(
-        "Strategy definition is not executable: "
-        + "Evaluator adapter incompatibilities: "
-        + "; ".join(legacy_issues)
-        + " | direct execution incompatibilities: "
-        + "; ".join(direct_execution_issues)
-    )
-
-
-def build_evaluator_strategy_spec_from_definition(strategy: StrategyDefinition) -> EvaluatorStrategySpec:
-    issues = get_legacy_strategy_definition_compatibility_issues(strategy)
-    if issues:
-        raise ValueError(
-            "Evaluator adapter incompatibilities: " + "; ".join(issues)
-        )
-
-    selection_contexts, predictor_context = build_strategy_signal_execution_contexts_from_definition(strategy)
-    selection_signals = [signal for signal in strategy.signals if signal.source_kind == "selection_signal"]
-    predictor_signals = [signal for signal in strategy.signals if signal.source_kind == "predictor_overlay"]
-    selection_signal = selection_signals[0]
-
-    signal_parameters = thaw_strategy_parameter_value(dict(selection_signal.signal_parameters))
-    strategy_type = str(signal_parameters.get("strategyType"))
-    score_parameters = signal_parameters.get("scoreParameters")
-
-    predictor_use = None
-    if predictor_signals:
-        predictor_signal = predictor_signals[0]
-        predictor_parameters = thaw_strategy_parameter_value(dict(predictor_signal.signal_parameters))
-        predictor_key = predictor_signal.predictor_key or predictor_parameters.get("predictorKey")
-        predictor_use = build_predictor_use_spec(
-            predictor_key=str(predictor_key),
-            signal_weight=float(predictor_parameters.get("signalWeight", selection_signal.weight)),
-            predictor_weight=float(predictor_parameters.get("predictorWeight", predictor_signal.weight)),
-        )
-
-    return build_evaluator_strategy_spec(
-        strategy_id=strategy.strategy_id,
-        version=strategy.version,
-        hypothesis=strategy.hypothesis,
-        label=strategy.label,
-        description=strategy.description,
-        timeframe=selection_signal.data_timeframe,
-        investment_universe=strategy.investment_universe,
-        selection=build_selection_spec(
-            strategy_type,
-            key=str(signal_parameters.get("selectionKey") or strategy_type),
-            label=selection_signal.label,
-            description=selection_signal.description,
-            score_parameters=score_parameters,
-        ),
-        portfolio_model=strategy.portfolio_model,
-        execution_policy=build_execution_policy_spec(
-            key=strategy.execution_plan.key,
-            label=strategy.execution_plan.label,
-            entry="train_once_then_periodic_rebalance",
-            rebalance_schedule=strategy.execution_plan.rebalance_schedule,
-        ),
-        risk_controls=strategy.risk_controls,
-        predictor_use=predictor_use,
-        signal_execution_contexts=selection_contexts,
-        predictor_signal_execution_context=predictor_context,
-        decision_schedule=strategy.execution_plan.decision_schedule,
-        extensions=dict(strategy.extensions),
-    )
+    return build_direct_execution_evaluator_strategy_spec_from_definition(strategy)
 
 
 def build_evaluator_strategy_spec(

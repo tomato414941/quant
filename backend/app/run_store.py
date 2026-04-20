@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-RUN_STORE_LOGIC_VERSION = "v62"
+RUN_STORE_LOGIC_VERSION = "v63"
 RUN_STORE_INDEX_FILENAME = "_index.json"
 
 

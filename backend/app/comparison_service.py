@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -2282,6 +2283,86 @@ def build_market_data_warnings(
     return warnings
 
 
+def parse_iso_date(value: object) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def timeframe_calendar_boundary_days(timeframe_key: object) -> int:
+    if timeframe_key in {"1wk", "1w"}:
+        return 7
+    if timeframe_key == "1mo":
+        return 31
+    return 1
+
+
+def is_small_calendar_gap(
+    warning: dict[str, object],
+    availability_policy: dict[str, object] | None,
+    left_date_key: str,
+    right_date_key: str,
+) -> bool:
+    left_date = parse_iso_date(warning.get(left_date_key))
+    right_date = parse_iso_date(warning.get(right_date_key))
+    if left_date is None or right_date is None:
+        return False
+    max_stale_bars = int((availability_policy or {}).get("maxStaleBars") or 0)
+    boundary_days = timeframe_calendar_boundary_days(warning.get("timeframe"))
+    max_calendar_gap_days = max(max_stale_bars, boundary_days)
+    return abs((right_date - left_date).days) <= max_calendar_gap_days
+
+
+def classify_availability_warning(
+    warning: dict[str, object],
+    availability_policy: dict[str, object] | None,
+) -> str:
+    kind = warning.get("kind")
+    if kind == "requested_asset_unavailable":
+        return "actionable"
+    if kind == "aligned_start_after_requested_start":
+        if is_small_calendar_gap(warning, availability_policy, "requestedStartDate", "alignedStartDate"):
+            return "calendar_boundary"
+        return "actionable"
+    if kind == "aligned_end_before_requested_end":
+        if is_small_calendar_gap(warning, availability_policy, "requestedEndDate", "alignedEndDate"):
+            return "calendar_boundary"
+        return "actionable"
+    if kind == "asset_available_after_aligned_start":
+        if is_small_calendar_gap(warning, availability_policy, "alignedStartDate", "firstValidDate"):
+            return "calendar_boundary"
+        return "actionable"
+    if kind == "asset_unavailable_before_aligned_end":
+        if is_small_calendar_gap(warning, availability_policy, "lastValidDate", "alignedEndDate"):
+            return "calendar_boundary"
+        return "actionable"
+    return "actionable"
+
+
+def build_availability_diagnostics(
+    warnings: list[dict[str, object]],
+    availability_policy: dict[str, object] | None,
+) -> dict[str, object]:
+    actionable_warnings = []
+    calendar_boundary_warnings = []
+    for warning in warnings:
+        classification = classify_availability_warning(warning, availability_policy)
+        if classification == "calendar_boundary":
+            calendar_boundary_warnings.append(warning)
+        else:
+            actionable_warnings.append(warning)
+    return {
+        "warningCount": len(warnings),
+        "actionableWarningCount": len(actionable_warnings),
+        "calendarBoundaryWarningCount": len(calendar_boundary_warnings),
+        "actionableWarnings": actionable_warnings,
+        "calendarBoundaryWarnings": calendar_boundary_warnings,
+    }
+
+
 def build_availability_summary(metadata_by_timeframe: dict[str, dict[str, object]]) -> dict[str, object]:
     summaries = []
     for timeframe_key, metadata in sorted(metadata_by_timeframe.items()):
@@ -2456,11 +2537,18 @@ def serialize_evaluation(
     period_override: str | None = None,
     strategy_definitions: list | None = None,
 ) -> dict:
+    availability_policy = build_default_availability_policy()
+    warnings = build_market_data_warnings(
+        comparison,
+        metadata_by_timeframe,
+        period_override=period_override,
+    )
     payload = {
         "kind": "evaluation_spec",
         "schemaVersion": "v1",
-        "availabilityPolicy": build_default_availability_policy(),
+        "availabilityPolicy": availability_policy,
         "availabilitySummary": build_availability_summary(metadata_by_timeframe),
+        "availabilityDiagnostics": build_availability_diagnostics(warnings, availability_policy),
         "marketDataContexts": [
             serialize_market_slice_context(
                 comparison=comparison,
@@ -2492,11 +2580,6 @@ def serialize_evaluation(
     )
     if signal_market_data_contexts:
         payload["signalMarketDataContexts"] = signal_market_data_contexts
-    warnings = build_market_data_warnings(
-        comparison,
-        metadata_by_timeframe,
-        period_override=period_override,
-    )
     if warnings:
         payload["warnings"] = warnings
     return payload

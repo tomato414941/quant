@@ -10,6 +10,7 @@ from typing import Sequence
 from app.comparison_service import (
     build_comparison_payload,
     build_comparison_payload_from_run_spec_payload,
+    build_walk_forward_comparison_payload,
     build_comparison_run_spec_payload,
     build_latest_run_payload,
     build_run_catalog_payload,
@@ -35,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the comparison against a fixed universe variant.",
     )
     comparison_parser.add_argument("--json", action="store_true", dest="as_json")
+    comparison_parser.add_argument("--walk-forward", action="store_true")
+    comparison_parser.add_argument("--walk-forward-start-year", type=int, default=2020)
+    comparison_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
 
     comparison_run_spec_parser = subparsers.add_parser(
         "comparison-run-spec",
@@ -255,6 +259,57 @@ def render_comparison_summary(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+
+def render_walk_forward_summary(payload: dict, *, top: int) -> str:
+    comparison = payload["comparison"]
+    walk_forward = payload["walkForward"]
+    candidate_results = payload["candidateResults"]
+    lines = [
+        f"Comparison: {comparison['title']} ({comparison['comparisonId']})",
+        f"Question: {comparison['question']}",
+        (
+            "Walk-forward: "
+            f"{walk_forward['startYear']}-{walk_forward['endYear']} "
+            f"({walk_forward['windowCount']} windows)"
+        ),
+        (
+            "Ranking policy: average test Sharpe / minimum test Sharpe / "
+            "average test return / average test max drawdown"
+        ),
+        (
+            "Run store: "
+            f"cached={payload['runStoreSummary']['cachedRunCount']} "
+            f"computed={payload['runStoreSummary']['computedRunCount']}"
+        ),
+        "",
+    ]
+
+    warnings = comparison.get("runSpec", {}).get("evaluation", {}).get("warnings", [])
+    if warnings:
+        lines.append("Warnings:")
+        for warning in warnings:
+            lines.append(f"- {warning['message']}")
+        lines.append("")
+
+    lines.append(f"Top {min(top, len(candidate_results))} candidate strategies by walk-forward test performance:")
+    for index, result in enumerate(candidate_results[:top], start=1):
+        lines.append(f"{index}. {result['strategyLabel']} [{result['strategyKey']}]")
+        lines.append(
+            "   "
+            f"Avg Sharpe {result['averageSharpeRatio']:.3f} | "
+            f"Min Sharpe {result['minimumSharpeRatio']:.3f} | "
+            f"Avg Return {format_percent(result['averageTotalReturnPct'])} | "
+            f"Avg MDD {format_percent(result['averageMaxDrawdownPct'])} | "
+            f"Positive Years {result['positiveReturnWindowCount']}/{result['windowCount']}"
+        )
+        lines.append(
+            "   "
+            f"Avg Turnover {format_percent(result['averageTurnoverPct'])}"
+        )
+
+    return "\n".join(lines)
+
+
 def render_comparison_run_spec(payload: dict) -> str:
     lines = [
         f"Comparison: {payload['title']} ({payload['comparisonId']})",
@@ -322,6 +377,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "comparison-summary":
         comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
+        if args.walk_forward:
+            payload = build_walk_forward_comparison_payload(
+                comparison_spec,
+                fetch_market_universe_bundle=fetch_market_universe_bundle,
+                start_year=args.walk_forward_start_year,
+                end_year=args.walk_forward_end_year,
+            )
+            if args.as_json:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            else:
+                print(render_walk_forward_summary(payload, top=max(args.top, 1)))
+            return 0
+
         payload = build_comparison_payload(
             comparison_spec,
             fetch_market_universe_bundle=fetch_market_universe_bundle,

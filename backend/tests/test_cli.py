@@ -1,10 +1,12 @@
 import copy
 import json
+import math
 
 import pandas as pd
 
 from app import cli as cli_module
 from app import main as main_module
+from app.comparison_service import sort_walk_forward_results
 
 
 def fake_fetch_market_universe_bundle(
@@ -105,6 +107,51 @@ def fake_fetch_market_universe_bundle(
     }
 
 
+
+def fake_fetch_market_universe_bundle_multiyear(
+    tickers: list[str],
+    period: str,
+    timeframe: str = "1d",
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[dict, dict]:
+    if timeframe == "1mo":
+        index = pd.date_range("2019-01-31", "2021-12-31", freq="ME")
+    elif timeframe == "1wk":
+        index = pd.date_range("2019-01-04", "2021-12-31", freq="W-FRI")
+    else:
+        index = pd.date_range("2019-01-01", "2021-12-31", freq="D")
+
+    data = {}
+    for ticker_index, ticker in enumerate(tickers):
+        base = 90.0 + ticker_index * 3.0
+        drift = 0.03 + ticker_index * 0.002
+        data[ticker] = [
+            base + row_index * drift + math.sin(row_index / 9 + ticker_index) * 0.5
+            for row_index in range(len(index))
+        ]
+    closes = pd.DataFrame(data, index=index)
+    volumes = pd.DataFrame(
+        {
+            ticker: [1_000_000 + ticker_index * 10_000 + row_index * 100 for row_index in range(len(index))]
+            for ticker_index, ticker in enumerate(closes.columns)
+        },
+        index=index,
+    )
+    return {
+        "closes": closes,
+        "volumes": volumes,
+    }, {
+        "tickers": tickers,
+        "period": period,
+        "source": "test",
+        "timeframe": timeframe,
+        "aligned_start_date": str(closes.index[0].date()),
+        "aligned_end_date": str(closes.index[-1].date()),
+        "row_count": len(closes),
+    }
+
+
 def configure_cli(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -125,6 +172,88 @@ def test_comparison_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Test Sharpe" in captured.out
 
 
+
+def configure_cli_multiyear(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fake_fetch_market_universe_bundle_multiyear)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
+    config.result_store_dir = str(tmp_path / "run_results")
+    config.candidate_strategies = config.candidate_strategies[:3]
+    config.reference_strategies = config.reference_strategies[:1]
+    config.run_spec.market_slice.start_date = "2019-01-01"
+    config.run_spec.market_slice.end_date = "2021-12-31"
+    monkeypatch.setattr(cli_module, "DEFAULT_COMPARISON_SPEC", config)
+    return config
+
+
+def test_comparison_summary_walk_forward_command(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--walk-forward",
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+        "--top",
+        "2",
+    ])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert config.comparison_id in captured.out
+    assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
+    assert "Top 2 candidate strategies by walk-forward test performance:" in captured.out
+    assert "Avg Sharpe" in captured.out
+    assert "Min Sharpe" in captured.out
+
+
+def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_multiyear(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--walk-forward",
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kind"] == "walk_forward_comparison"
+    assert payload["walkForward"]["startYear"] == 2020
+    assert payload["walkForward"]["endYear"] == 2021
+    assert payload["walkForward"]["windowCount"] == 2
+    assert payload["candidateResults"][0]["windowCount"] == 2
+    assert "averageSharpeRatio" in payload["candidateResults"][0]
+    assert "minimumSharpeRatio" in payload["candidateResults"][0]
+
+
+def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_multiyear(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--walk-forward",
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2020",
+        "--universe",
+        "no_crypto",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    tickers = payload["comparison"]["marketUniverse"]["tickers"]
+    assert exit_code == 0
+    assert "BTC-USD" not in tickers
+    assert "ETH-USD" not in tickers
+
+
 def test_sort_candidate_runs_uses_test_metrics() -> None:
     weak_test_run = {
         "summary": {"sharpeRatio": 9.0, "totalReturnPct": 90.0, "maxDrawdownPct": 1.0},
@@ -142,6 +271,25 @@ def test_sort_candidate_runs_uses_test_metrics() -> None:
     }
 
     assert cli_module.sort_candidate_runs([weak_test_run, strong_test_run])[0] is strong_test_run
+
+
+def test_sort_walk_forward_results_uses_minimum_sharpe_tiebreak() -> None:
+    fragile = {
+        "strategyKey": "fragile",
+        "averageSharpeRatio": 2.0,
+        "minimumSharpeRatio": -1.0,
+        "averageTotalReturnPct": 20.0,
+        "averageMaxDrawdownPct": 8.0,
+    }
+    stable = {
+        "strategyKey": "stable",
+        "averageSharpeRatio": 2.0,
+        "minimumSharpeRatio": 1.0,
+        "averageTotalReturnPct": 10.0,
+        "averageMaxDrawdownPct": 4.0,
+    }
+
+    assert sort_walk_forward_results([fragile, stable])[0] is stable
 
 
 def test_apply_comparison_universe_variant_removes_crypto_assets() -> None:
@@ -179,7 +327,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v60"
+    assert payload["records"][0]["logicVersion"] == "v61"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

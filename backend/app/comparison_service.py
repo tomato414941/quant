@@ -8,6 +8,7 @@ import pandas as pd
 from app.portfolio import (
     StrategyDefinition,
     build_alignment_policy_spec,
+    build_default_availability_policy,
     build_asset_ranking_specs_from_strategy_definitions,
     build_investment_universe_spec,
     build_observation_spec,
@@ -919,7 +920,7 @@ def build_window_dataset_metadata(dataset_metadata: dict, market_bundle: dict) -
 
 
 def compute_walk_forward_split_ratio(closes, test_start_date: str) -> float:
-    returns = closes.pct_change().dropna()
+    returns = closes.pct_change(fill_method=None).iloc[1:].dropna(how="all")
     if len(returns) < 6:
         raise ValueError("At least 6 return rows are required for a walk-forward window.")
     return_dates = pd.to_datetime(returns.index)
@@ -933,7 +934,7 @@ def compute_walk_forward_split_ratio(closes, test_start_date: str) -> float:
 
 def build_walk_forward_evaluation(
     comparison: ComparisonSpec,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     timeframes: list[TimeframeSpec],
     *,
     fields: list[str],
@@ -977,7 +978,7 @@ def build_walk_forward_predictor_runs(
     predictor_specs: list,
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
     window: dict,
 ) -> tuple[list[dict], dict[str, object], RunStoreSummary]:
@@ -1010,7 +1011,7 @@ def build_walk_forward_predictor_runs(
             if market_bundle["volumes"] is not None
             else None
         )
-        returns = closes.pct_change().dropna()
+        returns = closes.pct_change(fill_method=None).iloc[1:].dropna(how="all")
         aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
         split_ratio = compute_walk_forward_split_ratio(closes, window["testStartDate"])
         source_strategy_definition = predictor_source_definitions.get(predictor_spec.key)
@@ -1081,7 +1082,7 @@ def build_walk_forward_strategy_runs(
     strategy_definitions: list[StrategyDefinition],
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
     window: dict,
     predictor_panels_by_key: dict[str, object] | None = None,
@@ -2154,7 +2155,74 @@ def build_market_data_warnings(
                     ),
                 }
             )
+    for timeframe_key, metadata in sorted(metadata_by_timeframe.items()):
+        aligned_start = metadata.get("aligned_start_date")
+        aligned_end = metadata.get("aligned_end_date")
+        for asset, availability in (metadata.get("assetAvailability") or {}).items():
+            if availability.get("available") is False:
+                warnings.append(
+                    {
+                        "kind": "requested_asset_unavailable",
+                        "timeframe": timeframe_key,
+                        "asset": asset,
+                        "failedReason": availability.get("failedReason"),
+                        "message": f"{timeframe_key} data has no usable rows for {asset}.",
+                    }
+                )
+                continue
+            first_valid = availability.get("firstValidDate")
+            last_valid = availability.get("lastValidDate")
+            if aligned_start and first_valid and str(first_valid) > str(aligned_start):
+                warnings.append(
+                    {
+                        "kind": "asset_available_after_aligned_start",
+                        "timeframe": timeframe_key,
+                        "asset": asset,
+                        "alignedStartDate": aligned_start,
+                        "firstValidDate": first_valid,
+                        "message": f"{asset} becomes available on {first_valid}, after aligned start {aligned_start}.",
+                    }
+                )
+            if aligned_end and last_valid and str(last_valid) < str(aligned_end):
+                warnings.append(
+                    {
+                        "kind": "asset_unavailable_before_aligned_end",
+                        "timeframe": timeframe_key,
+                        "asset": asset,
+                        "alignedEndDate": aligned_end,
+                        "lastValidDate": last_valid,
+                        "message": f"{asset} last valid data is {last_valid}, before aligned end {aligned_end}.",
+                    }
+                )
     return warnings
+
+
+def build_availability_summary(metadata_by_timeframe: dict[str, dict[str, object]]) -> dict[str, object]:
+    summaries = []
+    for timeframe_key, metadata in sorted(metadata_by_timeframe.items()):
+        availability = metadata.get("assetAvailability") or {}
+        requested_tickers = metadata.get("requested_tickers", [])
+        available_tickers = metadata.get("tickers", [])
+        requested_count = len(availability) or len(requested_tickers) or len(available_tickers)
+        if availability:
+            available_count = sum(1 for item in availability.values() if item.get("available") is not False)
+        else:
+            available_count = len(available_tickers) or requested_count
+        summaries.append(
+            {
+                "timeframe": timeframe_key,
+                "requestedAssetCount": requested_count,
+                "availableAssetCount": available_count,
+                "unavailableAssetCount": max(0, requested_count - available_count),
+            }
+        )
+    if not summaries:
+        return {"timeframes": []}
+    return {
+        "timeframes": summaries,
+        "minAvailableAssetCount": min(summary["availableAssetCount"] for summary in summaries),
+        "maxAvailableAssetCount": max(summary["availableAssetCount"] for summary in summaries),
+    }
 
 
 def serialize_market_slice_context(
@@ -2179,6 +2247,9 @@ def serialize_market_slice_context(
     failed_tickers = dataset_metadata.get("failed_tickers")
     if failed_tickers:
         payload["failedTickers"] = failed_tickers
+    asset_availability = dataset_metadata.get("assetAvailability")
+    if asset_availability:
+        payload["assetAvailability"] = asset_availability
     return payload
 
 
@@ -2254,6 +2325,9 @@ def serialize_signal_market_data_context(
     failed_tickers = dataset_metadata.get("failed_tickers")
     if failed_tickers:
         payload["failedTickers"] = failed_tickers
+    asset_availability = dataset_metadata.get("assetAvailability")
+    if asset_availability:
+        payload["assetAvailability"] = asset_availability
     return payload
 
 
@@ -2290,7 +2364,7 @@ def serialize_signal_market_data_contexts(
 
 def serialize_evaluation(
     comparison: ComparisonSpec,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     timeframes: list[TimeframeSpec],
     *,
     fields: list[str],
@@ -2300,6 +2374,8 @@ def serialize_evaluation(
     payload = {
         "kind": "evaluation_spec",
         "schemaVersion": "v1",
+        "availabilityPolicy": build_default_availability_policy(),
+        "availabilitySummary": build_availability_summary(metadata_by_timeframe),
         "marketDataContexts": [
             serialize_market_slice_context(
                 comparison=comparison,
@@ -2343,7 +2419,7 @@ def serialize_evaluation(
 
 def serialize_run_spec(
     comparison: ComparisonSpec,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     timeframes: list[TimeframeSpec],
     *,
     strategy_definitions: list | None = None,
@@ -2376,7 +2452,7 @@ def serialize_run_spec(
 
 def serialize_comparison(
     comparison: ComparisonSpec,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     timeframes: list[TimeframeSpec],
     *,
     candidate_strategy_definitions: list | None = None,
@@ -2645,7 +2721,7 @@ def build_strategy_runs(
     strategy_definitions: list[StrategyDefinition],
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
     predictor_panels_by_key: dict[str, object] | None = None,
 ) -> tuple[list[dict], RunStoreSummary]:
@@ -2722,7 +2798,7 @@ def build_predictor_runs(
     predictor_specs: list,
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], dict[str, object], RunStoreSummary]:
     results: list[dict] = []
@@ -2748,7 +2824,7 @@ def build_predictor_runs(
             if market_bundle["volumes"] is not None
             else None
         )
-        returns = closes.pct_change().dropna()
+        returns = closes.pct_change(fill_method=None).iloc[1:].dropna(how="all")
         aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
         source_strategy_definition = predictor_source_definitions.get(predictor_spec.key)
         if source_strategy_definition is None:
@@ -2815,7 +2891,7 @@ def build_condition_sweep_runs(
     comparison: ComparisonSpec,
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
     strategy_definitions: list[StrategyDefinition] | None = None,
 ) -> tuple[list[dict], RunStoreSummary]:
@@ -2931,7 +3007,7 @@ def build_ranking_evaluation_runs(
     comparison: ComparisonSpec,
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     candidate_strategy_definitions = list(comparison.candidate_strategies)
@@ -2954,7 +3030,7 @@ def build_ranking_evaluation_runs(
             if market_bundle["volumes"] is not None
             else None
         )
-        returns = closes.pct_change().dropna()
+        returns = closes.pct_change(fill_method=None).iloc[1:].dropna(how="all")
         aligned_volumes = volumes.loc[returns.index] if volumes is not None else None
         source_strategy_definition = ranking_source_definitions.get(ranking_spec.key)
         if source_strategy_definition is None:
@@ -3017,7 +3093,7 @@ def build_parameter_sweep_runs(
     comparison: ComparisonSpec,
     market_bundles_by_timeframe: dict[str, dict],
     market_data_period: str,
-    metadata_by_timeframe: dict[str, dict[str, str]],
+    metadata_by_timeframe: dict[str, dict[str, object]],
     run_store: FileRunResultStore,
 ) -> tuple[list[dict], RunStoreSummary]:
     base_evaluation = comparison.run_spec.evaluation

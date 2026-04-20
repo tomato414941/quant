@@ -200,38 +200,48 @@ walk-forward では、window ごとに eligible universe の推移を記録す�
 
 これにより、ある window の成績が「戦略が良かった」のか、「その window で候補資産が増えた / 減った」のかを切り分けやすくする。
 
-## Implementation Roadmap
+## Implementation Status
 
 ### Phase 1: Market Data Metadata
 
-- ticker ごとの `firstValidDate`, `lastValidDate`, `validRowCount` を保存する
-- 全体 `dropna()` で評価開始日を後ろへずらす挙動をやめる準備をする
-- Dataset Context に `assetAvailability` と availability warnings を追加する
+Status: implemented.
+
+- ticker ごとの `requested`, `available`, `failedReason`, `firstValidDate`, `lastValidDate`, `validRowCount` を `assetAvailability` に保存する
+- market data は union calendar に揃え、全体 `dropna()` ではなく `dropna(how="all")` で評価開始日を維持する
+- 短期欠損は `maxStaleBars = 5` まで close の前方補完を許容し、volume は未知なら 0 とする
 
 ### Phase 2: Availability Policy
 
-- `AvailabilityPolicy` を evaluation context の一部として定義する
-- 初期デフォルトは `min_history_bars = 252`, `max_stale_bars = 5`, `delisted_asset_policy = liquidate_to_cash`
-- policy を evaluation fingerprint に含める
+Status: implemented for evaluation payload and backtest runtime.
+
+- デフォルト policy は `minHistoryBars = 252`, `maxStaleBars = 5`, `delistedAssetPolicy = liquidate_to_cash`
+- policy は evaluation payload に入り、run spec fingerprint と cache version の対象になる
+- unit test の短い toy data では、履歴本数不足で全テストが cash だけにならないよう、実効 `minHistoryBars` は観測済み履歴長を上限にする
 
 ### Phase 3: Backtest Integration
 
-- `compare_portfolio_runs` で日付ごとの eligible assets を解決する
-- selection / predictor / allocation の直前に eligible assets へ絞る
+Status: implemented.
+
+- `compare_portfolio_runs` / `run_portfolio_backtest` は日付ごとの eligible assets を解決する
+- selection / predictor / allocation は eligible assets に絞った履歴だけを見る
 - eligible assets が2未満の場合は cash fallback する
-- removed asset の既存 weight は cash へ移す
+- eligible から外れた既存 weight はその bar で cash 化する
 
 ### Phase 4: Reporting
 
-- CLI / JSON に availability summary を出す
-- walk-forward window ごとに eligible asset count と warnings を出す
-- `crypto_included` の 2015-2017 が ETH なしで評価されることを明示できるようにする
+Status: partially implemented.
+
+- run payload と evaluation payload に `availabilityPolicy` / `availabilitySummary` を出す
+- backtest series に `availableAssetCount`, `eligibleAssetCount`, `newlyEligibleAssets`, `removedAssets` を出す
+- Dataset Context に `assetAvailability` と asset-level availability warnings を出す
+- walk-forward window 集計で universe 変化をさらに読みやすくする余地は残る
 
 ### Phase 5: Cache Versioning
 
-- run store logic version を上げる
-- availability policy と asset availability summary を run spec fingerprint に含める
-- 旧結果と新結果を混ぜない
+Status: implemented.
+
+- run store logic version は `v62`
+- availability policy と asset availability summary を evaluation payload に含め、旧結果と新結果を混ぜない
 
 ## Test Scenarios
 

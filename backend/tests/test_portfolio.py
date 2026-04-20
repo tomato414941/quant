@@ -3468,3 +3468,63 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         asset_specific_payload[0]["summary"]["totalReturnPct"]
         < flat_payload[0]["summary"]["totalReturnPct"]
     )
+
+def test_compare_portfolio_runs_tracks_dynamic_asset_eligibility() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0],
+            "BBB": [100.0, 100.5, 101.0, 101.5, 102.0, 102.5, 103.0, 103.5, 104.0],
+            "LATE": [None, None, None, 50.0, 51.0, 52.0, 53.0, 54.0, 55.0],
+        },
+        index=[
+            "2025-01-01",
+            "2025-01-02",
+            "2025-01-03",
+            "2025-01-04",
+            "2025-01-05",
+            "2025-01-06",
+            "2025-01-07",
+            "2025-01-08",
+            "2025-01-09",
+        ],
+    )
+    strategy = build_evaluator_strategy_spec(
+        strategy_id="dynamic_asset_eligibility",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="dynamic_asset_eligibility_universe",
+            label="Dynamic asset eligibility universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    run = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        bars_per_year=252.0,
+        availability_policy={
+            "kind": "asset_availability_policy",
+            "minHistoryBars": 2,
+            "maxStaleBars": 5,
+            "delistedAssetPolicy": "liquidate_to_cash",
+        },
+    )[0]
+
+    assert run["series"][0]["date"] == "2025-01-02"
+    assert min(point["eligibleAssetCount"] for point in run["series"]) == 2
+    assert max(point["eligibleAssetCount"] for point in run["series"]) == 3
+    assert any("LATE" in point["newlyEligibleAssets"] for point in run["series"])
+    assert run["availabilitySummary"]["minEligibleAssetCount"] == 2
+    assert run["availabilitySummary"]["maxEligibleAssetCount"] == 3

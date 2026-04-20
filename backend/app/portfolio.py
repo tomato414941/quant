@@ -366,7 +366,7 @@ def resample_returns_frame_to_timeframe(
         value_kind="close",
         alignment_method=alignment_method,
     )
-    return resampled_closes.pct_change().dropna()
+    return resampled_closes.pct_change(fill_method=None).dropna()
 
 
 def prepare_signal_component_data(
@@ -918,14 +918,156 @@ def compute_trade_cost(
     if recent_volumes.empty:
         return linear_cost
 
-    aligned_prices = price_snapshot.reindex(recent_volumes.columns).astype("float64")
-    adv_shares = recent_volumes.mean(axis=0).astype("float64")
+    aligned_prices = price_snapshot.reindex(recent_volumes.columns).astype("float64").fillna(0.0)
+    adv_shares = recent_volumes.mean(axis=0).astype("float64").fillna(0.0)
     adv_notional = np.maximum((adv_shares * aligned_prices).to_numpy(dtype="float64"), min_adv_notional)
     trade_notional = weight_delta * float(portfolio_equity)
     participation = np.clip(trade_notional / adv_notional, 0.0, None)
     impact_rates = impact_cost_rates * np.sqrt(participation)
     impact_cost = float(np.dot(weight_delta, impact_rates))
     return linear_cost + impact_cost
+
+
+def build_default_availability_policy() -> dict[str, object]:
+    return {
+        "kind": "asset_availability_policy",
+        "minHistoryBars": 252,
+        "maxStaleBars": 5,
+        "delistedAssetPolicy": "liquidate_to_cash",
+    }
+
+
+def resolve_effective_min_history_bars(
+    history_returns: pd.DataFrame,
+    availability_policy: dict[str, object],
+) -> int:
+    configured_min = int(availability_policy.get("minHistoryBars", 252))
+    return max(1, min(configured_min, len(history_returns)))
+
+
+def resolve_available_assets(history_returns: pd.DataFrame) -> list[str]:
+    if history_returns.empty:
+        return []
+    latest_row = history_returns.iloc[-1]
+    return [str(asset) for asset, value in latest_row.items() if pd.notna(value)]
+
+
+def resolve_eligible_assets(
+    history_returns: pd.DataFrame,
+    availability_policy: dict[str, object],
+) -> list[str]:
+    if history_returns.empty:
+        return []
+    min_history_bars = resolve_effective_min_history_bars(history_returns, availability_policy)
+    latest_row = history_returns.iloc[-1]
+    valid_counts = history_returns.notna().sum(axis=0)
+    return [
+        str(asset)
+        for asset in history_returns.columns
+        if pd.notna(latest_row[asset]) and int(valid_counts[asset]) >= min_history_bars
+    ]
+
+
+def prepare_history_returns_for_assets(
+    history_returns: pd.DataFrame,
+    eligible_assets: list[str],
+) -> pd.DataFrame:
+    if not eligible_assets:
+        return history_returns.iloc[0:0, 0:0].copy()
+    return history_returns.loc[:, eligible_assets].dropna(how="any")
+
+
+def prepare_volume_history_for_assets(
+    volume_history: pd.DataFrame | None,
+    clean_history_returns: pd.DataFrame,
+) -> pd.DataFrame | None:
+    if volume_history is None:
+        return None
+    return volume_history.loc[clean_history_returns.index, clean_history_returns.columns]
+
+
+def zero_weights_outside_assets(
+    weights: np.ndarray,
+    universe_columns: pd.Index,
+    allowed_assets: list[str],
+) -> np.ndarray:
+    allowed_asset_set = set(allowed_assets)
+    scoped_weights = [
+        float(weight) if str(asset) in allowed_asset_set else 0.0
+        for asset, weight in zip(universe_columns, weights, strict=True)
+    ]
+    return np.asarray(scoped_weights, dtype="float64")
+
+
+def compute_dynamic_portfolio_allocation(
+    *,
+    history_returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy: EvaluatorStrategySpec,
+    portfolio_model: PortfolioModelSpec,
+    bars_per_year: float,
+    universe_columns: pd.Index,
+    max_investment_ratio: float,
+    max_weight: float | None,
+    previous_weights: np.ndarray | None,
+    transaction_cost: float,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None,
+    predictor_context: dict[str, object] | None,
+    availability_policy: dict[str, object],
+) -> tuple[list[str], np.ndarray]:
+    eligible_assets = resolve_eligible_assets(history_returns, availability_policy)
+    if len(eligible_assets) < 2:
+        return [], np.zeros(len(universe_columns), dtype="float64")
+    clean_history_returns = prepare_history_returns_for_assets(history_returns, eligible_assets)
+    if len(clean_history_returns) < 3 or len(clean_history_returns.columns) < 2:
+        return [], np.zeros(len(universe_columns), dtype="float64")
+    clean_volume_history = prepare_volume_history_for_assets(volume_history, clean_history_returns)
+    scoped_previous_weights = None
+    if previous_weights is not None:
+        scoped_previous_weights = zero_weights_outside_assets(previous_weights, universe_columns, eligible_assets)
+    try:
+        return compute_portfolio_allocation(
+            history_returns=clean_history_returns,
+            volume_history=clean_volume_history,
+            strategy=strategy,
+            portfolio_model=portfolio_model,
+            bars_per_year=bars_per_year,
+            universe_columns=universe_columns,
+            max_investment_ratio=max_investment_ratio,
+            max_weight=max_weight,
+            previous_weights=scoped_previous_weights,
+            transaction_cost=transaction_cost,
+            current_date=current_date,
+            predictor_panel=predictor_panel,
+            selection_contexts=selection_contexts,
+            predictor_context=predictor_context,
+        )
+    except ValueError:
+        return [], np.zeros(len(universe_columns), dtype="float64")
+
+
+def summarize_availability_series(series: list[dict]) -> dict[str, object]:
+    if not series:
+        return {
+            "minAvailableAssetCount": 0,
+            "maxAvailableAssetCount": 0,
+            "minEligibleAssetCount": 0,
+            "maxEligibleAssetCount": 0,
+            "newlyEligibleAssetCount": 0,
+            "removedAssetCount": 0,
+        }
+    available_counts = [int(point.get("availableAssetCount", 0)) for point in series]
+    eligible_counts = [int(point.get("eligibleAssetCount", 0)) for point in series]
+    return {
+        "minAvailableAssetCount": min(available_counts),
+        "maxAvailableAssetCount": max(available_counts),
+        "minEligibleAssetCount": min(eligible_counts),
+        "maxEligibleAssetCount": max(eligible_counts),
+        "newlyEligibleAssetCount": sum(len(point.get("newlyEligibleAssets", [])) for point in series),
+        "removedAssetCount": sum(len(point.get("removedAssets", [])) for point in series),
+    }
 
 
 def compare_portfolio_runs(
@@ -941,6 +1083,7 @@ def compare_portfolio_runs(
     portfolio_state: PortfolioState | None = None,
     predictor_panels_by_strategy: dict[str, pd.DataFrame] | None = None,
     strategy_signal_execution_contexts_by_key: dict[str, tuple[list[dict[str, object]], dict[str, object] | None]] | None = None,
+    availability_policy: dict[str, object] | None = None,
 ) -> list[dict]:
     if not strategies:
         raise ValueError("At least one strategy is required.")
@@ -966,6 +1109,8 @@ def compare_portfolio_runs(
 
     if strategy_signal_execution_contexts_by_key is None:
         strategy_signal_execution_contexts_by_key = {}
+    if availability_policy is None:
+        availability_policy = build_default_availability_policy()
 
     runs: list[dict] = []
     for strategy in strategies:
@@ -986,9 +1131,11 @@ def compare_portfolio_runs(
 
         strategy_closes = closes[strategy_universe]
         strategy_volumes = volumes[strategy_universe] if volumes is not None else None
-        returns = strategy_closes.pct_change().dropna()
+        returns = strategy_closes.pct_change(fill_method=None).iloc[1:]
+        returns = returns.dropna(how="all")
         if len(returns) < 6:
             raise ValueError("At least 6 return rows are required for portfolio comparison.")
+        strategy_volumes = strategy_volumes.loc[returns.index] if strategy_volumes is not None else None
         cost_inputs = resolve_cost_model_inputs(
             universe_columns=returns.columns,
             cost_model=cost_model,
@@ -1008,7 +1155,7 @@ def compare_portfolio_runs(
 
         portfolio_model = strategy.portfolio_model
         risk_controls = strategy.risk_controls
-        initial_selected_assets, initial_weights = compute_portfolio_allocation(
+        initial_selected_assets, initial_weights = compute_dynamic_portfolio_allocation(
             history_returns=train_returns,
             volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
             strategy=strategy,
@@ -1023,6 +1170,7 @@ def compare_portfolio_runs(
             predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
             selection_contexts=selection_contexts,
             predictor_context=predictor_context,
+            availability_policy=availability_policy,
         )
         backtest = run_portfolio_backtest(
             closes=strategy_closes,
@@ -1049,6 +1197,7 @@ def compare_portfolio_runs(
             predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
             selection_contexts=selection_contexts,
             predictor_context=predictor_context,
+            availability_policy=availability_policy,
         )
 
         runs.append(
@@ -1066,6 +1215,8 @@ def compare_portfolio_runs(
                 "summary": backtest["summary"],
                 "splitAnalysis": backtest["splitAnalysis"],
                 "series": backtest["series"],
+                "availabilitySummary": backtest["availabilitySummary"],
+                "availabilityPolicy": availability_policy,
             }
         )
 
@@ -1085,6 +1236,7 @@ def evaluate_strategy_run(
     portfolio_state: PortfolioState | None = None,
     predictor_panel: pd.DataFrame | None = None,
     signal_execution_contexts: tuple[list[dict[str, object]], dict[str, object] | None] | None = None,
+    availability_policy: dict[str, object] | None = None,
 ) -> dict:
     return compare_portfolio_runs(
         closes=closes,
@@ -1103,6 +1255,7 @@ def evaluate_strategy_run(
             if signal_execution_contexts is None
             else {strategy.key: signal_execution_contexts}
         ),
+        availability_policy=availability_policy,
     )[0]
 
 
@@ -1118,6 +1271,7 @@ def evaluate_strategy_definition_run(
     transaction_cost: float | None = None,
     portfolio_state: PortfolioState | None = None,
     predictor_panel: pd.DataFrame | None = None,
+    availability_policy: dict[str, object] | None = None,
 ) -> dict:
     try:
         strategy = build_executable_evaluator_strategy_spec_from_definition(strategy_definition)
@@ -1139,6 +1293,7 @@ def evaluate_strategy_definition_run(
         portfolio_state=portfolio_state,
         predictor_panel=predictor_panel,
         signal_execution_contexts=signal_execution_contexts,
+        availability_policy=availability_policy,
     )
     run["key"] = strategy_definition.key
     run["strategy"] = serialize_strategy_definition(strategy_definition)
@@ -1473,9 +1628,17 @@ def compute_predictor_panel(
     signal_source_weight = float(predictor_spec.engine_spec.combiner_spec.signal_source_weight or 0.8)
     learner_weight = float(predictor_spec.engine_spec.combiner_spec.learner_weight or 0.2)
 
+    availability_policy = build_default_availability_policy()
     for index in range(2, len(scoped_returns)):
-        history_returns = scoped_returns.iloc[:index]
-        history_volumes = scoped_volumes.iloc[:index] if scoped_volumes is not None else None
+        raw_history_returns = scoped_returns.iloc[:index]
+        eligible_assets = resolve_eligible_assets(raw_history_returns, availability_policy)
+        if len(eligible_assets) < 2:
+            continue
+        history_returns = prepare_history_returns_for_assets(raw_history_returns, eligible_assets)
+        if len(history_returns) < 3 or len(history_returns.columns) < 2:
+            continue
+        raw_history_volumes = scoped_volumes.iloc[:index] if scoped_volumes is not None else None
+        history_volumes = prepare_volume_history_for_assets(raw_history_volumes, history_returns)
         selected_assets = select_assets(
             history_returns,
             history_volumes,
@@ -1722,9 +1885,17 @@ def evaluate_asset_ranking_spec(
     observations: list[dict] = []
     latest_top_assets: list[str] = []
 
+    availability_policy = build_default_availability_policy()
     for index in range(2, len(returns)):
-        history_returns = returns.iloc[:index]
-        history_volumes = volumes.iloc[:index] if volumes is not None else None
+        raw_history_returns = returns.iloc[:index]
+        eligible_assets = resolve_eligible_assets(raw_history_returns, availability_policy)
+        if len(eligible_assets) < 2:
+            continue
+        history_returns = prepare_history_returns_for_assets(raw_history_returns, eligible_assets)
+        if len(history_returns) < 3 or len(history_returns.columns) < 2:
+            continue
+        raw_history_volumes = volumes.iloc[:index] if volumes is not None else None
+        history_volumes = prepare_volume_history_for_assets(raw_history_volumes, history_returns)
         selection = ranking_spec.selection
         selected_assets = select_assets(
             history_returns,
@@ -2005,6 +2176,8 @@ def compute_portfolio_allocation(
         return [], np.zeros(len(universe_columns), dtype="float64")
     strategy_returns = filter_positive_variance_assets(signal_returns[selected_assets])
     selected_assets = list(strategy_returns.columns)
+    if len(selected_assets) < 2:
+        return [], np.zeros(len(universe_columns), dtype="float64")
     selected_previous_weights = None
     if previous_weights is not None:
         previous_weight_map = {
@@ -2320,7 +2493,11 @@ def run_portfolio_backtest(
     predictor_panel: pd.DataFrame | None,
     selection_contexts: list[dict[str, object]] | None = None,
     predictor_context: dict[str, object] | None = None,
+    availability_policy: dict[str, object] | None = None,
 ) -> dict:
+    if availability_policy is None:
+        availability_policy = build_default_availability_policy()
+
     portfolio_equity = initial_capital
     portfolio_returns: list[float] = []
     series: list[dict] = []
@@ -2338,21 +2515,49 @@ def run_portfolio_backtest(
     pending_decision_selected_assets = list(initial_selected_assets)
     next_rebalance_weights: np.ndarray | None = None
     next_rebalance_selected_assets: list[str] | None = None
+    previous_eligible_assets: set[str] = set()
 
     for index, (date, row) in enumerate(returns.iterrows()):
         trade_turnover = 0.0
         trade_cost = 0.0
+        history_through_current = returns.iloc[: index + 1]
+        available_assets = resolve_available_assets(history_through_current)
+        eligible_assets = resolve_eligible_assets(history_through_current, availability_policy)
+        eligible_asset_set = set(eligible_assets)
+        newly_eligible_assets = sorted(eligible_asset_set - previous_eligible_assets)
+        removed_assets = sorted(previous_eligible_assets - eligible_asset_set)
+
+        tradable_weights = zero_weights_outside_assets(current_weights, returns.columns, eligible_assets)
+        forced_weight_delta = np.abs(tradable_weights - current_weights)
+        if forced_weight_delta.sum() > 0:
+            trade_turnover += float(forced_weight_delta.sum())
+            trade_cost += compute_trade_cost(
+                weight_delta=forced_weight_delta,
+                linear_cost_rates=asset_transaction_costs,
+                impact_cost_rates=asset_impact_costs,
+                portfolio_equity=portfolio_equity,
+                price_snapshot=closes.iloc[max(index - 1, 0)],
+                volume_history=volumes.iloc[:index] if volumes is not None else None,
+                adv_window_bars=adv_window_bars,
+                min_adv_notional=min_adv_notional,
+            )
+            current_weights = tradable_weights
+            current_selected_assets = [asset for asset in current_selected_assets if asset in eligible_asset_set]
 
         if index == split_index:
             next_rebalance_weights = initial_weights.copy()
             next_rebalance_selected_assets = list(initial_selected_assets)
 
         if index >= split_index and next_rebalance_weights is not None:
-            rebalanced_weights = next_rebalance_weights
-            selected_assets = next_rebalance_selected_assets or []
+            rebalanced_weights = zero_weights_outside_assets(
+                next_rebalance_weights,
+                returns.columns,
+                eligible_assets,
+            )
+            selected_assets = [asset for asset in (next_rebalance_selected_assets or []) if asset in eligible_asset_set]
             weight_delta = np.abs(rebalanced_weights - current_weights)
-            trade_turnover = float(weight_delta.sum())
-            trade_cost = compute_trade_cost(
+            trade_turnover += float(weight_delta.sum())
+            trade_cost += compute_trade_cost(
                 weight_delta=weight_delta,
                 linear_cost_rates=asset_transaction_costs,
                 impact_cost_rates=asset_impact_costs,
@@ -2369,7 +2574,8 @@ def run_portfolio_backtest(
             next_rebalance_weights = None
             next_rebalance_selected_assets = None
 
-        portfolio_return = float(np.dot(row.to_numpy(dtype="float64"), current_weights))
+        row_returns = row.reindex(returns.columns).fillna(0.0).to_numpy(dtype="float64")
+        portfolio_return = float(np.dot(row_returns, current_weights))
         portfolio_return -= trade_cost
 
         portfolio_equity *= 1 + portfolio_return
@@ -2387,8 +2593,13 @@ def run_portfolio_backtest(
                 "date": str(date),
                 "portfolioEquity": round(portfolio_equity, 2),
                 "portfolioReturnPct": round(portfolio_return * 100, 2),
+                "availableAssetCount": len(available_assets),
+                "eligibleAssetCount": len(eligible_assets),
+                "newlyEligibleAssets": newly_eligible_assets,
+                "removedAssets": removed_assets,
             }
         )
+        previous_eligible_assets = eligible_asset_set
 
         if index <= split_index or index >= len(returns) - 1:
             continue
@@ -2399,7 +2610,7 @@ def run_portfolio_backtest(
             current_date=date,
             rebalance_schedule=decision_schedule,
         ):
-            pending_decision_selected_assets, pending_decision_weights = compute_portfolio_allocation(
+            pending_decision_selected_assets, pending_decision_weights = compute_dynamic_portfolio_allocation(
                 history_returns=returns.iloc[: index + 1],
                 volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
                 strategy=strategy,
@@ -2414,6 +2625,7 @@ def run_portfolio_backtest(
                 predictor_panel=predictor_panel,
                 selection_contexts=selection_contexts,
                 predictor_context=predictor_context,
+                availability_policy=availability_policy,
             )
         if should_rebalance(
             previous_date=previous_date,
@@ -2440,6 +2652,7 @@ def run_portfolio_backtest(
         "series": series,
         "latestWeights": latest_weights,
         "latestSelectedAssets": latest_selected_assets,
+        "availabilitySummary": summarize_availability_series(series),
         "splitAnalysis": {
             "config": {"splitRatioPct": round(split_ratio * 100, 1)},
             "train": train_summary,

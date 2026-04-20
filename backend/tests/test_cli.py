@@ -206,6 +206,9 @@ def test_comparison_summary_walk_forward_command(monkeypatch, tmp_path, capsys) 
     assert "Top 2 candidate strategies by walk-forward test performance:" in captured.out
     assert "Avg Sharpe" in captured.out
     assert "Min Sharpe" in captured.out
+    assert "Availability policy:" in captured.out
+    assert "Market availability:" in captured.out
+    assert "Test eligible assets" in captured.out
 
 
 def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -230,6 +233,8 @@ def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, cap
     assert payload["candidateResults"][0]["windowCount"] == 2
     assert "averageSharpeRatio" in payload["candidateResults"][0]
     assert "minimumSharpeRatio" in payload["candidateResults"][0]
+    assert "minTestEligibleAssetCount" in payload["candidateResults"][0]
+    assert "testAvailability" in payload["candidateResults"][0]["windows"][0]
 
 
 def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, tmp_path, capsys) -> None:

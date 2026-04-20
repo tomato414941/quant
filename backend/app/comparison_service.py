@@ -1185,6 +1185,8 @@ def aggregate_walk_forward_runs(runs_by_window: list[dict]) -> list[dict]:
             )
             test_summary = run["splitAnalysis"]["test"]["portfolio"]
             train_summary = run["splitAnalysis"]["train"]["portfolio"]
+            train_split = run["splitAnalysis"]["train"]
+            test_split = run["splitAnalysis"]["test"]
             group["windows"].append(
                 {
                     "year": window["year"],
@@ -1192,6 +1194,16 @@ def aggregate_walk_forward_runs(runs_by_window: list[dict]) -> list[dict]:
                     "testEndDate": window["testEndDate"],
                     "test": test_summary,
                     "train": train_summary,
+                    "testAvailability": summarize_run_series_availability(
+                        run.get("series", []),
+                        start_date=test_split.get("startDate"),
+                        end_date=test_split.get("endDate"),
+                    ),
+                    "trainAvailability": summarize_run_series_availability(
+                        run.get("series", []),
+                        start_date=train_split.get("startDate"),
+                        end_date=train_split.get("endDate"),
+                    ),
                 }
             )
 
@@ -1199,9 +1211,64 @@ def aggregate_walk_forward_runs(runs_by_window: list[dict]) -> list[dict]:
     return sort_walk_forward_results(results)
 
 
+def summarize_run_series_availability(
+    series: list[dict],
+    *,
+    start_date: str | None,
+    end_date: str | None,
+) -> dict[str, object]:
+    empty_summary = {
+        "barCount": 0,
+        "minAvailableAssetCount": 0,
+        "maxAvailableAssetCount": 0,
+        "minEligibleAssetCount": 0,
+        "maxEligibleAssetCount": 0,
+        "newlyEligibleAssetCount": 0,
+        "removedAssetCount": 0,
+        "newlyEligibleAssets": [],
+        "removedAssets": [],
+    }
+    if not series or start_date is None or end_date is None:
+        return empty_summary
+
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    rows = [
+        row for row in series
+        if start <= pd.Timestamp(row["date"]) <= end
+    ]
+    if not rows:
+        return empty_summary
+
+    available_counts = [int(row.get("availableAssetCount", 0)) for row in rows]
+    eligible_counts = [int(row.get("eligibleAssetCount", 0)) for row in rows]
+    newly_eligible_assets = sorted({
+        asset
+        for row in rows
+        for asset in row.get("newlyEligibleAssets", [])
+    })
+    removed_assets = sorted({
+        asset
+        for row in rows
+        for asset in row.get("removedAssets", [])
+    })
+    return {
+        "barCount": len(rows),
+        "minAvailableAssetCount": min(available_counts),
+        "maxAvailableAssetCount": max(available_counts),
+        "minEligibleAssetCount": min(eligible_counts),
+        "maxEligibleAssetCount": max(eligible_counts),
+        "newlyEligibleAssetCount": len(newly_eligible_assets),
+        "removedAssetCount": len(removed_assets),
+        "newlyEligibleAssets": newly_eligible_assets,
+        "removedAssets": removed_assets,
+    }
+
+
 def summarize_walk_forward_group(group: dict) -> dict:
     windows = sorted(group["windows"], key=lambda window: window["year"])
     test_summaries = [window["test"] for window in windows]
+    test_availability_summaries = [window["testAvailability"] for window in windows]
     window_count = len(test_summaries)
 
     def average_metric(metric_key: str) -> float:
@@ -1226,6 +1293,24 @@ def summarize_walk_forward_group(group: dict) -> dict:
         "averageTotalReturnPct": average_metric("totalReturnPct"),
         "averageMaxDrawdownPct": average_metric("maxDrawdownPct"),
         "averageTurnoverPct": average_metric("turnoverPct"),
+        "minTestEligibleAssetCount": min(
+            int(summary["minEligibleAssetCount"])
+            for summary in test_availability_summaries
+        ),
+        "maxTestEligibleAssetCount": max(
+            int(summary["maxEligibleAssetCount"])
+            for summary in test_availability_summaries
+        ),
+        "testNewlyEligibleAssetCount": len({
+            asset
+            for summary in test_availability_summaries
+            for asset in summary.get("newlyEligibleAssets", [])
+        }),
+        "testRemovedAssetCount": len({
+            asset
+            for summary in test_availability_summaries
+            for asset in summary.get("removedAssets", [])
+        }),
     }
 
 

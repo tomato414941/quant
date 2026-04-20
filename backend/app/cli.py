@@ -260,10 +260,17 @@ def render_comparison_summary(payload: dict, *, top: int) -> str:
 
 
 
+def format_count_range(min_count: int, max_count: int) -> str:
+    if min_count == max_count:
+        return str(min_count)
+    return f"{min_count}-{max_count}"
+
+
 def render_walk_forward_summary(payload: dict, *, top: int) -> str:
     comparison = payload["comparison"]
     walk_forward = payload["walkForward"]
     candidate_results = payload["candidateResults"]
+    evaluation = comparison.get("runSpec", {}).get("evaluation", {})
     lines = [
         f"Comparison: {comparison['title']} ({comparison['comparisonId']})",
         f"Question: {comparison['question']}",
@@ -284,7 +291,26 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
         "",
     ]
 
-    warnings = comparison.get("runSpec", {}).get("evaluation", {}).get("warnings", [])
+    availability_policy = evaluation.get("availabilityPolicy")
+    if availability_policy:
+        lines.append(
+            "Availability policy: "
+            f"minHistoryBars={availability_policy.get('minHistoryBars')} "
+            f"maxStaleBars={availability_policy.get('maxStaleBars')} "
+            f"delistedAssetPolicy={availability_policy.get('delistedAssetPolicy')}"
+        )
+    availability_summary = evaluation.get("availabilitySummary")
+    if availability_summary:
+        min_available = int(availability_summary.get("minAvailableAssetCount", 0))
+        max_available = int(availability_summary.get("maxAvailableAssetCount", 0))
+        lines.append(
+            "Market availability: "
+            f"available assets {format_count_range(min_available, max_available)}"
+        )
+    if availability_policy or availability_summary:
+        lines.append("")
+
+    warnings = evaluation.get("warnings", [])
     if warnings:
         lines.append("Warnings:")
         for warning in warnings:
@@ -306,6 +332,14 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
             "   "
             f"Avg Turnover {format_percent(result['averageTurnoverPct'])}"
         )
+        if "minTestEligibleAssetCount" in result:
+            lines.append(
+                "   "
+                "Test eligible assets "
+                f"{format_count_range(int(result['minTestEligibleAssetCount']), int(result['maxTestEligibleAssetCount']))} | "
+                f"Newly eligible {result['testNewlyEligibleAssetCount']} | "
+                f"Removed {result['testRemovedAssetCount']}"
+            )
 
     return "\n".join(lines)
 

@@ -338,6 +338,7 @@ Strategy の外側で、どの期間・頻度・整列済みデータ範囲で�
 補足:
 - `investment universe` そのものは Strategy に含める
 - `その universe をどの期間で評価したか` は Dataset Context に含める
+- 期間途中で資産が現れる/消える場合の扱いは [Universe Availability](./universe-availability.md) を正本にする
 
 ### Evaluation Settings
 

@@ -279,6 +279,10 @@ def configure_cli_robustness(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_UNIVERSES", ("crypto_included",))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_COST_MULTIPLIERS", (1.0,))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_MAX_WEIGHTS", (0.35,))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_SMOKE_PERIOD_KEYS", ("2019_2021",))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_SMOKE_UNIVERSES", ("crypto_included",))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_SMOKE_COST_MULTIPLIERS", (1.0,))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_SMOKE_MAX_WEIGHTS", (0.35,))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_PERIOD_KEYS", ("2019_2021",))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_UNIVERSES", ("crypto_included",))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_COST_MULTIPLIERS", (1.0,))
@@ -313,6 +317,8 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert payload["schemaVersion"] == "v1"
     assert payload["profile"] == "quick"
     assert payload["scenarioCount"] == 1
+    assert "elapsedSeconds" in payload
+    assert "elapsedSeconds" in payload["scenarioResults"][0]
     assert payload["decisionSummary"]["strategyCount"] == len(payload["strategyResults"])
     assert payload["matrix"]["universes"] == ["crypto_included"]
     assert payload["scenarioResults"][0]["scenario"]["period"] == "2019-2021"
@@ -320,6 +326,33 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "worstSharpeRatio" in payload["strategyResults"][0]
     assert "top5ScenarioCount" in payload["strategyResults"][0]
     assert "worstScenario" in payload["strategyResults"][0]
+
+
+def test_robustness_summary_command_progress_and_output_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_robustness(monkeypatch, tmp_path)
+    output_path = tmp_path / "robustness-summary.json"
+
+    exit_code = cli_module.main([
+        "robustness-summary",
+        "--profile",
+        "smoke",
+        "--progress",
+        "--json",
+        "--output",
+        str(output_path),
+    ])
+
+    captured = capsys.readouterr()
+    stdout_payload = json.loads(captured.out)
+    file_payload = json.loads(output_path.read_text())
+    assert exit_code == 0
+    assert stdout_payload["profile"] == "smoke"
+    assert stdout_payload["scenarioCount"] == 1
+    assert stdout_payload["kind"] == file_payload["kind"]
+    assert stdout_payload["scenarioCount"] == file_payload["scenarioCount"]
+    assert "scenario 1/1 started" in captured.err
+    assert "scenario 1/1 done" in captured.err
+    assert "elapsed=" in captured.err
 
 
 def test_render_availability_diagnostics_shows_calendar_boundary_classification() -> None:

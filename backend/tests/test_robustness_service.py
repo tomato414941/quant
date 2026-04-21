@@ -4,6 +4,17 @@ from app import robustness_service
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 
 
+def test_build_robustness_scenarios_uses_smoke_profile() -> None:
+    scenarios = robustness_service.build_robustness_scenarios(profile="smoke")
+
+    assert len(scenarios) == 1
+    scenario = scenarios[0]
+    assert scenario["periodKey"] == "2020_2025"
+    assert scenario["universe"] == "crypto_included"
+    assert scenario["costMultiplier"] == 1.0
+    assert scenario["maxWeight"] == 0.35
+
+
 def test_build_robustness_scenarios_uses_quick_profile_by_default() -> None:
     scenarios = robustness_service.build_robustness_scenarios()
 

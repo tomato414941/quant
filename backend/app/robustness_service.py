@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import math
+import time
 from dataclasses import replace
 from typing import Callable
 
@@ -40,7 +41,11 @@ ROBUSTNESS_UNIVERSES = ("crypto_included", "no_crypto", "btc_only")
 ROBUSTNESS_COST_MULTIPLIERS = (1.0, 2.0, 3.0)
 ROBUSTNESS_MAX_WEIGHTS = (0.25, 0.35, 0.45)
 ROBUSTNESS_MAX_INVESTMENT_RATIO = 1.0
-ROBUSTNESS_PROFILE_KEYS = ("quick", "standard")
+ROBUSTNESS_PROFILE_KEYS = ("smoke", "quick", "standard")
+ROBUSTNESS_SMOKE_PERIOD_KEYS = ("2020_2025",)
+ROBUSTNESS_SMOKE_UNIVERSES = ("crypto_included",)
+ROBUSTNESS_SMOKE_COST_MULTIPLIERS = (1.0,)
+ROBUSTNESS_SMOKE_MAX_WEIGHTS = (0.35,)
 ROBUSTNESS_QUICK_PERIOD_KEYS = ("2020_2025",)
 ROBUSTNESS_QUICK_UNIVERSES = ("crypto_included", "no_crypto")
 ROBUSTNESS_QUICK_COST_MULTIPLIERS = (1.0, 3.0)
@@ -64,7 +69,9 @@ def build_robustness_summary_payload(
     universes: tuple[str, ...] | None = None,
     cost_multipliers: tuple[float, ...] | None = None,
     max_weights: tuple[float, ...] | None = None,
+    progress_callback: Callable[[dict], None] | None = None,
 ) -> dict:
+    started_at = time.perf_counter()
     scenarios = build_robustness_scenarios(
         profile=profile,
         period_keys=period_keys,
@@ -77,7 +84,15 @@ def build_robustness_summary_payload(
     total_cached_runs = 0
     total_computed_runs = 0
 
-    for scenario in scenarios:
+    for scenario_index, scenario in enumerate(scenarios, start=1):
+        if progress_callback:
+            progress_callback({
+                "kind": "scenario_started",
+                "scenarioIndex": scenario_index,
+                "scenarioCount": len(scenarios),
+                "scenario": scenario,
+            })
+        scenario_started_at = time.perf_counter()
         scenario_comparison = build_scenario_comparison(
             comparison,
             scenario=scenario,
@@ -92,6 +107,7 @@ def build_robustness_summary_payload(
         run_store_summary = payload["runStoreSummary"]
         total_cached_runs += int(run_store_summary["cachedRunCount"])
         total_computed_runs += int(run_store_summary["computedRunCount"])
+        scenario_elapsed_seconds = round(time.perf_counter() - scenario_started_at, 3)
 
         ranked_results = payload["candidateResults"] + payload.get("referenceResults", [])
         diagnostics = collect_scenario_diagnostics(payload)
@@ -99,6 +115,7 @@ def build_robustness_summary_payload(
             "kind": "robustness_scenario_result",
             "scenario": scenario,
             "runStoreSummary": run_store_summary,
+            "elapsedSeconds": scenario_elapsed_seconds,
             "diagnostics": diagnostics,
             "resultCount": len(ranked_results),
             "results": [],
@@ -116,6 +133,15 @@ def build_robustness_summary_payload(
             )
             group["scenarioResults"].append({**result_record, "scenario": scenario})
         scenario_results.append(scenario_record)
+        if progress_callback:
+            progress_callback({
+                "kind": "scenario_completed",
+                "scenarioIndex": scenario_index,
+                "scenarioCount": len(scenarios),
+                "scenario": scenario,
+                "runStoreSummary": run_store_summary,
+                "elapsedSeconds": scenario_elapsed_seconds,
+            })
 
     strategy_results = [
         summarize_strategy_robustness(group, scenario_count=len(scenarios))
@@ -129,6 +155,7 @@ def build_robustness_summary_payload(
         "schemaVersion": "v1",
         "profile": profile,
         "scenarioCount": len(scenarios),
+        "elapsedSeconds": round(time.perf_counter() - started_at, 3),
         "runStoreSummary": {
             "cachedRunCount": total_cached_runs,
             "computedRunCount": total_computed_runs,
@@ -194,14 +221,21 @@ def resolve_robustness_matrix(
     if profile not in ROBUSTNESS_PROFILE_KEYS:
         raise ValueError(f"Unknown robustness profile: {profile}")
 
-    base_period_keys = (
-        tuple(period["key"] for period in ROBUSTNESS_PERIODS)
-        if profile == "standard"
-        else ROBUSTNESS_QUICK_PERIOD_KEYS
-    )
-    base_universes = ROBUSTNESS_UNIVERSES if profile == "standard" else ROBUSTNESS_QUICK_UNIVERSES
-    base_costs = ROBUSTNESS_COST_MULTIPLIERS if profile == "standard" else ROBUSTNESS_QUICK_COST_MULTIPLIERS
-    base_weights = ROBUSTNESS_MAX_WEIGHTS if profile == "standard" else ROBUSTNESS_QUICK_MAX_WEIGHTS
+    if profile == "standard":
+        base_period_keys = tuple(period["key"] for period in ROBUSTNESS_PERIODS)
+        base_universes = ROBUSTNESS_UNIVERSES
+        base_costs = ROBUSTNESS_COST_MULTIPLIERS
+        base_weights = ROBUSTNESS_MAX_WEIGHTS
+    elif profile == "quick":
+        base_period_keys = ROBUSTNESS_QUICK_PERIOD_KEYS
+        base_universes = ROBUSTNESS_QUICK_UNIVERSES
+        base_costs = ROBUSTNESS_QUICK_COST_MULTIPLIERS
+        base_weights = ROBUSTNESS_QUICK_MAX_WEIGHTS
+    else:
+        base_period_keys = ROBUSTNESS_SMOKE_PERIOD_KEYS
+        base_universes = ROBUSTNESS_SMOKE_UNIVERSES
+        base_costs = ROBUSTNESS_SMOKE_COST_MULTIPLIERS
+        base_weights = ROBUSTNESS_SMOKE_MAX_WEIGHTS
 
     selected_period_keys = period_keys or base_period_keys
     selected_universes = universes or base_universes

@@ -4,6 +4,7 @@ import argparse
 import copy
 from dataclasses import replace
 import json
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -87,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=robustness_service.ROBUSTNESS_MAX_WEIGHTS,
         help="Restrict robustness scenarios to a max asset weight. Can be repeated.",
     )
+    robustness_parser.add_argument("--progress", action="store_true")
+    robustness_parser.add_argument("--output", help="Write the full robustness JSON payload to this path.")
     robustness_parser.add_argument("--json", action="store_true", dest="as_json")
 
     comparison_run_spec_parser = subparsers.add_parser(
@@ -478,6 +481,26 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+def render_robustness_progress(event: dict) -> str:
+    scenario = event["scenario"]
+    prefix = f"scenario {event['scenarioIndex']}/{event['scenarioCount']}"
+    if event["kind"] == "scenario_started":
+        return f"{prefix} started: {scenario['key']}"
+    run_store_summary = event["runStoreSummary"]
+    return (
+        f"{prefix} done: {scenario['key']} | "
+        f"cached={run_store_summary['cachedRunCount']} "
+        f"computed={run_store_summary['computedRunCount']} "
+        f"elapsed={event['elapsedSeconds']:.3f}s"
+    )
+
+
+def write_json_payload(path: str, payload: dict) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
 def render_comparison_run_spec(payload: dict) -> str:
     lines = [
         f"Comparison: {payload['title']} ({payload['comparisonId']})",
@@ -569,6 +592,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "robustness-summary":
+        progress_callback = None
+        if args.progress:
+            progress_callback = lambda event: print(render_robustness_progress(event), file=sys.stderr)
         payload = robustness_service.build_robustness_summary_payload(
             DEFAULT_COMPARISON_SPEC,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
@@ -578,7 +604,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             universes=tuple(args.universes) if args.universes else None,
             cost_multipliers=tuple(args.cost_multipliers) if args.cost_multipliers else None,
             max_weights=tuple(args.max_weights) if args.max_weights else None,
+            progress_callback=progress_callback,
         )
+        if args.output:
+            write_json_payload(args.output, payload)
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:

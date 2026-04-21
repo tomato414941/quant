@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from app import robustness_service
 from app.comparison_service import (
     build_comparison_payload,
     build_comparison_payload_from_run_spec_payload,
@@ -44,6 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
     comparison_parser.add_argument("--walk-forward", action="store_true")
     comparison_parser.add_argument("--walk-forward-start-year", type=int, default=2020)
     comparison_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
+
+    robustness_parser = subparsers.add_parser(
+        "robustness-summary",
+        help="Print a robustness summary across fixed evaluation conditions.",
+    )
+    robustness_parser.add_argument("--top", type=int, default=10)
+    robustness_parser.add_argument("--json", action="store_true", dest="as_json")
 
     comparison_run_spec_parser = subparsers.add_parser(
         "comparison-run-spec",
@@ -371,6 +379,56 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+def render_robustness_summary(payload: dict, *, top: int) -> str:
+    matrix = payload["matrix"]
+    strategy_results = payload["strategyResults"]
+    periods = ", ".join(period["label"] for period in matrix["periods"])
+    universes = ", ".join(matrix["universes"])
+    cost_multipliers = ", ".join(f"x{value:.1f}" for value in matrix["costMultipliers"])
+    max_weights = ", ".join(f"{value:.0f}%" for value in matrix["maxWeightPcts"])
+    lines = [
+        f"Robustness summary: {payload['scenarioCount']} scenarios",
+        f"Periods: {periods}",
+        f"Universes: {universes}",
+        f"Costs: {cost_multipliers} | Max weights: {max_weights}",
+        (
+            "Ranking policy: decision / worst Sharpe / top-5 stability / "
+            "average Sharpe"
+        ),
+        (
+            "Run store: "
+            f"cached={payload['runStoreSummary']['cachedRunCount']} "
+            f"computed={payload['runStoreSummary']['computedRunCount']}"
+        ),
+        "",
+        f"Top {min(top, len(strategy_results))} strategies by robustness:",
+    ]
+    for index, result in enumerate(strategy_results[:top], start=1):
+        risks = ", ".join(result["diagnosticFlags"]) if result["diagnosticFlags"] else "none"
+        lines.append(f"{index}. {result['strategyLabel']} [{result['strategyKey']}]")
+        lines.append(
+            "   "
+            f"Decision {result['decision']} | "
+            f"Avg Sharpe {result['averageSharpeRatio']:.3f} | "
+            f"Worst Sharpe {result['worstSharpeRatio']:.3f} | "
+            f"Top5 {result['top5ScenarioCount']}/{result['scenarioCount']}"
+        )
+        lines.append(
+            "   "
+            f"Avg Return {format_percent(result['averageTotalReturnPct'])} | "
+            f"Worst MDD {format_percent(result['worstMaxDrawdownPct'])} | "
+            f"Avg Turnover {format_percent(result['averageTurnoverPct'])} | "
+            f"Max Turnover {format_percent(result['maxTurnoverPct'])}"
+        )
+        lines.append(
+            "   "
+            f"Crypto sensitivity {result['cryptoSensitivity']:+.3f} | "
+            f"Cost sensitivity {result['costSensitivity']:+.3f} | "
+            f"Risks: {risks}"
+        )
+    return "\n".join(lines)
+
+
 def render_comparison_run_spec(payload: dict) -> str:
     lines = [
         f"Comparison: {payload['title']} ({payload['comparisonId']})",
@@ -459,6 +517,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_comparison_summary(payload, top=max(args.top, 1)))
+        return 0
+
+    if args.command == "robustness-summary":
+        payload = robustness_service.build_robustness_summary_payload(
+            DEFAULT_COMPARISON_SPEC,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+            apply_universe_variant=apply_comparison_universe_variant,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_robustness_summary(payload, top=max(args.top, 1)))
         return 0
 
     if args.command == "comparison-run-spec":

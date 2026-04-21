@@ -260,6 +260,59 @@ def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, 
     assert "ETH-USD" not in tickers
 
 
+def configure_cli_robustness(monkeypatch, tmp_path):
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        cli_module.robustness_service,
+        "ROBUSTNESS_PERIODS",
+        (
+            {
+                "key": "2019_2021",
+                "label": "2019-2021",
+                "startDate": "2019-01-01",
+                "endDate": "2021-12-31",
+                "walkForwardStartYear": 2020,
+                "walkForwardEndYear": 2020,
+            },
+        ),
+    )
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_UNIVERSES", ("crypto_included",))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_COST_MULTIPLIERS", (1.0,))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_MAX_WEIGHTS", (0.35,))
+    return config
+
+
+def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_robustness(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main(["robustness-summary", "--top", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Robustness summary: 1 scenarios" in captured.out
+    assert "Top 2 strategies by robustness:" in captured.out
+    assert "Decision" in captured.out
+    assert "Worst Sharpe" in captured.out
+    assert "Risks:" in captured.out
+
+
+def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_robustness(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main(["robustness-summary", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kind"] == "robustness_summary"
+    assert payload["schemaVersion"] == "v1"
+    assert payload["scenarioCount"] == 1
+    assert payload["matrix"]["universes"] == ["crypto_included"]
+    assert payload["scenarioResults"][0]["scenario"]["period"] == "2019-2021"
+    assert payload["strategyResults"][0]["decision"] in {"PASS", "WATCH", "FAIL", "INVALID"}
+    assert "worstSharpeRatio" in payload["strategyResults"][0]
+    assert "top5ScenarioCount" in payload["strategyResults"][0]
+
+
 def test_render_availability_diagnostics_shows_calendar_boundary_classification() -> None:
     lines = []
 

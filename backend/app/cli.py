@@ -450,10 +450,12 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
     ]
     for index, result in enumerate(strategy_results[:top], start=1):
         risks = ", ".join(result["diagnosticFlags"]) if result["diagnosticFlags"] else "none"
+        reasons = ", ".join(result.get("decisionReasons") or []) or "none"
         lines.append(f"{index}. {result['strategyLabel']} [{result['strategyKey']}]")
         lines.append(
             "   "
             f"Decision {result['decision']} | "
+            f"Reasons: {reasons} | "
             f"Avg Sharpe {result['averageSharpeRatio']:.3f} | "
             f"Worst Sharpe {result['worstSharpeRatio']:.3f} | "
             f"Top5 {result['top5ScenarioCount']}/{result['scenarioCount']}"

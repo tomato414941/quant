@@ -390,7 +390,7 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
     })
     crypto_sensitivity = compute_crypto_sensitivity(results)
     cost_sensitivity = compute_cost_sensitivity(results)
-    decision = classify_robustness_decision(
+    decision_result = build_robustness_decision(
         scenario_count=scenario_count,
         worst_sharpe=min(min_sharpe_values),
         top5_count=top5_count,
@@ -402,7 +402,8 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         "kind": "robustness_strategy_result",
         "strategyKey": group["strategyKey"],
         "strategyLabel": group["strategyLabel"],
-        "decision": decision,
+        "decision": decision_result["decision"],
+        "decisionReasons": decision_result["reasons"],
         "scenarioCount": len(results),
         "averageSharpeRatio": round(average(sharpe_values), 6),
         "worstSharpeRatio": round(min(min_sharpe_values), 6),
@@ -483,14 +484,50 @@ def classify_robustness_decision(
     crypto_sensitivity: float,
     cost_sensitivity: float,
 ) -> str:
+    return build_robustness_decision(
+        scenario_count=scenario_count,
+        worst_sharpe=worst_sharpe,
+        top5_count=top5_count,
+        diagnostic_flags=diagnostic_flags,
+        crypto_sensitivity=crypto_sensitivity,
+        cost_sensitivity=cost_sensitivity,
+    )["decision"]
+
+
+def build_robustness_decision(
+    *,
+    scenario_count: int,
+    worst_sharpe: float,
+    top5_count: int,
+    diagnostic_flags: list[str],
+    crypto_sensitivity: float,
+    cost_sensitivity: float,
+) -> dict:
     top5_ratio = top5_count / scenario_count if scenario_count else 0.0
+    reasons = []
+    if "mixed calendar" in diagnostic_flags:
+        reasons.append("mixed calendar diagnostic only")
     if "actionable availability warning" in diagnostic_flags or "unknown symbols" in diagnostic_flags:
-        return "INVALID"
+        if "actionable availability warning" in diagnostic_flags:
+            reasons.append("actionable availability warning")
+        if "unknown symbols" in diagnostic_flags:
+            reasons.append("unknown symbols")
+        return {"decision": "INVALID", "reasons": reasons}
     if worst_sharpe < 0.0 or top5_ratio < 0.25:
-        return "FAIL"
-    if "mixed calendar" in diagnostic_flags or cost_sensitivity <= -0.30 or crypto_sensitivity <= -0.30:
-        return "WATCH"
-    return "PASS"
+        if worst_sharpe < 0.0:
+            reasons.append("worst Sharpe below 0.0")
+        if top5_ratio < 0.25:
+            reasons.append("top-5 scenario ratio below 25%")
+        return {"decision": "FAIL", "reasons": reasons}
+    if cost_sensitivity <= -0.30 or crypto_sensitivity <= -0.30:
+        if cost_sensitivity <= -0.30:
+            reasons.append("cost sensitivity below -0.30")
+        if crypto_sensitivity <= -0.30:
+            reasons.append("crypto sensitivity below -0.30")
+        return {"decision": "WATCH", "reasons": reasons}
+    if not reasons:
+        reasons.append("passed robustness thresholds")
+    return {"decision": "PASS", "reasons": reasons}
 
 
 def sort_robustness_results(results: list[dict]) -> list[dict]:

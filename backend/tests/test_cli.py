@@ -301,6 +301,7 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Decisions:" in captured.out
     assert "Top 2 strategies by robustness:" in captured.out
     assert "Decision" in captured.out
+    assert "Reasons:" in captured.out
     assert "Worst Sharpe" in captured.out
     assert "Risks:" in captured.out
     assert "Worst scenario" in captured.out
@@ -323,6 +324,7 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert payload["matrix"]["universes"] == ["crypto_included"]
     assert payload["scenarioResults"][0]["scenario"]["period"] == "2019-2021"
     assert payload["strategyResults"][0]["decision"] in {"PASS", "WATCH", "FAIL", "INVALID"}
+    assert "decisionReasons" in payload["strategyResults"][0]
     assert "worstSharpeRatio" in payload["strategyResults"][0]
     assert "top5ScenarioCount" in payload["strategyResults"][0]
     assert "worstScenario" in payload["strategyResults"][0]

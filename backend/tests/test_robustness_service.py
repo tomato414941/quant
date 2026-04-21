@@ -100,6 +100,38 @@ def test_classify_robustness_decision_passes_stable_result() -> None:
     assert decision == "PASS"
 
 
+def test_classify_robustness_decision_does_not_penalize_mixed_calendar_only() -> None:
+    decision = robustness_service.classify_robustness_decision(
+        scenario_count=10,
+        worst_sharpe=0.1,
+        top5_count=5,
+        diagnostic_flags=["mixed calendar"],
+        crypto_sensitivity=0.0,
+        cost_sensitivity=0.0,
+    )
+
+    assert decision == "PASS"
+
+
+def test_build_robustness_decision_reports_reasons() -> None:
+    decision = robustness_service.build_robustness_decision(
+        scenario_count=10,
+        worst_sharpe=0.1,
+        top5_count=5,
+        diagnostic_flags=["mixed calendar"],
+        crypto_sensitivity=0.0,
+        cost_sensitivity=-0.3,
+    )
+
+    assert decision == {
+        "decision": "WATCH",
+        "reasons": [
+            "mixed calendar diagnostic only",
+            "cost sensitivity below -0.30",
+        ],
+    }
+
+
 def test_build_scenario_comparison_applies_period_cost_and_risk_controls() -> None:
     comparison = copy.deepcopy(DEFAULT_COMPARISON_SPEC)
     scenario = {

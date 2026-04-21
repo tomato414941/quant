@@ -18,6 +18,11 @@ from app.comparison_service import (
 )
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
+from app.instrument_registry import (
+    UNIVERSE_VARIANT_KEYS,
+    get_universe_variant,
+    resolve_universe_variant_excluded_tickers,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     comparison_parser.add_argument("--top", type=int, default=5)
     comparison_parser.add_argument(
         "--universe",
-        choices=("crypto_included", "btc_only", "no_crypto"),
+        choices=UNIVERSE_VARIANT_KEYS,
         default="crypto_included",
         help="Run the comparison against a fixed universe variant.",
     )
@@ -86,25 +91,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-UNIVERSE_VARIANTS = {
-    "crypto_included": {
-        "label": "Crypto included",
-        "excluded_tickers": set(),
-    },
-    "btc_only": {
-        "label": "BTC only",
-        "excluded_tickers": {"ETH-USD"},
-    },
-    "no_crypto": {
-        "label": "No crypto",
-        "excluded_tickers": {"BTC-USD", "ETH-USD"},
-    },
-}
+def collect_comparison_universe_tickers(comparison) -> tuple[str, ...]:
+    tickers: dict[str, None] = {}
+    for asset in comparison.run_spec.portfolio_state.current_weights:
+        tickers.setdefault(asset, None)
+    for strategy in comparison.candidate_strategies + comparison.reference_strategies:
+        for ticker in strategy.investment_universe.tickers:
+            tickers.setdefault(ticker, None)
+        for signal in strategy.signals:
+            for ticker in signal.observation_spec.tickers:
+                tickers.setdefault(ticker, None)
+    return tuple(tickers)
 
 
 def apply_comparison_universe_variant(comparison, universe_key: str):
-    variant = UNIVERSE_VARIANTS[universe_key]
-    excluded_tickers = set(variant["excluded_tickers"])
+    variant = get_universe_variant(universe_key)
+    excluded_tickers = resolve_universe_variant_excluded_tickers(
+        collect_comparison_universe_tickers(comparison),
+        universe_key,
+    )
     if not excluded_tickers:
         return comparison
 
@@ -138,6 +143,7 @@ def apply_comparison_universe_variant(comparison, universe_key: str):
 
 
 def filter_strategy_definition_universe(strategy_definition, excluded_tickers: set[str], universe_key: str):
+    variant = get_universe_variant(universe_key)
     tickers = tuple(
         ticker
         for ticker in strategy_definition.investment_universe.tickers
@@ -148,7 +154,7 @@ def filter_strategy_definition_universe(strategy_definition, excluded_tickers: s
     investment_universe = replace(
         strategy_definition.investment_universe,
         key=f"{strategy_definition.investment_universe.key}__{universe_key}",
-        label=f"{strategy_definition.investment_universe.label} / {UNIVERSE_VARIANTS[universe_key]['label']}",
+        label=f"{strategy_definition.investment_universe.label} / {variant.label}",
         tickers=tickers,
     )
     return replace(
@@ -208,6 +214,14 @@ def render_availability_diagnostics(lines: list[str], diagnostics: dict | None) 
         lines.append("")
 
 
+def render_instrument_diagnostics(lines: list[str], diagnostics: dict | None) -> None:
+    if not diagnostics or not diagnostics.get("mixedMarketCalendar"):
+        return
+    calendars = ", ".join((diagnostics.get("marketCalendars") or {}).keys())
+    lines.append(f"Calendar diagnostics: mixed market calendars {calendars}.")
+    lines.append("")
+
+
 def portfolio_segment_summary(run: dict, segment: str) -> dict:
     return run["splitAnalysis"][segment]["portfolio"]
 
@@ -250,6 +264,7 @@ def render_comparison_summary(payload: dict, *, top: int) -> str:
     ]
 
     evaluation = comparison.get("runSpec", {}).get("evaluation", {})
+    render_instrument_diagnostics(lines, evaluation.get("instrumentDiagnostics"))
     render_availability_diagnostics(lines, evaluation.get("availabilityDiagnostics"))
 
     lines.append(f"Top {min(top, len(candidate_runs))} candidate runs by test performance:")
@@ -326,6 +341,7 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
     if availability_policy or availability_summary:
         lines.append("")
 
+    render_instrument_diagnostics(lines, evaluation.get("instrumentDiagnostics"))
     render_availability_diagnostics(lines, evaluation.get("availabilityDiagnostics"))
 
     lines.append(f"Top {min(top, len(candidate_results))} candidate strategies by walk-forward test performance:")

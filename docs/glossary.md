@@ -356,9 +356,12 @@ Strategy の外側で、どの期間・頻度・整列済みデータ範囲で�
 例:
 - fee
 - slippage
+- impact
+- cost profile
 
 補足:
 - fee の実数値そのものは通常 Strategy ではなく Evaluation Context
+- instrument の asset class / venue から cost profile を作り、ticker 直書きの特別扱いは避ける
 - ただし、どの cost model を採用するかは Strategy や Study の論点になりうる
 
 ### Initial State

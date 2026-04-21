@@ -344,6 +344,10 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["runSpec"]["kind"] == "comparison_run_spec"
     assert payload["comparison"]["runSpec"]["executionAssumptions"]["kind"] == "close_execution_assumptions"
     assert payload["comparison"]["runSpec"]["executionAssumptions"]["parameters"]["fillPrice"] == "close"
+    assert (
+        payload["comparison"]["runSpec"]["executionAssumptions"]["parameters"]["costProfileKey"]
+        == "retail_multi_asset_default"
+    )
     assert payload["comparison"]["runSpec"]["executionAssumptions"]["costModel"]["kind"] == "asset_specific_adv_cost"
     assert (
         payload["comparison"]["runSpec"]["executionAssumptions"]["costModel"]["parameters"]["commissionPct"]
@@ -363,6 +367,11 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     )
     assert payload["comparison"]["runSpec"]["evaluation"]["kind"] == "evaluation_spec"
     assert payload["comparison"]["runSpec"]["evaluation"]["schemaVersion"] == "v1"
+    instrument_diagnostics = payload["comparison"]["runSpec"]["evaluation"]["instrumentDiagnostics"]
+    assert instrument_diagnostics["costProfileKey"] == "retail_multi_asset_default"
+    assert instrument_diagnostics["mixedMarketCalendar"] is True
+    assert instrument_diagnostics["marketCalendars"] == {"24_7": 2, "nyse": 18}
+    assert instrument_diagnostics["assetClassCounts"]["crypto"] == 2
     assert {
         context["timeframe"]["key"]
         for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
@@ -526,7 +535,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["recordCount"] == min(10, expected_predictor_count * 2)
     assert index_payload["sortBy"] == "test_rank_ic"
     assert index_payload["records"][0]["runKind"] == "predictor_run"
-    assert index_payload["records"][0]["logicVersion"] == "v63"
+    assert index_payload["records"][0]["logicVersion"] == "v64"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
     assert index_payload["records"][0]["evaluationSubjectFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
@@ -547,7 +556,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "predictor_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "predictor_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v63"
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v64"
     assert detail_payload["record"]["runSpec"]["strategyDefinition"]["kind"] == "strategy_definition"
     assert detail_payload["record"]["runSpec"]["evaluationSubject"]["kind"] == "predictor"
     assert detail_payload["record"]["runSpec"]["evaluationSubject"]["predictor"]["kind"] == "predictor_spec"
@@ -1146,7 +1155,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert index_payload["totalCount"] == (expected_strategy_count + expected_reference_count) * 2
     assert index_payload["recordCount"] == 10
     assert index_payload["records"][0]["runKind"] == "strategy_run"
-    assert index_payload["records"][0]["logicVersion"] == "v63"
+    assert index_payload["records"][0]["logicVersion"] == "v64"
     assert index_payload["records"][0]["strategyDefinitionFingerprint"]
     assert index_payload["records"][0]["evaluationSubjectFingerprint"]
     assert index_payload["records"][0]["marketDataFingerprint"]
@@ -1159,7 +1168,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert detail_payload["kind"] == "strategy_run_detail"
     assert detail_payload["record"]["runKey"] == run_key
     assert detail_payload["record"]["runSpec"]["runKind"] == "strategy_run"
-    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v63"
+    assert detail_payload["record"]["runSpec"]["logicVersion"] == "v64"
     assert set(detail_payload["record"]["runSpec"]["fingerprints"].keys()) == {"strategyDefinition", "evaluationSubject", "marketData", "evaluation"}
 
     fingerprint_filtered_response = client.get(
@@ -1308,15 +1317,15 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     config.condition_variants = [
         ConditionVariant(
             key="baseline",
-            label="手数料 0.10% / 投資 85% / 上限なし",
-            commission_pct=0.1,
+            label="コスト x1.0 / 投資 85% / 上限なし",
+            cost_multiplier=1.0,
             max_investment_ratio=0.85,
             max_weight=None,
         ),
         ConditionVariant(
             key="cash_80",
-            label="手数料 0.10% / 投資 80% / 上限なし",
-            commission_pct=0.1,
+            label="コスト x2.0 / 投資 80% / 上限なし",
+            cost_multiplier=2.0,
             max_investment_ratio=0.8,
             max_weight=None,
         ),
@@ -1332,6 +1341,7 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     assert first_payload["runStoreSummary"]["cachedRunCount"] == 0
     assert first_payload["runStoreSummary"]["computedRunCount"] == 2
     assert len(first_payload["conditionVariants"]) == 2
+    assert {variant["costMultiplier"] for variant in first_payload["conditionVariants"]} == {1.0, 2.0}
     assert first_payload["results"][0]["conditionVariant"]["label"]
 
     second_response = client.get("/api/condition-sweep")
@@ -1344,8 +1354,8 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     config.condition_variants.append(
         ConditionVariant(
             key="cap_45",
-            label="手数料 0.10% / 投資 85% / 45%上限",
-            commission_pct=0.1,
+            label="コスト x1.0 / 投資 85% / 45%上限",
+            cost_multiplier=1.0,
             max_investment_ratio=0.85,
             max_weight=0.45,
         )
@@ -1417,7 +1427,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["limit"] == 5
     assert payload["runKind"] == "strategy_run"
     assert payload["recordCount"] == 5
-    assert payload["records"][0]["logicVersion"] == "v63"
+    assert payload["records"][0]["logicVersion"] == "v64"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

@@ -81,6 +81,26 @@ def build_asset_specific_adv_cost_model_spec(
     )
 
 
+COST_SCALABLE_PARAMETER_KEYS = {"commissionPct", "slippagePct", "impactCoefficientPct"}
+
+
+def scale_cost_model_spec(cost_model: CostModelSpec, multiplier: float) -> CostModelSpec:
+    return CostModelSpec(
+        kind=cost_model.kind,
+        parameters={
+            key: (float(value) * multiplier if key in COST_SCALABLE_PARAMETER_KEYS else float(value))
+            for key, value in cost_model.parameters.items()
+        },
+        per_asset_overrides={
+            asset: {
+                key: (float(value) * multiplier if key in COST_SCALABLE_PARAMETER_KEYS else float(value))
+                for key, value in overrides.items()
+            }
+            for asset, overrides in cost_model.per_asset_overrides.items()
+        },
+    )
+
+
 def build_execution_assumptions_spec(
     *,
     kind: str = "close_execution_assumptions",
@@ -126,7 +146,7 @@ class SelectionPolicy:
 class ConditionVariant:
     key: str
     label: str
-    commission_pct: float
+    cost_multiplier: float
     max_investment_ratio: float
     max_weight: float | None = None
 

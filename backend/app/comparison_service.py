@@ -45,8 +45,10 @@ from app.comparison_models import (
     MarketSliceSpec,
     RunSpec,
     SelectionPolicy,
+    scale_cost_model_spec,
 )
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_fingerprint, build_run_spec
+from app.instrument_registry import build_instrument_diagnostics
 from app.timeframe_models import (
     DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_MONTHLY_TIMEFRAME,
@@ -467,10 +469,11 @@ def deserialize_evaluation_spec(payload: dict[str, object]) -> EvaluationSpec:
 
 def deserialize_condition_variant(payload: dict[str, object]) -> ConditionVariant:
     max_weight_pct = payload.get("maxWeightPct")
+    cost_multiplier = payload.get("costMultiplier", 1.0)
     return ConditionVariant(
         key=str(payload["key"]),
         label=str(payload["label"]),
-        commission_pct=float(payload["commissionPct"]),
+        cost_multiplier=float(cost_multiplier),
         max_investment_ratio=float(payload["maxInvestmentPct"]) / 100,
         max_weight=None if max_weight_pct is None else float(max_weight_pct) / 100,
     )
@@ -2528,6 +2531,17 @@ def serialize_signal_market_data_contexts(
     return contexts
 
 
+def collect_instrument_diagnostic_symbols(
+    metadata_by_timeframe: dict[str, dict[str, object]],
+) -> tuple[str, ...]:
+    symbols: dict[str, None] = {}
+    for metadata in metadata_by_timeframe.values():
+        tickers = metadata.get("requested_tickers") or metadata.get("tickers") or []
+        for ticker in tickers:
+            symbols.setdefault(str(ticker), None)
+    return tuple(symbols)
+
+
 def serialize_evaluation(
     comparison: ComparisonSpec,
     metadata_by_timeframe: dict[str, dict[str, object]],
@@ -2549,6 +2563,15 @@ def serialize_evaluation(
         "availabilityPolicy": availability_policy,
         "availabilitySummary": build_availability_summary(metadata_by_timeframe),
         "availabilityDiagnostics": build_availability_diagnostics(warnings, availability_policy),
+        "instrumentDiagnostics": build_instrument_diagnostics(
+            collect_instrument_diagnostic_symbols(metadata_by_timeframe),
+            cost_profile_key=str(
+                comparison.run_spec.execution_assumptions.parameters.get(
+                    "costProfileKey",
+                    "unknown",
+                )
+            ),
+        ),
         "marketDataContexts": [
             serialize_market_slice_context(
                 comparison=comparison,
@@ -2674,7 +2697,7 @@ def serialize_condition_variant(condition_variant: ConditionVariant) -> dict:
     return {
         "key": condition_variant.key,
         "label": condition_variant.label,
-        "commissionPct": round(condition_variant.commission_pct, 3),
+        "costMultiplier": round(condition_variant.cost_multiplier, 3),
         "maxInvestmentPct": round(condition_variant.max_investment_ratio * 100, 1),
         "maxWeightPct": round(condition_variant.max_weight * 100, 1)
         if condition_variant.max_weight is not None
@@ -3092,12 +3115,9 @@ def build_condition_sweep_runs(
             effective_evaluation = replace(comparison.run_spec.evaluation)
             effective_execution_assumptions = replace(
                 comparison.run_spec.execution_assumptions,
-                cost_model=replace(
+                cost_model=scale_cost_model_spec(
                     comparison.run_spec.execution_assumptions.cost_model,
-                    parameters={
-                        **comparison.run_spec.execution_assumptions.cost_model.parameters,
-                        "commissionPct": condition_variant.commission_pct,
-                    },
+                    condition_variant.cost_multiplier,
                 ),
             )
             serialized_strategy_definition = serialize_strategy_definition_payload(effective_strategy_definition)

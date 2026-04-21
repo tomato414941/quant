@@ -17,6 +17,7 @@ from app.timeframe_models import (
     DEFAULT_MONTHLY_TIMEFRAME,
     DEFAULT_WEEKLY_TIMEFRAME,
 )
+from app.instrument_registry import GLOBAL_MULTI_ASSET_TICKERS, ETF_ONLY_TICKERS
 
 
 def window_spec(*, unit: str, value: float) -> dict[str, float | str]:
@@ -237,53 +238,13 @@ MEAN_RISK_UTILITY_CONSERVATIVE = build_portfolio_model_spec(
 DEFAULT_INVESTMENT_UNIVERSE = build_investment_universe_spec(
     key="global_multi_asset_v1",
     label="20資産マルチアセット",
-    tickers=[
-        "SPY",
-        "QQQ",
-        "IWM",
-        "EFA",
-        "EEM",
-        "EWJ",
-        "EWZ",
-        "VNQ",
-        "TLT",
-        "IEF",
-        "LQD",
-        "HYG",
-        "TIP",
-        "GLD",
-        "SLV",
-        "DBC",
-        "USO",
-        "UUP",
-        "BTC-USD",
-        "ETH-USD",
-    ],
+    tickers=GLOBAL_MULTI_ASSET_TICKERS,
 )
 
 ETF_ONLY_INVESTMENT_UNIVERSE = build_investment_universe_spec(
     key="global_etf_only_v1",
     label="18資産ETF",
-    tickers=[
-        "SPY",
-        "QQQ",
-        "IWM",
-        "EFA",
-        "EEM",
-        "EWJ",
-        "EWZ",
-        "VNQ",
-        "TLT",
-        "IEF",
-        "LQD",
-        "HYG",
-        "TIP",
-        "GLD",
-        "SLV",
-        "DBC",
-        "USO",
-        "UUP",
-    ],
+    tickers=ETF_ONLY_TICKERS,
 )
 
 DEFAULT_RISK_CONTROLS = build_risk_controls_spec(

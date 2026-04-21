@@ -231,16 +231,16 @@ Status: implemented.
 
 Status: implemented.
 
-- run payload と evaluation payload に `availabilityPolicy` / `availabilitySummary` / `availabilityDiagnostics` を出す
+- run payload と evaluation payload に `availabilityPolicy` / `availabilitySummary` / `availabilityDiagnostics` / `instrumentDiagnostics` を出す
 - backtest series に `availableAssetCount`, `eligibleAssetCount`, `newlyEligibleAssets`, `removedAssets` を出す
 - Dataset Context に `assetAvailability` と asset-level availability warnings を出す
-- CLI は `availabilityDiagnostics` を表示し、raw warnings の分類判断を持たない
+- CLI は `availabilityDiagnostics` と mixed calendar の `instrumentDiagnostics` を表示し、raw warnings の分類判断を持たない
 
 ### Phase 5: Cache Versioning
 
 Status: implemented.
 
-- run store logic version は `v63`
+- run store logic version は `v64`
 - availability policy と asset availability summary を evaluation payload に含め、旧結果と新結果を混ぜない
 
 ## Test Scenarios

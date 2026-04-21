@@ -7,64 +7,50 @@ from app.comparison_models import (
     build_asset_specific_adv_cost_model_spec,
     build_execution_assumptions_spec,
 )
+from app.instrument_registry import (
+    DEFAULT_COST_PROFILE,
+    GLOBAL_MULTI_ASSET_TICKERS,
+    build_cost_overrides_for_profile,
+)
 
 
 def build_realistic_multi_asset_cost_model_spec() -> CostModelSpec:
+    profile = DEFAULT_COST_PROFILE
     return build_asset_specific_adv_cost_model_spec(
-        default_commission_pct=0.05,
-        default_slippage_pct=0.02,
-        default_impact_coefficient_pct=0.08,
-        adv_window_bars=20,
-        min_adv_notional=1_000_000.0,
-        per_asset_overrides={
-            "SPY": {"commissionPct": 0.02, "slippagePct": 0.01, "impactCoefficientPct": 0.02},
-            "QQQ": {"commissionPct": 0.02, "slippagePct": 0.01, "impactCoefficientPct": 0.02},
-            "IWM": {"commissionPct": 0.03, "slippagePct": 0.02, "impactCoefficientPct": 0.04},
-            "EFA": {"commissionPct": 0.03, "slippagePct": 0.02, "impactCoefficientPct": 0.03},
-            "EEM": {"commissionPct": 0.04, "slippagePct": 0.03, "impactCoefficientPct": 0.06},
-            "EWJ": {"commissionPct": 0.03, "slippagePct": 0.02, "impactCoefficientPct": 0.03},
-            "EWZ": {"commissionPct": 0.05, "slippagePct": 0.05, "impactCoefficientPct": 0.10},
-            "VNQ": {"commissionPct": 0.03, "slippagePct": 0.02, "impactCoefficientPct": 0.04},
-            "TLT": {"commissionPct": 0.02, "slippagePct": 0.01, "impactCoefficientPct": 0.02},
-            "IEF": {"commissionPct": 0.02, "slippagePct": 0.01, "impactCoefficientPct": 0.02},
-            "LQD": {"commissionPct": 0.02, "slippagePct": 0.02, "impactCoefficientPct": 0.03},
-            "HYG": {"commissionPct": 0.03, "slippagePct": 0.03, "impactCoefficientPct": 0.05},
-            "TIP": {"commissionPct": 0.02, "slippagePct": 0.02, "impactCoefficientPct": 0.03},
-            "GLD": {"commissionPct": 0.03, "slippagePct": 0.03, "impactCoefficientPct": 0.04},
-            "SLV": {"commissionPct": 0.04, "slippagePct": 0.04, "impactCoefficientPct": 0.07},
-            "DBC": {"commissionPct": 0.05, "slippagePct": 0.05, "impactCoefficientPct": 0.10},
-            "USO": {"commissionPct": 0.06, "slippagePct": 0.06, "impactCoefficientPct": 0.12},
-            "UUP": {"commissionPct": 0.03, "slippagePct": 0.02, "impactCoefficientPct": 0.03},
-            "BTC-USD": {"commissionPct": 0.10, "slippagePct": 0.15, "impactCoefficientPct": 0.25},
-            "ETH-USD": {"commissionPct": 0.10, "slippagePct": 0.15, "impactCoefficientPct": 0.25},
-        },
+        default_commission_pct=profile.default_parameters["commissionPct"],
+        default_slippage_pct=profile.default_parameters["slippagePct"],
+        default_impact_coefficient_pct=profile.default_parameters["impactCoefficientPct"],
+        adv_window_bars=int(profile.default_parameters["advWindowBars"]),
+        min_adv_notional=profile.default_parameters["minAdvNotional"],
+        per_asset_overrides=build_cost_overrides_for_profile(profile, GLOBAL_MULTI_ASSET_TICKERS),
     )
 
 
 def build_condition_variants() -> list[ConditionVariant]:
     variants: list[ConditionVariant] = []
-    commission_values = [0.05, 0.1, 0.2]
+    cost_multipliers = [1.0, 2.0, 3.0]
     investment_values = [1.0, 0.9, 0.8]
     max_weight_values = [None, 0.45, 0.35]
 
-    for commission_pct in commission_values:
+    for cost_multiplier in cost_multipliers:
         for max_investment_ratio in investment_values:
             for max_weight in max_weight_values:
                 cash_pct = round((1 - max_investment_ratio) * 100)
                 cap_label = "上限なし" if max_weight is None else f"{max_weight * 100:.0f}%上限"
                 cap_key = "no_cap" if max_weight is None else f"cap_{int(max_weight * 100)}"
+                multiplier_key = str(cost_multiplier).replace(".", "_")
                 variants.append(
                     ConditionVariant(
                         key=(
-                            f"fee_{str(commission_pct).replace('.', '_')}"
+                            f"cost_x{multiplier_key}"
                             f"__invest_{int(max_investment_ratio * 100)}"
                             f"__{cap_key}"
                         ),
                         label=(
-                            f"手数料 {commission_pct:.2f}% / 投資 {int(max_investment_ratio * 100)}%"
+                            f"コスト x{cost_multiplier:.1f} / 投資 {int(max_investment_ratio * 100)}%"
                             f" / CASH {cash_pct}% / {cap_label}"
                         ),
-                        commission_pct=commission_pct,
+                        cost_multiplier=cost_multiplier,
                         max_investment_ratio=max_investment_ratio,
                         max_weight=max_weight,
                     )
@@ -104,6 +90,7 @@ DEFAULT_EXECUTION_ASSUMPTIONS = build_execution_assumptions_spec(
     label="終値約定",
     parameters={
         "fillPrice": "close",
+        "costProfileKey": DEFAULT_COST_PROFILE.key,
     },
     cost_model=build_realistic_multi_asset_cost_model_spec(),
 )

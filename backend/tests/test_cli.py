@@ -370,6 +370,23 @@ def test_apply_comparison_universe_variant_removes_crypto_assets() -> None:
     )
 
 
+def test_apply_comparison_universe_variant_keeps_btc_only() -> None:
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
+
+    filtered = cli_module.apply_comparison_universe_variant(config, "btc_only")
+
+    assert "BTC-USD" in filtered.run_spec.portfolio_state.current_weights
+    assert "ETH-USD" not in filtered.run_spec.portfolio_state.current_weights
+    assert any(
+        "BTC-USD" in strategy.investment_universe.tickers
+        for strategy in filtered.candidate_strategies + filtered.reference_strategies
+    )
+    assert all(
+        "ETH-USD" not in strategy.investment_universe.tickers
+        for strategy in filtered.candidate_strategies + filtered.reference_strategies
+    )
+
+
 def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
@@ -383,7 +400,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v63"
+    assert payload["records"][0]["logicVersion"] == "v64"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

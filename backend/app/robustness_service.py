@@ -40,6 +40,11 @@ ROBUSTNESS_UNIVERSES = ("crypto_included", "no_crypto", "btc_only")
 ROBUSTNESS_COST_MULTIPLIERS = (1.0, 2.0, 3.0)
 ROBUSTNESS_MAX_WEIGHTS = (0.25, 0.35, 0.45)
 ROBUSTNESS_MAX_INVESTMENT_RATIO = 1.0
+ROBUSTNESS_PROFILE_KEYS = ("quick", "standard")
+ROBUSTNESS_QUICK_PERIOD_KEYS = ("2020_2025",)
+ROBUSTNESS_QUICK_UNIVERSES = ("crypto_included", "no_crypto")
+ROBUSTNESS_QUICK_COST_MULTIPLIERS = (1.0, 3.0)
+ROBUSTNESS_QUICK_MAX_WEIGHTS = (0.35,)
 
 DECISION_PRIORITY = {
     "PASS": 0,
@@ -54,8 +59,19 @@ def build_robustness_summary_payload(
     *,
     fetch_market_universe_bundle,
     apply_universe_variant: Callable[[ComparisonSpec, str], ComparisonSpec],
+    profile: str = "quick",
+    period_keys: tuple[str, ...] | None = None,
+    universes: tuple[str, ...] | None = None,
+    cost_multipliers: tuple[float, ...] | None = None,
+    max_weights: tuple[float, ...] | None = None,
 ) -> dict:
-    scenarios = build_robustness_scenarios()
+    scenarios = build_robustness_scenarios(
+        profile=profile,
+        period_keys=period_keys,
+        universes=universes,
+        cost_multipliers=cost_multipliers,
+        max_weights=max_weights,
+    )
     scenario_results = []
     strategy_groups: dict[str, dict] = {}
     total_cached_runs = 0
@@ -106,33 +122,44 @@ def build_robustness_summary_payload(
         for group in strategy_groups.values()
     ]
     strategy_results = sort_robustness_results(strategy_results)
+    matrix = build_robustness_matrix(scenarios)
 
     return {
         "kind": "robustness_summary",
         "schemaVersion": "v1",
+        "profile": profile,
         "scenarioCount": len(scenarios),
         "runStoreSummary": {
             "cachedRunCount": total_cached_runs,
             "computedRunCount": total_computed_runs,
         },
-        "matrix": {
-            "periods": list(ROBUSTNESS_PERIODS),
-            "universes": list(ROBUSTNESS_UNIVERSES),
-            "costMultipliers": list(ROBUSTNESS_COST_MULTIPLIERS),
-            "maxWeightPcts": [round(max_weight * 100, 1) for max_weight in ROBUSTNESS_MAX_WEIGHTS],
-            "maxInvestmentPct": round(ROBUSTNESS_MAX_INVESTMENT_RATIO * 100, 1),
-        },
+        "decisionSummary": build_decision_summary(strategy_results),
+        "matrix": matrix,
         "strategyResults": strategy_results,
         "scenarioResults": scenario_results,
     }
 
 
-def build_robustness_scenarios() -> list[dict]:
+def build_robustness_scenarios(
+    *,
+    profile: str = "quick",
+    period_keys: tuple[str, ...] | None = None,
+    universes: tuple[str, ...] | None = None,
+    cost_multipliers: tuple[float, ...] | None = None,
+    max_weights: tuple[float, ...] | None = None,
+) -> list[dict]:
+    periods, selected_universes, selected_costs, selected_weights = resolve_robustness_matrix(
+        profile=profile,
+        period_keys=period_keys,
+        universes=universes,
+        cost_multipliers=cost_multipliers,
+        max_weights=max_weights,
+    )
     scenarios = []
-    for period in ROBUSTNESS_PERIODS:
-        for universe in ROBUSTNESS_UNIVERSES:
-            for cost_multiplier in ROBUSTNESS_COST_MULTIPLIERS:
-                for max_weight in ROBUSTNESS_MAX_WEIGHTS:
+    for period in periods:
+        for universe in selected_universes:
+            for cost_multiplier in selected_costs:
+                for max_weight in selected_weights:
                     scenarios.append(
                         {
                             "key": (
@@ -154,6 +181,68 @@ def build_robustness_scenarios() -> list[dict]:
                         }
                     )
     return scenarios
+
+
+def resolve_robustness_matrix(
+    *,
+    profile: str,
+    period_keys: tuple[str, ...] | None,
+    universes: tuple[str, ...] | None,
+    cost_multipliers: tuple[float, ...] | None,
+    max_weights: tuple[float, ...] | None,
+) -> tuple[tuple[dict, ...], tuple[str, ...], tuple[float, ...], tuple[float, ...]]:
+    if profile not in ROBUSTNESS_PROFILE_KEYS:
+        raise ValueError(f"Unknown robustness profile: {profile}")
+
+    base_period_keys = (
+        tuple(period["key"] for period in ROBUSTNESS_PERIODS)
+        if profile == "standard"
+        else ROBUSTNESS_QUICK_PERIOD_KEYS
+    )
+    base_universes = ROBUSTNESS_UNIVERSES if profile == "standard" else ROBUSTNESS_QUICK_UNIVERSES
+    base_costs = ROBUSTNESS_COST_MULTIPLIERS if profile == "standard" else ROBUSTNESS_QUICK_COST_MULTIPLIERS
+    base_weights = ROBUSTNESS_MAX_WEIGHTS if profile == "standard" else ROBUSTNESS_QUICK_MAX_WEIGHTS
+
+    selected_period_keys = period_keys or base_period_keys
+    selected_universes = universes or base_universes
+    selected_costs = cost_multipliers or base_costs
+    selected_weights = max_weights or base_weights
+
+    period_by_key = {period["key"]: period for period in ROBUSTNESS_PERIODS}
+    periods = tuple(period_by_key[key] for key in selected_period_keys)
+    return periods, selected_universes, selected_costs, selected_weights
+
+
+def build_robustness_matrix(scenarios: list[dict]) -> dict:
+    period_by_key = {
+        scenario["periodKey"]: {
+            "key": scenario["periodKey"],
+            "label": scenario["period"],
+            "startDate": scenario["startDate"],
+            "endDate": scenario["endDate"],
+            "walkForwardStartYear": scenario["walkForwardStartYear"],
+            "walkForwardEndYear": scenario["walkForwardEndYear"],
+        }
+        for scenario in scenarios
+    }
+    period_order = {period["key"]: index for index, period in enumerate(ROBUSTNESS_PERIODS)}
+    return {
+        "periods": sorted(period_by_key.values(), key=lambda period: period_order[period["key"]]),
+        "universes": sorted({scenario["universe"] for scenario in scenarios}),
+        "costMultipliers": sorted({float(scenario["costMultiplier"]) for scenario in scenarios}),
+        "maxWeightPcts": sorted({round(float(scenario["maxWeight"]) * 100, 1) for scenario in scenarios}),
+        "maxInvestmentPct": round(ROBUSTNESS_MAX_INVESTMENT_RATIO * 100, 1),
+    }
+
+
+def build_decision_summary(strategy_results: list[dict]) -> dict:
+    counts = {decision: 0 for decision in DECISION_PRIORITY}
+    for result in strategy_results:
+        counts[result["decision"]] += 1
+    return {
+        "strategyCount": len(strategy_results),
+        "counts": counts,
+    }
 
 
 def format_key_number(value: float) -> str:
@@ -293,7 +382,29 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         "cryptoSensitivity": round(crypto_sensitivity, 6),
         "costSensitivity": round(cost_sensitivity, 6),
         "diagnosticFlags": diagnostic_flags,
+        "worstScenario": build_worst_scenario_summary(results),
         "scenarioResults": results,
+    }
+
+
+def build_worst_scenario_summary(results: list[dict]) -> dict:
+    worst_result = min(
+        results,
+        key=lambda result: (
+            float(result["minimumSharpeRatio"]),
+            float(result["averageSharpeRatio"]),
+            result["scenario"]["key"],
+        ),
+    )
+    return {
+        "scenarioKey": worst_result["scenario"]["key"],
+        "period": worst_result["scenario"]["period"],
+        "universe": worst_result["scenario"]["universe"],
+        "costMultiplier": float(worst_result["scenario"]["costMultiplier"]),
+        "maxWeightPct": float(worst_result["scenario"]["maxWeightPct"]),
+        "averageSharpeRatio": round(float(worst_result["averageSharpeRatio"]), 6),
+        "minimumSharpeRatio": round(float(worst_result["minimumSharpeRatio"]), 6),
+        "rank": int(worst_result["rank"]),
     }
 
 

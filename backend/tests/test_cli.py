@@ -279,6 +279,10 @@ def configure_cli_robustness(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_UNIVERSES", ("crypto_included",))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_COST_MULTIPLIERS", (1.0,))
     monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_MAX_WEIGHTS", (0.35,))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_PERIOD_KEYS", ("2019_2021",))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_UNIVERSES", ("crypto_included",))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_COST_MULTIPLIERS", (1.0,))
+    monkeypatch.setattr(cli_module.robustness_service, "ROBUSTNESS_QUICK_MAX_WEIGHTS", (0.35,))
     return config
 
 
@@ -289,11 +293,13 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "Robustness summary: 1 scenarios" in captured.out
+    assert "Robustness summary: 1 scenarios (quick profile)" in captured.out
+    assert "Decisions:" in captured.out
     assert "Top 2 strategies by robustness:" in captured.out
     assert "Decision" in captured.out
     assert "Worst Sharpe" in captured.out
     assert "Risks:" in captured.out
+    assert "Worst scenario" in captured.out
 
 
 def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -305,12 +311,15 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["kind"] == "robustness_summary"
     assert payload["schemaVersion"] == "v1"
+    assert payload["profile"] == "quick"
     assert payload["scenarioCount"] == 1
+    assert payload["decisionSummary"]["strategyCount"] == len(payload["strategyResults"])
     assert payload["matrix"]["universes"] == ["crypto_included"]
     assert payload["scenarioResults"][0]["scenario"]["period"] == "2019-2021"
     assert payload["strategyResults"][0]["decision"] in {"PASS", "WATCH", "FAIL", "INVALID"}
     assert "worstSharpeRatio" in payload["strategyResults"][0]
     assert "top5ScenarioCount" in payload["strategyResults"][0]
+    assert "worstScenario" in payload["strategyResults"][0]
 
 
 def test_render_availability_diagnostics_shows_calendar_boundary_classification() -> None:

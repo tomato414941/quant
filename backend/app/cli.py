@@ -51,6 +51,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print a robustness summary across fixed evaluation conditions.",
     )
     robustness_parser.add_argument("--top", type=int, default=10)
+    robustness_parser.add_argument(
+        "--profile",
+        choices=robustness_service.ROBUSTNESS_PROFILE_KEYS,
+        default="quick",
+        help="Use quick for iteration or standard for the full robustness matrix.",
+    )
+    robustness_parser.add_argument(
+        "--period",
+        action="append",
+        dest="period_keys",
+        choices=[period["key"] for period in robustness_service.ROBUSTNESS_PERIODS],
+        help="Restrict robustness scenarios to a period key. Can be repeated.",
+    )
+    robustness_parser.add_argument(
+        "--universe",
+        action="append",
+        dest="universes",
+        choices=robustness_service.ROBUSTNESS_UNIVERSES,
+        help="Restrict robustness scenarios to a universe. Can be repeated.",
+    )
+    robustness_parser.add_argument(
+        "--cost-multiplier",
+        action="append",
+        dest="cost_multipliers",
+        type=float,
+        choices=robustness_service.ROBUSTNESS_COST_MULTIPLIERS,
+        help="Restrict robustness scenarios to a cost multiplier. Can be repeated.",
+    )
+    robustness_parser.add_argument(
+        "--max-weight",
+        action="append",
+        dest="max_weights",
+        type=float,
+        choices=robustness_service.ROBUSTNESS_MAX_WEIGHTS,
+        help="Restrict robustness scenarios to a max asset weight. Can be repeated.",
+    )
     robustness_parser.add_argument("--json", action="store_true", dest="as_json")
 
     comparison_run_spec_parser = subparsers.add_parser(
@@ -386,8 +422,14 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
     universes = ", ".join(matrix["universes"])
     cost_multipliers = ", ".join(f"x{value:.1f}" for value in matrix["costMultipliers"])
     max_weights = ", ".join(f"{value:.0f}%" for value in matrix["maxWeightPcts"])
+    decision_counts = payload.get("decisionSummary", {}).get("counts", {})
+    decision_summary = ", ".join(
+        f"{decision}={decision_counts.get(decision, 0)}"
+        for decision in robustness_service.DECISION_PRIORITY
+    )
     lines = [
-        f"Robustness summary: {payload['scenarioCount']} scenarios",
+        f"Robustness summary: {payload['scenarioCount']} scenarios ({payload.get('profile', 'unknown')} profile)",
+        f"Decisions: {decision_summary}",
         f"Periods: {periods}",
         f"Universes: {universes}",
         f"Costs: {cost_multipliers} | Max weights: {max_weights}",
@@ -420,11 +462,18 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
             f"Avg Turnover {format_percent(result['averageTurnoverPct'])} | "
             f"Max Turnover {format_percent(result['maxTurnoverPct'])}"
         )
+        worst = result["worstScenario"]
         lines.append(
             "   "
             f"Crypto sensitivity {result['cryptoSensitivity']:+.3f} | "
             f"Cost sensitivity {result['costSensitivity']:+.3f} | "
             f"Risks: {risks}"
+        )
+        lines.append(
+            "   "
+            f"Worst scenario {worst['scenarioKey']} | "
+            f"Min Sharpe {worst['minimumSharpeRatio']:.3f} | "
+            f"Rank {worst['rank']}"
         )
     return "\n".join(lines)
 
@@ -524,6 +573,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             DEFAULT_COMPARISON_SPEC,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
             apply_universe_variant=apply_comparison_universe_variant,
+            profile=args.profile,
+            period_keys=tuple(args.period_keys) if args.period_keys else None,
+            universes=tuple(args.universes) if args.universes else None,
+            cost_multipliers=tuple(args.cost_multipliers) if args.cost_multipliers else None,
+            max_weights=tuple(args.max_weights) if args.max_weights else None,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))

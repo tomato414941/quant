@@ -8,6 +8,12 @@ from typing import Callable
 
 from app.comparison_models import ComparisonSpec, ConditionVariant, scale_cost_model_spec
 from app.comparison_service import build_walk_forward_comparison_payload
+from app.diagnostics_service import (
+    build_evaluation_diagnostic_events,
+    has_invalidating_diagnostic,
+    representative_diagnostic_event,
+    summarize_diagnostic_events,
+)
 from app.portfolio import build_risk_controls_spec
 
 
@@ -339,19 +345,28 @@ def collect_scenario_diagnostics(payload: dict) -> dict:
     availability_diagnostics = evaluation.get("availabilityDiagnostics") or {}
     instrument_diagnostics = evaluation.get("instrumentDiagnostics") or {}
     actionable_warnings = availability_diagnostics.get("actionableWarnings") or []
+    calendar_boundary_warnings = availability_diagnostics.get("calendarBoundaryWarnings") or []
     unknown_symbols = instrument_diagnostics.get("unknownSymbols") or []
-    flags = []
-    if actionable_warnings:
-        flags.append("actionable availability warning")
-    if instrument_diagnostics.get("mixedMarketCalendar"):
-        flags.append("mixed calendar")
-    if unknown_symbols:
-        flags.append("unknown symbols")
+    diagnostic_events = list(
+        evaluation.get("diagnosticEvents")
+        or build_evaluation_diagnostic_events(
+            availability_diagnostics=availability_diagnostics,
+            instrument_diagnostics=instrument_diagnostics,
+        )
+    )
+    diagnostic_summary = summarize_diagnostic_events(diagnostic_events)
+    representative_event = representative_diagnostic_event(diagnostic_events)
     return {
         "actionableWarningCount": len(actionable_warnings),
+        "calendarBoundaryWarningCount": len(calendar_boundary_warnings),
         "mixedMarketCalendar": bool(instrument_diagnostics.get("mixedMarketCalendar")),
         "unknownSymbols": list(unknown_symbols),
-        "flags": flags,
+        "flags": diagnostic_summary["flags"],
+        "diagnosticSummary": diagnostic_summary,
+        "diagnosticEvents": diagnostic_events,
+        "representativeDiagnostic": representative_event,
+        "actionableWarnings": list(actionable_warnings),
+        "calendarBoundaryWarnings": list(calendar_boundary_warnings),
     }
 
 
@@ -390,6 +405,13 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
     })
     crypto_sensitivity = compute_crypto_sensitivity(results)
     cost_sensitivity = compute_cost_sensitivity(results)
+    diagnostic_events = [
+        event
+        for result in results
+        for event in result["diagnostics"].get("diagnosticEvents", [])
+    ]
+    diagnostic_summary = summarize_diagnostic_events(diagnostic_events)
+    representative_event = representative_diagnostic_event(diagnostic_events)
     decision_result = build_robustness_decision(
         scenario_count=scenario_count,
         worst_sharpe=min(min_sharpe_values),
@@ -397,6 +419,7 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         diagnostic_flags=diagnostic_flags,
         crypto_sensitivity=crypto_sensitivity,
         cost_sensitivity=cost_sensitivity,
+        diagnostic_events=diagnostic_events,
     )
     return {
         "kind": "robustness_strategy_result",
@@ -417,6 +440,8 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         "cryptoSensitivity": round(crypto_sensitivity, 6),
         "costSensitivity": round(cost_sensitivity, 6),
         "diagnosticFlags": diagnostic_flags,
+        "diagnosticSummary": diagnostic_summary,
+        "representativeDiagnostic": representative_event,
         "worstScenario": build_worst_scenario_summary(results),
         "scenarioResults": results,
     }
@@ -499,18 +524,29 @@ def build_robustness_decision(
     scenario_count: int,
     worst_sharpe: float,
     top5_count: int,
-    diagnostic_flags: list[str],
+    diagnostic_flags: list[str] | None,
     crypto_sensitivity: float,
     cost_sensitivity: float,
+    diagnostic_events: list[dict[str, object]] | None = None,
 ) -> dict:
+    diagnostic_flags = diagnostic_flags or []
+    diagnostic_events = diagnostic_events or []
     top5_ratio = top5_count / scenario_count if scenario_count else 0.0
     reasons = []
     if "mixed calendar" in diagnostic_flags:
         reasons.append("mixed calendar diagnostic only")
-    if "actionable availability warning" in diagnostic_flags or "unknown symbols" in diagnostic_flags:
-        if "actionable availability warning" in diagnostic_flags:
+    has_invalid_availability = (
+        "actionable availability warning" in diagnostic_flags
+        or has_invalidating_diagnostic(diagnostic_events, category="availability")
+    )
+    has_invalid_instrument = (
+        "unknown symbols" in diagnostic_flags
+        or has_invalidating_diagnostic(diagnostic_events, category="instrument")
+    )
+    if has_invalid_availability or has_invalid_instrument:
+        if has_invalid_availability:
             reasons.append("actionable availability warning")
-        if "unknown symbols" in diagnostic_flags:
+        if has_invalid_instrument:
             reasons.append("unknown symbols")
         return {"decision": "INVALID", "reasons": reasons}
     if worst_sharpe < 0.0 or top5_ratio < 0.25:

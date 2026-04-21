@@ -48,6 +48,7 @@ from app.comparison_models import (
     scale_cost_model_spec,
 )
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_fingerprint, build_run_spec
+from app.diagnostics_service import build_evaluation_diagnostic_events
 from app.instrument_registry import build_instrument_diagnostics
 from app.timeframe_models import (
     DEFAULT_DAILY_TIMEFRAME,
@@ -2557,20 +2558,26 @@ def serialize_evaluation(
         metadata_by_timeframe,
         period_override=period_override,
     )
+    availability_diagnostics = build_availability_diagnostics(warnings, availability_policy)
+    instrument_diagnostics = build_instrument_diagnostics(
+        collect_instrument_diagnostic_symbols(metadata_by_timeframe),
+        cost_profile_key=str(
+            comparison.run_spec.execution_assumptions.parameters.get(
+                "costProfileKey",
+                "unknown",
+            )
+        ),
+    )
     payload = {
         "kind": "evaluation_spec",
         "schemaVersion": "v1",
         "availabilityPolicy": availability_policy,
         "availabilitySummary": build_availability_summary(metadata_by_timeframe),
-        "availabilityDiagnostics": build_availability_diagnostics(warnings, availability_policy),
-        "instrumentDiagnostics": build_instrument_diagnostics(
-            collect_instrument_diagnostic_symbols(metadata_by_timeframe),
-            cost_profile_key=str(
-                comparison.run_spec.execution_assumptions.parameters.get(
-                    "costProfileKey",
-                    "unknown",
-                )
-            ),
+        "availabilityDiagnostics": availability_diagnostics,
+        "instrumentDiagnostics": instrument_diagnostics,
+        "diagnosticEvents": build_evaluation_diagnostic_events(
+            availability_diagnostics=availability_diagnostics,
+            instrument_diagnostics=instrument_diagnostics,
         ),
         "marketDataContexts": [
             serialize_market_slice_context(

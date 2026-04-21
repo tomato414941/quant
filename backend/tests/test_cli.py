@@ -325,6 +325,8 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert payload["scenarioResults"][0]["scenario"]["period"] == "2019-2021"
     assert payload["strategyResults"][0]["decision"] in {"PASS", "WATCH", "FAIL", "INVALID"}
     assert "decisionReasons" in payload["strategyResults"][0]
+    assert "diagnosticSummary" in payload["strategyResults"][0]
+    assert "diagnosticEvents" in payload["scenarioResults"][0]["diagnostics"]
     assert "worstSharpeRatio" in payload["strategyResults"][0]
     assert "top5ScenarioCount" in payload["strategyResults"][0]
     assert "worstScenario" in payload["strategyResults"][0]
@@ -518,7 +520,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v64"
+    assert payload["records"][0]["logicVersion"] == "v65"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

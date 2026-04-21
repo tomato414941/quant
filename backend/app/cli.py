@@ -510,6 +510,26 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
             f"Cost sensitivity {result['costSensitivity']:+.3f} | "
             f"Risks: {risks}"
         )
+        diagnostic_summary = result.get("diagnosticSummary") or {}
+        if diagnostic_summary.get("eventCount"):
+            severity_counts = diagnostic_summary.get("severityCounts") or {}
+            lines.append(
+                "   "
+                f"Diagnostics {diagnostic_summary['eventCount']} events | "
+                f"invalidating={severity_counts.get('invalidating', 0)} "
+                f"warning={severity_counts.get('warning', 0)} "
+                f"info={severity_counts.get('info', 0)}"
+            )
+        representative = result.get("representativeDiagnostic")
+        if representative:
+            lines.append(
+                "   "
+                "Representative diagnostic "
+                f"{representative.get('severity')}/"
+                f"{representative.get('category')}/"
+                f"{representative.get('kind')}: "
+                f"{representative.get('reason')}"
+            )
         lines.append(
             "   "
             f"Worst scenario {worst['scenarioKey']} | "

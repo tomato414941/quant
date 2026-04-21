@@ -132,6 +132,87 @@ def test_build_robustness_decision_reports_reasons() -> None:
     }
 
 
+def test_collect_scenario_diagnostics_normalizes_events() -> None:
+    payload = {
+        "comparison": {
+            "runSpec": {
+                "evaluation": {
+                    "availabilityDiagnostics": {
+                        "actionableWarnings": [
+                            {
+                                "kind": "asset_available_after_aligned_start",
+                                "message": "BTC starts after the aligned start",
+                                "ticker": "BTC-USD",
+                                "timeframe": "1d",
+                                "alignedStartDate": "2015-01-01",
+                                "firstValidDate": "2015-01-05",
+                            }
+                        ],
+                        "calendarBoundaryWarnings": [
+                            {
+                                "kind": "aligned_start_after_requested_start",
+                                "message": "Calendar boundary moved start",
+                                "timeframe": "1d",
+                            }
+                        ],
+                    },
+                    "instrumentDiagnostics": {
+                        "mixedMarketCalendar": True,
+                        "marketCalendars": {"24_7": 1, "nyse": 1},
+                        "assetClassCounts": {"crypto": 1, "equity_etf": 1},
+                        "unknownSymbols": ["UNKNOWN"],
+                    },
+                }
+            }
+        }
+    }
+
+    diagnostics = robustness_service.collect_scenario_diagnostics(payload)
+
+    assert diagnostics["actionableWarningCount"] == 1
+    assert diagnostics["calendarBoundaryWarningCount"] == 1
+    assert diagnostics["flags"] == [
+        "actionable availability warning",
+        "mixed calendar",
+        "unknown symbols",
+    ]
+    assert diagnostics["diagnosticSummary"]["severityCounts"] == {
+        "info": 2,
+        "invalidating": 2,
+    }
+    representative = diagnostics["representativeDiagnostic"]
+    assert representative["severity"] == "invalidating"
+    assert representative["category"] == "availability"
+    assert representative["symbol"] == "BTC-USD"
+    assert representative["dates"] == {
+        "alignedStartDate": "2015-01-01",
+        "firstValidDate": "2015-01-05",
+    }
+
+
+def test_build_robustness_decision_uses_invalidating_events() -> None:
+    decision = robustness_service.build_robustness_decision(
+        scenario_count=10,
+        worst_sharpe=1.0,
+        top5_count=10,
+        diagnostic_flags=[],
+        crypto_sensitivity=0.0,
+        cost_sensitivity=0.0,
+        diagnostic_events=[
+            {
+                "kind": "requested_asset_unavailable",
+                "category": "availability",
+                "severity": "invalidating",
+            }
+        ],
+    )
+
+    assert decision == {
+        "decision": "INVALID",
+        "reasons": ["actionable availability warning"],
+    }
+
+
 def test_build_scenario_comparison_applies_period_cost_and_risk_controls() -> None:
     comparison = copy.deepcopy(DEFAULT_COMPARISON_SPEC)
     scenario = {

@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=robustness_service.ROBUSTNESS_MAX_WEIGHTS,
         help="Restrict robustness scenarios to a max asset weight. Can be repeated.",
     )
+    robustness_parser.add_argument(
+        "--strategy-key",
+        action="append",
+        dest="strategy_keys",
+        help="Restrict robustness scenarios to a strategy key. Can be repeated.",
+    )
     robustness_parser.add_argument("--progress", action="store_true")
     robustness_parser.add_argument("--output", help="Write the full robustness JSON payload to this path.")
     robustness_parser.add_argument("--json", action="store_true", dest="as_json")
@@ -149,6 +155,36 @@ def collect_comparison_universe_tickers(comparison) -> tuple[str, ...]:
             for ticker in signal.observation_spec.tickers:
                 tickers.setdefault(ticker, None)
     return tuple(tickers)
+
+
+def filter_comparison_strategies(comparison, strategy_keys: tuple[str, ...] | None):
+    if not strategy_keys:
+        return comparison
+
+    selected_keys = set(strategy_keys)
+    available_keys = {
+        strategy.key
+        for strategy in comparison.candidate_strategies + comparison.reference_strategies
+    }
+    missing_keys = sorted(selected_keys - available_keys)
+    if missing_keys:
+        raise ValueError(f"Unknown strategy key(s): {', '.join(missing_keys)}")
+
+    filtered_comparison = copy.deepcopy(comparison)
+    filtered_comparison.comparison_id = f"{comparison.comparison_id}__strategies_{'_'.join(strategy_keys)}"
+    filtered_comparison.candidate_strategies = [
+        strategy
+        for strategy in comparison.candidate_strategies
+        if strategy.key in selected_keys
+    ]
+    filtered_comparison.reference_strategies = [
+        strategy
+        for strategy in comparison.reference_strategies
+        if strategy.key in selected_keys
+    ]
+    if not filtered_comparison.candidate_strategies and not filtered_comparison.reference_strategies:
+        raise ValueError("At least one strategy must be selected.")
+    return filtered_comparison
 
 
 def apply_comparison_universe_variant(comparison, universe_key: str):
@@ -597,8 +633,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         progress_callback = None
         if args.progress:
             progress_callback = lambda event: print(render_robustness_progress(event), file=sys.stderr)
-        payload = robustness_service.build_robustness_summary_payload(
+        comparison_spec = filter_comparison_strategies(
             DEFAULT_COMPARISON_SPEC,
+            tuple(args.strategy_keys) if args.strategy_keys else None,
+        )
+        payload = robustness_service.build_robustness_summary_payload(
+            comparison_spec,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
             apply_universe_variant=apply_comparison_universe_variant,
             profile=args.profile,

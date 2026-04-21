@@ -330,6 +330,27 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "worstScenario" in payload["strategyResults"][0]
 
 
+def test_robustness_summary_command_filters_strategy_keys(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli_robustness(monkeypatch, tmp_path)
+    selected_key = config.candidate_strategies[0].key
+
+    exit_code = cli_module.main([
+        "robustness-summary",
+        "--json",
+        "--strategy-key",
+        selected_key,
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert {result["strategyKey"] for result in payload["strategyResults"]} == {selected_key}
+    assert {
+        result["strategyKey"]
+        for scenario in payload["scenarioResults"]
+        for result in scenario["results"]
+    } == {selected_key}
+
+
 def test_robustness_summary_command_progress_and_output_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_robustness(monkeypatch, tmp_path)
     output_path = tmp_path / "robustness-summary.json"

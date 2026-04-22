@@ -1337,6 +1337,7 @@ def summarize_execution_decision_summaries(summaries: list[dict]) -> dict:
         "noTradeCount": no_trade_count,
         "policyCounts": merge_count_maps(clean_summaries, "policyCounts"),
         "reasonCounts": merge_count_maps(clean_summaries, "reasonCounts"),
+        "edgeSourceCounts": merge_count_maps(clean_summaries, "edgeSourceCounts"),
         "averageTurnoverPct": weighted_average_summary_metric(
             clean_summaries,
             "averageTurnoverPct",

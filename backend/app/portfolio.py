@@ -20,6 +20,7 @@ SUPPORTED_DECISION_POLICIES = {
 }
 DEFAULT_NO_TRADE_BAND = 0.02
 DEFAULT_CONFIDENCE_FLOOR = 0.25
+SIGNAL_RETURN_PROXY_EDGE_SOURCE = "signal_return_proxy"
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class ForecastSnapshot:
     score: pd.Series
     percentile_rank: pd.Series
     expected_return_proxy: pd.Series | None
+    edge_source: str | None
     confidence: pd.Series
     risk_proxy: pd.Series
 
@@ -43,6 +45,7 @@ class PortfolioDecision:
     turnover: float
     estimated_cost_pct: float
     estimated_edge_pct: float | None
+    edge_source: str | None
     average_confidence: float | None
 
 
@@ -1203,6 +1206,7 @@ def build_portfolio_decision(
             turnover=turnover,
             estimated_cost_pct=round(estimated_cost * 100, 4),
             estimated_edge_pct=None,
+            edge_source=None,
             average_confidence=None,
         )
 
@@ -1216,6 +1220,7 @@ def build_portfolio_decision(
             turnover=turnover,
             estimated_cost_pct=round(estimated_cost * 100, 4),
             estimated_edge_pct=None,
+            edge_source=None,
             average_confidence=None,
         )
 
@@ -1232,6 +1237,7 @@ def build_portfolio_decision(
     )
     average_confidence = compute_weighted_forecast_confidence(forecast, universe_columns, target_weights)
     estimated_edge = compute_forecast_edge(forecast, universe_columns, current_weights, target_weights)
+    edge_source = None if estimated_edge is None or forecast is None else forecast.edge_source
     no_trade_reason = None
     if turnover <= DEFAULT_NO_TRADE_BAND:
         no_trade_reason = "turnover_below_band"
@@ -1251,6 +1257,7 @@ def build_portfolio_decision(
             turnover=turnover,
             estimated_cost_pct=round(estimated_cost * 100, 4),
             estimated_edge_pct=None if estimated_edge is None else round(estimated_edge * 100, 4),
+            edge_source=edge_source,
             average_confidence=None if average_confidence is None else round(average_confidence, 4),
         )
 
@@ -1263,6 +1270,7 @@ def build_portfolio_decision(
         turnover=turnover,
         estimated_cost_pct=round(estimated_cost * 100, 4),
         estimated_edge_pct=None if estimated_edge is None else round(estimated_edge * 100, 4),
+        edge_source=edge_source,
         average_confidence=None if average_confidence is None else round(average_confidence, 4),
     )
 
@@ -1276,6 +1284,7 @@ def serialize_portfolio_decision_event(date: str, decision: PortfolioDecision) -
         "turnoverPct": round(decision.turnover * 100, 2),
         "estimatedCostPct": decision.estimated_cost_pct,
         "estimatedEdgePct": decision.estimated_edge_pct,
+        "edgeSource": decision.edge_source,
         "averageConfidence": decision.average_confidence,
         "selectedAssetCount": len(decision.selected_assets),
     }
@@ -1325,6 +1334,7 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
             "noTradeCount": 0,
             "policyCounts": {},
             "reasonCounts": {},
+            "edgeSourceCounts": {},
             "averageTurnoverPct": None,
             "averageEstimatedCostPct": None,
             "averageEstimatedEdgePct": None,
@@ -1337,11 +1347,15 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
 
     policy_counts: dict[str, int] = {}
     reason_counts: dict[str, int] = {}
+    edge_source_counts: dict[str, int] = {}
     for event in events:
         policy = str(event["policy"])
         reason = str(event["reason"])
+        edge_source = event.get("edgeSource")
         policy_counts[policy] = policy_counts.get(policy, 0) + 1
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if edge_source is not None:
+            edge_source_counts[str(edge_source)] = edge_source_counts.get(str(edge_source), 0) + 1
 
     edge_values = [float(event["estimatedEdgePct"]) for event in events if event["estimatedEdgePct"] is not None]
     confidence_values = [float(event["averageConfidence"]) for event in events if event["averageConfidence"] is not None]
@@ -1353,6 +1367,7 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
         "noTradeCount": sum(1 for event in events if event["action"] == "no_trade"),
         "policyCounts": policy_counts,
         "reasonCounts": reason_counts,
+        "edgeSourceCounts": edge_source_counts,
         "averageTurnoverPct": round(float(np.mean([event["turnoverPct"] for event in events])), 2),
         "averageEstimatedCostPct": round(float(np.mean([event["estimatedCostPct"] for event in events])), 4),
         "averageEstimatedEdgePct": None if not edge_values else round(float(np.mean(edge_values)), 4),
@@ -2305,7 +2320,7 @@ def compute_strategy_score_series(
     )
 
 
-def compute_expected_return_proxy_series(
+def compute_signal_return_proxy_series(
     returns: pd.DataFrame,
     aligned_scores: pd.Series,
 ) -> pd.Series | None:
@@ -2322,6 +2337,13 @@ def compute_expected_return_proxy_series(
     proxy_scale = float(max(historical_mean.std(ddof=0), 1e-4))
     proxy = np.clip(standardized_scores.to_numpy(dtype="float64") * proxy_scale, -0.05, 0.05)
     return pd.Series(proxy, index=returns.columns, dtype="float64")
+
+
+def compute_expected_return_proxy_series(
+    returns: pd.DataFrame,
+    aligned_scores: pd.Series,
+) -> pd.Series | None:
+    return compute_signal_return_proxy_series(returns, aligned_scores)
 
 
 def compute_forecast_confidence_series(aligned_scores: pd.Series) -> pd.Series:
@@ -2359,12 +2381,14 @@ def build_strategy_forecast_snapshot(
         return None
 
     risk_proxy = returns.std(axis=0).reindex(returns.columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    signal_return_proxy = compute_signal_return_proxy_series(returns, aligned_scores)
     return ForecastSnapshot(
         as_of_date=current_date,
         horizon="strategy_default",
         score=aligned_scores,
         percentile_rank=aligned_scores.rank(method="average", pct=True),
-        expected_return_proxy=compute_expected_return_proxy_series(returns, aligned_scores),
+        expected_return_proxy=signal_return_proxy,
+        edge_source=None if signal_return_proxy is None else SIGNAL_RETURN_PROXY_EDGE_SOURCE,
         confidence=compute_forecast_confidence_series(aligned_scores),
         risk_proxy=risk_proxy,
     )

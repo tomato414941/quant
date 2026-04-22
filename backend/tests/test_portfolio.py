@@ -7,6 +7,7 @@ import pandas as pd
 
 from app.portfolio import (
     COST_AWARE_NO_TRADE_DECISION_POLICY,
+    SIGNAL_RETURN_PROXY_EDGE_SOURCE,
     PREDICTION_FEATURE_NAMES,
     build_observation_spec,
     build_prediction_combiner_spec,
@@ -2188,6 +2189,7 @@ def test_build_strategy_forecast_snapshot_wraps_ranking_score() -> None:
     assert forecast.as_of_date == "2025-01-04"
     assert set(forecast.score.index) == set(returns.columns)
     assert forecast.expected_return_proxy is not None
+    assert forecast.edge_source == SIGNAL_RETURN_PROXY_EDGE_SOURCE
     assert forecast.percentile_rank["AAA"] > forecast.percentile_rank["CCC"]
     assert forecast.confidence["AAA"] == 1.0
 
@@ -2201,6 +2203,7 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
             "turnoverPct": 10.0,
             "estimatedCostPct": 0.2,
             "estimatedEdgePct": 0.1,
+            "edgeSource": SIGNAL_RETURN_PROXY_EDGE_SOURCE,
             "averageConfidence": 0.5,
         },
         {
@@ -2210,6 +2213,7 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
             "turnoverPct": 20.0,
             "estimatedCostPct": 0.3,
             "estimatedEdgePct": 0.7,
+            "edgeSource": SIGNAL_RETURN_PROXY_EDGE_SOURCE,
             "averageConfidence": 0.9,
         },
         {
@@ -2247,6 +2251,7 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
         "median": 0.7,
         "maximum": 0.9,
     }
+    assert summary["edgeSourceCounts"] == {SIGNAL_RETURN_PROXY_EDGE_SOURCE: 2}
 
 
 def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost() -> None:
@@ -2295,6 +2300,7 @@ def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost()
     assert decision_summary["policyCounts"][COST_AWARE_NO_TRADE_DECISION_POLICY] >= 1
     assert decision_summary["noTradeCount"] >= 1
     assert "edge_below_cost" in decision_summary["reasonCounts"]
+    assert decision_summary["edgeSourceCounts"][SIGNAL_RETURN_PROXY_EDGE_SOURCE] >= 1
     assert run["strategy"]["components"]["optional"]["decisionPolicy"]["key"] == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 

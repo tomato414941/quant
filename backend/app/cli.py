@@ -853,6 +853,10 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
             )
             lines.append(
                 "   "
+                f"Exec edge sources {format_count_map(execution_decisions.get('edgeSourceCounts') or {})}"
+            )
+            lines.append(
+                "   "
                 "Exec edge "
                 f"{format_percent_distribution(execution_decisions.get('estimatedEdgePctDistribution'))} | "
                 "cost "

@@ -634,6 +634,10 @@ def project_execution_decision_summary(summary: dict) -> dict:
             str(key): int(value)
             for key, value in (summary.get("reasonCounts") or {}).items()
         },
+        "edgeSourceCounts": {
+            str(key): int(value)
+            for key, value in (summary.get("edgeSourceCounts") or {}).items()
+        },
         "averageTurnoverPct": optional_float(summary.get("averageTurnoverPct")),
         "averageEstimatedCostPct": optional_float(summary.get("averageEstimatedCostPct")),
         "averageEstimatedEdgePct": optional_float(summary.get("averageEstimatedEdgePct")),

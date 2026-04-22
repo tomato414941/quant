@@ -373,6 +373,7 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Holdings avg" in captured.out
     assert "Exec decisions" in captured.out
     assert "Exec reasons" in captured.out
+    assert "Exec edge sources" in captured.out
     assert "Exec edge" in captured.out
     assert "edge-cost" in captured.out
     assert "Exec confidence" in captured.out
@@ -410,6 +411,7 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "executionDecisionSummary" in payload["strategyResults"][0]
     assert "decisionCount" in payload["strategyResults"][0]["executionDecisionSummary"]
     assert "estimatedEdgeAfterCostPctDistribution" in payload["strategyResults"][0]["executionDecisionSummary"]
+    assert "edgeSourceCounts" in payload["strategyResults"][0]["executionDecisionSummary"]
     baseline = next(
         result for result in payload["strategyResults"]
         if result["strategyKey"] == "ref-fu-eq-cash"
@@ -623,7 +625,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v68"
+    assert payload["records"][0]["logicVersion"] == "v69"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

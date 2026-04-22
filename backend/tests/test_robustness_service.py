@@ -403,6 +403,7 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
                     "noTradeCount": 1,
                     "policyCounts": {"cost_aware_no_trade": 2},
                     "reasonCounts": {"edge_below_cost": 1, "edge_after_cost": 1},
+                    "edgeSourceCounts": {"signal_return_proxy": 2},
                     "averageTurnoverPct": 12.0,
                     "averageEstimatedCostPct": 0.2,
                     "averageEstimatedEdgePct": 0.5,
@@ -442,6 +443,7 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
             "noTradeCount": 1,
             "policyCounts": {"cost_aware_no_trade": 2},
             "reasonCounts": {"edge_below_cost": 1, "edge_after_cost": 1},
+            "edgeSourceCounts": {"signal_return_proxy": 2},
             "averageTurnoverPct": 12.0,
             "averageEstimatedCostPct": 0.2,
             "averageEstimatedEdgePct": 0.5,
@@ -484,10 +486,12 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
     assert projected["exposureSummary"]["averageCashWeightPct"] == 25.0
     assert projected["executionDecisionSummary"]["noTradeCount"] == 1
     assert projected["executionDecisionSummary"]["reasonCounts"]["edge_below_cost"] == 1
+    assert projected["executionDecisionSummary"]["edgeSourceCounts"] == {"signal_return_proxy": 2}
     assert projected["executionDecisionSummary"]["estimatedEdgeAfterCostPctDistribution"]["median"] == 0.2
     assert projected["windows"][0]["weights"][0] == {"asset": "SPY", "weightPct": 30.0}
     assert projected["windows"][0]["executionDecisionSummary"]["decisionCount"] == 2
     assert projected["windows"][0]["executionDecisionSummary"]["confidenceDistribution"]["count"] == 2
+    assert projected["windows"][0]["executionDecisionSummary"]["edgeSourceCounts"] == {"signal_return_proxy": 2}
 
 
 def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
@@ -520,6 +524,7 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                     "noTradeCount": 1,
                     "policyCounts": {"cost_aware_no_trade": 2},
                     "reasonCounts": {"edge_below_cost": 1, "edge_after_cost": 1},
+                    "edgeSourceCounts": {"signal_return_proxy": 2},
                     "averageTurnoverPct": 10.0,
                     "averageEstimatedCostPct": 0.2,
                     "averageEstimatedEdgePct": 0.6,
@@ -585,6 +590,7 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                     "noTradeCount": 1,
                     "policyCounts": {"cost_aware_no_trade": 1},
                     "reasonCounts": {"edge_below_cost": 1},
+                    "edgeSourceCounts": {"signal_return_proxy": 1},
                     "averageTurnoverPct": 4.0,
                     "averageEstimatedCostPct": 0.1,
                     "averageEstimatedEdgePct": 0.3,
@@ -634,6 +640,7 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
     assert execution_summary["decisionCount"] == 3
     assert execution_summary["noTradeCount"] == 2
     assert execution_summary["reasonCounts"] == {"edge_below_cost": 2, "edge_after_cost": 1}
+    assert execution_summary["edgeSourceCounts"] == {"signal_return_proxy": 3}
     assert execution_summary["averageEstimatedEdgePct"] == 0.5
     assert execution_summary["estimatedEdgePctDistribution"] == {
         "count": 3,

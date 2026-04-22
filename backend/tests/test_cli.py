@@ -371,6 +371,8 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Worst scenario" in captured.out
     assert "Worst window" in captured.out
     assert "Holdings avg" in captured.out
+    assert "Exec decisions" in captured.out
+    assert "Exec reasons" in captured.out
     assert "Delta vs ref-fu-eq-cash" in captured.out
 
 
@@ -402,6 +404,8 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "worstWindow" in payload["strategyResults"][0]
     assert "diversificationSummary" in payload["strategyResults"][0]
     assert "exposureSummary" in payload["strategyResults"][0]
+    assert "executionDecisionSummary" in payload["strategyResults"][0]
+    assert "decisionCount" in payload["strategyResults"][0]["executionDecisionSummary"]
     baseline = next(
         result for result in payload["strategyResults"]
         if result["strategyKey"] == "ref-fu-eq-cash"
@@ -414,6 +418,7 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "weights" in first_window
     assert "diversificationSummary" in first_window
     assert "exposureSummary" in first_window
+    assert "executionDecisionSummary" in first_window
 
 
 def test_robustness_summary_command_filters_strategy_keys(monkeypatch, tmp_path, capsys) -> None:
@@ -613,7 +618,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v66"
+    assert payload["records"][0]["logicVersion"] == "v67"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

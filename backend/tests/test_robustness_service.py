@@ -397,10 +397,32 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
                     {"asset": "CASH", "weightPct": 25.0},
                 ],
                 "selectedAssets": ["SPY", "QQQ", "TLT"],
+                "executionDecisionSummary": {
+                    "decisionCount": 2,
+                    "rebalanceCount": 1,
+                    "noTradeCount": 1,
+                    "policyCounts": {"cost_aware_no_trade": 2},
+                    "reasonCounts": {"edge_below_cost": 1, "edge_after_cost": 1},
+                    "averageTurnoverPct": 12.0,
+                    "averageEstimatedCostPct": 0.2,
+                    "averageEstimatedEdgePct": 0.5,
+                    "averageConfidence": 0.7,
+                },
                 "testAvailability": {},
                 "trainAvailability": {},
             }
         ],
+        "executionDecisionSummary": {
+            "decisionCount": 2,
+            "rebalanceCount": 1,
+            "noTradeCount": 1,
+            "policyCounts": {"cost_aware_no_trade": 2},
+            "reasonCounts": {"edge_below_cost": 1, "edge_after_cost": 1},
+            "averageTurnoverPct": 12.0,
+            "averageEstimatedCostPct": 0.2,
+            "averageEstimatedEdgePct": 0.5,
+            "averageConfidence": 0.7,
+        },
     }
 
     projected = robustness_service.build_scenario_strategy_result(
@@ -412,7 +434,109 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
     assert projected["diversificationSummary"]["averageHoldingCount"] == 3.0
     assert projected["diversificationSummary"]["averageTop5WeightPct"] == 75.0
     assert projected["exposureSummary"]["averageCashWeightPct"] == 25.0
+    assert projected["executionDecisionSummary"]["noTradeCount"] == 1
+    assert projected["executionDecisionSummary"]["reasonCounts"]["edge_below_cost"] == 1
     assert projected["windows"][0]["weights"][0] == {"asset": "SPY", "weightPct": 30.0}
+    assert projected["windows"][0]["executionDecisionSummary"]["decisionCount"] == 2
+
+
+def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
+    group = {
+        "strategyKey": "stg-test",
+        "strategyLabel": "Test Strategy",
+        "scenarioResults": [
+            {
+                "rank": 1,
+                "averageSharpeRatio": 1.0,
+                "minimumSharpeRatio": 0.8,
+                "averageTotalReturnPct": 10.0,
+                "averageMaxDrawdownPct": -5.0,
+                "averageTurnoverPct": 4.0,
+                "positiveReturnWindowCount": 1,
+                "windowCount": 1,
+                "diagnostics": {"flags": [], "diagnosticEvents": []},
+                "scenario": {
+                    "key": "scenario-a",
+                    "period": "2020-2021",
+                    "universe": "crypto_included",
+                    "costMultiplier": 1.0,
+                    "maxWeightPct": 35.0,
+                },
+                "diversificationSummary": robustness_service.empty_diversification_summary(),
+                "exposureSummary": robustness_service.empty_exposure_summary(),
+                "executionDecisionSummary": {
+                    "decisionCount": 2,
+                    "rebalanceCount": 1,
+                    "noTradeCount": 1,
+                    "policyCounts": {"cost_aware_no_trade": 2},
+                    "reasonCounts": {"edge_below_cost": 1, "edge_after_cost": 1},
+                    "averageTurnoverPct": 10.0,
+                    "averageEstimatedCostPct": 0.2,
+                    "averageEstimatedEdgePct": 0.6,
+                    "averageConfidence": 0.8,
+                },
+                "windows": [
+                    {
+                        "year": 2020,
+                        "test": {
+                            "sharpeRatio": 0.8,
+                            "totalReturnPct": 10.0,
+                            "maxDrawdownPct": -5.0,
+                        },
+                    }
+                ],
+            },
+            {
+                "rank": 2,
+                "averageSharpeRatio": 0.6,
+                "minimumSharpeRatio": 0.2,
+                "averageTotalReturnPct": 4.0,
+                "averageMaxDrawdownPct": -8.0,
+                "averageTurnoverPct": 6.0,
+                "positiveReturnWindowCount": 1,
+                "windowCount": 1,
+                "diagnostics": {"flags": [], "diagnosticEvents": []},
+                "scenario": {
+                    "key": "scenario-b",
+                    "period": "2020-2021",
+                    "universe": "no_crypto",
+                    "costMultiplier": 3.0,
+                    "maxWeightPct": 35.0,
+                },
+                "diversificationSummary": robustness_service.empty_diversification_summary(),
+                "exposureSummary": robustness_service.empty_exposure_summary(),
+                "executionDecisionSummary": {
+                    "decisionCount": 1,
+                    "rebalanceCount": 0,
+                    "noTradeCount": 1,
+                    "policyCounts": {"cost_aware_no_trade": 1},
+                    "reasonCounts": {"edge_below_cost": 1},
+                    "averageTurnoverPct": 4.0,
+                    "averageEstimatedCostPct": 0.1,
+                    "averageEstimatedEdgePct": 0.3,
+                    "averageConfidence": 0.5,
+                },
+                "windows": [
+                    {
+                        "year": 2021,
+                        "test": {
+                            "sharpeRatio": 0.2,
+                            "totalReturnPct": 4.0,
+                            "maxDrawdownPct": -8.0,
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+
+    summary = robustness_service.summarize_strategy_robustness(group, scenario_count=2)
+
+    execution_summary = summary["executionDecisionSummary"]
+    assert execution_summary["decisionCount"] == 3
+    assert execution_summary["noTradeCount"] == 2
+    assert execution_summary["reasonCounts"] == {"edge_below_cost": 2, "edge_after_cost": 1}
+    assert execution_summary["averageEstimatedEdgePct"] == 0.5
 
 
 def test_attach_delta_vs_baseline_reports_zero_for_baseline() -> None:

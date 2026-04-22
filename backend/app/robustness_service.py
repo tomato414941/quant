@@ -7,7 +7,10 @@ from dataclasses import replace
 from typing import Callable
 
 from app.comparison_models import ComparisonSpec, ConditionVariant, scale_cost_model_spec
-from app.comparison_service import build_walk_forward_comparison_payload
+from app.comparison_service import (
+    build_walk_forward_comparison_payload,
+    summarize_execution_decision_summaries,
+)
 from app.diagnostics_service import (
     build_evaluation_diagnostic_events,
     has_invalidating_diagnostic,
@@ -592,6 +595,9 @@ def build_window_drilldown(window: dict) -> dict:
         "selectedAssets": selected_assets,
         "diversificationSummary": summarize_weight_diversification(weights, selected_assets),
         "exposureSummary": summarize_weight_exposure(weights),
+        "executionDecisionSummary": project_execution_decision_summary(
+            window.get("executionDecisionSummary", {})
+        ),
         "testAvailability": project_availability_drilldown(window.get("testAvailability", {})),
         "trainAvailability": project_availability_drilldown(window.get("trainAvailability", {})),
     }
@@ -612,6 +618,33 @@ def project_availability_drilldown(summary: dict) -> dict:
         if key in summary
     }
 
+
+def project_execution_decision_summary(summary: dict) -> dict:
+    if not summary:
+        return summarize_execution_decision_summaries([])
+    return {
+        "decisionCount": int(summary.get("decisionCount", 0)),
+        "rebalanceCount": int(summary.get("rebalanceCount", 0)),
+        "noTradeCount": int(summary.get("noTradeCount", 0)),
+        "policyCounts": {
+            str(key): int(value)
+            for key, value in (summary.get("policyCounts") or {}).items()
+        },
+        "reasonCounts": {
+            str(key): int(value)
+            for key, value in (summary.get("reasonCounts") or {}).items()
+        },
+        "averageTurnoverPct": optional_float(summary.get("averageTurnoverPct")),
+        "averageEstimatedCostPct": optional_float(summary.get("averageEstimatedCostPct")),
+        "averageEstimatedEdgePct": optional_float(summary.get("averageEstimatedEdgePct")),
+        "averageConfidence": optional_float(summary.get("averageConfidence")),
+    }
+
+
+def optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 def build_worst_window_summary(windows: list[dict]) -> dict:
     if not windows:
@@ -672,6 +705,9 @@ def build_scenario_strategy_result(result: dict, *, rank: int, diagnostics: dict
         "diagnostics": diagnostics,
         "diversificationSummary": summarize_window_diversification(windows),
         "exposureSummary": summarize_window_exposure(windows),
+        "executionDecisionSummary": project_execution_decision_summary(
+            result.get("executionDecisionSummary", {})
+        ),
         "windows": windows,
         "worstWindow": build_worst_window_summary(windows),
     }
@@ -735,6 +771,9 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         "representativeDiagnostic": representative_event,
         "diversificationSummary": summarize_strategy_diversification(results),
         "exposureSummary": summarize_strategy_exposure(results),
+        "executionDecisionSummary": summarize_execution_decision_summaries(
+            [result.get("executionDecisionSummary", {}) for result in results]
+        ),
         "worstScenario": build_worst_scenario_summary(results),
         "worstWindow": build_strategy_worst_window_summary(results),
         "scenarioResults": results,

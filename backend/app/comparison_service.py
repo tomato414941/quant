@@ -1201,6 +1201,7 @@ def aggregate_walk_forward_runs(runs_by_window: list[dict]) -> list[dict]:
                     "train": train_summary,
                     "weights": run.get("weights", []),
                     "selectedAssets": run.get("selectedAssets", []),
+                    "executionDecisionSummary": run.get("decisionSummary", {}),
                     "testAvailability": summarize_run_series_availability(
                         run.get("series", []),
                         start_date=test_split.get("startDate"),
@@ -1300,6 +1301,9 @@ def summarize_walk_forward_group(group: dict) -> dict:
         "averageTotalReturnPct": average_metric("totalReturnPct"),
         "averageMaxDrawdownPct": average_metric("maxDrawdownPct"),
         "averageTurnoverPct": average_metric("turnoverPct"),
+        "executionDecisionSummary": summarize_execution_decision_summaries(
+            [window.get("executionDecisionSummary", {}) for window in windows]
+        ),
         "minTestEligibleAssetCount": min(
             int(summary["minEligibleAssetCount"])
             for summary in test_availability_summaries
@@ -1320,6 +1324,59 @@ def summarize_walk_forward_group(group: dict) -> dict:
         }),
     }
 
+
+def summarize_execution_decision_summaries(summaries: list[dict]) -> dict:
+    clean_summaries = [summary for summary in summaries if summary]
+    decision_count = sum(int(summary.get("decisionCount", 0)) for summary in clean_summaries)
+    rebalance_count = sum(int(summary.get("rebalanceCount", 0)) for summary in clean_summaries)
+    no_trade_count = sum(int(summary.get("noTradeCount", 0)) for summary in clean_summaries)
+
+    return {
+        "decisionCount": decision_count,
+        "rebalanceCount": rebalance_count,
+        "noTradeCount": no_trade_count,
+        "policyCounts": merge_count_maps(clean_summaries, "policyCounts"),
+        "reasonCounts": merge_count_maps(clean_summaries, "reasonCounts"),
+        "averageTurnoverPct": weighted_average_summary_metric(
+            clean_summaries,
+            "averageTurnoverPct",
+        ),
+        "averageEstimatedCostPct": weighted_average_summary_metric(
+            clean_summaries,
+            "averageEstimatedCostPct",
+        ),
+        "averageEstimatedEdgePct": weighted_average_summary_metric(
+            clean_summaries,
+            "averageEstimatedEdgePct",
+        ),
+        "averageConfidence": weighted_average_summary_metric(
+            clean_summaries,
+            "averageConfidence",
+        ),
+    }
+
+
+def merge_count_maps(summaries: list[dict], key: str) -> dict:
+    counts: dict[str, int] = {}
+    for summary in summaries:
+        for name, value in (summary.get(key) or {}).items():
+            counts[str(name)] = counts.get(str(name), 0) + int(value)
+    return counts
+
+
+def weighted_average_summary_metric(summaries: list[dict], key: str) -> float | None:
+    weighted_total = 0.0
+    total_weight = 0
+    for summary in summaries:
+        value = summary.get(key)
+        weight = int(summary.get("decisionCount", 0))
+        if value is None or weight <= 0:
+            continue
+        weighted_total += float(value) * weight
+        total_weight += weight
+    if total_weight == 0:
+        return None
+    return round(weighted_total / total_weight, 6)
 
 def sort_walk_forward_results(results: list[dict]) -> list[dict]:
     return sorted(

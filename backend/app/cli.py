@@ -300,6 +300,19 @@ def format_percent(value: float) -> str:
     return f"{value:+.2f}%"
 
 
+def format_optional_percent(value: object) -> str:
+    if value is None:
+        return "n/a"
+    return format_percent(float(value))
+
+
+def format_count_map(counts: dict, *, limit: int = 3) -> str:
+    if not counts:
+        return "none"
+    pairs = sorted(counts.items(), key=lambda item: (-int(item[1]), str(item[0])))[:limit]
+    return ", ".join(f"{key}={value}" for key, value in pairs)
+
+
 def render_availability_diagnostics(lines: list[str], diagnostics: dict | None) -> None:
     if not diagnostics:
         return
@@ -797,6 +810,20 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
                 "   "
                 f"Invested {format_percent(exposure['averageInvestedWeightPct'])} | "
                 f"Cash {format_percent(exposure['averageCashWeightPct'])}"
+            )
+        execution_decisions = result.get("executionDecisionSummary") or {}
+        if int(execution_decisions.get("decisionCount", 0)) > 0:
+            lines.append(
+                "   "
+                f"Exec decisions {execution_decisions['decisionCount']} | "
+                f"rebalance {execution_decisions['rebalanceCount']} | "
+                f"no-trade {execution_decisions['noTradeCount']} | "
+                f"avg edge {format_optional_percent(execution_decisions.get('averageEstimatedEdgePct'))} | "
+                f"avg cost {format_optional_percent(execution_decisions.get('averageEstimatedCostPct'))}"
+            )
+            lines.append(
+                "   "
+                f"Exec reasons {format_count_map(execution_decisions.get('reasonCounts') or {})}"
             )
         delta = result.get("deltaVsBaseline")
         if delta:

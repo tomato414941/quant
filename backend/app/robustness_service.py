@@ -346,6 +346,7 @@ def collect_scenario_diagnostics(payload: dict) -> dict:
     instrument_diagnostics = evaluation.get("instrumentDiagnostics") or {}
     actionable_warnings = availability_diagnostics.get("actionableWarnings") or []
     calendar_boundary_warnings = availability_diagnostics.get("calendarBoundaryWarnings") or []
+    asset_lifecycle_warnings = availability_diagnostics.get("assetLifecycleWarnings") or []
     unknown_symbols = instrument_diagnostics.get("unknownSymbols") or []
     diagnostic_events = list(
         evaluation.get("diagnosticEvents")
@@ -359,6 +360,7 @@ def collect_scenario_diagnostics(payload: dict) -> dict:
     return {
         "actionableWarningCount": len(actionable_warnings),
         "calendarBoundaryWarningCount": len(calendar_boundary_warnings),
+        "assetLifecycleWarningCount": len(asset_lifecycle_warnings),
         "mixedMarketCalendar": bool(instrument_diagnostics.get("mixedMarketCalendar")),
         "unknownSymbols": list(unknown_symbols),
         "flags": diagnostic_summary["flags"],
@@ -367,6 +369,7 @@ def collect_scenario_diagnostics(payload: dict) -> dict:
         "representativeDiagnostic": representative_event,
         "actionableWarnings": list(actionable_warnings),
         "calendarBoundaryWarnings": list(calendar_boundary_warnings),
+        "assetLifecycleWarnings": list(asset_lifecycle_warnings),
     }
 
 

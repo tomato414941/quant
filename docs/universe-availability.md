@@ -185,6 +185,7 @@ Backtest series には、必要に応じて日付ごとの universe 状態を出
 - 上場前の資産を過去に補完しない
 - future の first valid date を過去時点の判断に使わない
 - window 全体を見てから universe を決めない
+- 期間途中の資産参加/離脱は asset lifecycle として診断に残すが、単独では invalidating にしない
 - benchmark / reference strategy も同じ availability policy で評価する
 
 ## Interaction With Walk-Forward
@@ -233,6 +234,7 @@ Status: implemented.
 
 - run payload と evaluation payload に `availabilityPolicy` / `availabilitySummary` / `availabilityDiagnostics` / `instrumentDiagnostics` / `diagnosticEvents` を出す
 - `diagnosticEvents` は availability / instrument / calendar の診断を `kind`, `category`, `severity`, `scope`, `reason`, `evidence` で正規化する
+- 期間途中の資産参加/離脱は `assetLifecycleWarnings` として出し、`severity = info` / `scope = asset_lifecycle` にする
 - backtest series に `availableAssetCount`, `eligibleAssetCount`, `newlyEligibleAssets`, `removedAssets` を出す
 - Dataset Context に `assetAvailability` と asset-level availability warnings を出す
 - CLI は正規化済み diagnostics の要約を表示し、raw warnings の分類判断を持たない
@@ -241,7 +243,7 @@ Status: implemented.
 
 Status: implemented.
 
-- run store logic version は `v65`
+- run store logic version は `v66`
 - availability policy と asset availability summary を evaluation payload に含め、旧結果と新結果を混ぜない
 
 ## Test Scenarios

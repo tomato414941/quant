@@ -25,6 +25,14 @@ def build_availability_diagnostic_events(
         events.append(normalize_availability_warning(warning, severity=INVALIDATING_SEVERITY))
     for warning in availability_diagnostics.get("calendarBoundaryWarnings") or []:
         events.append(normalize_availability_warning(warning, severity=INFO_SEVERITY))
+    for warning in availability_diagnostics.get("assetLifecycleWarnings") or []:
+        events.append(
+            normalize_availability_warning(
+                warning,
+                severity=INFO_SEVERITY,
+                scope="asset_lifecycle",
+            )
+        )
     return events
 
 
@@ -32,12 +40,13 @@ def normalize_availability_warning(
     warning: dict[str, object],
     *,
     severity: str,
+    scope: str = "market_data",
 ) -> dict[str, object]:
     event = {
         "kind": str(warning.get("kind") or "availability_warning"),
         "category": "availability",
         "severity": severity,
-        "scope": "market_data",
+        "scope": scope,
         "reason": str(warning.get("message") or warning.get("kind") or "availability warning"),
         "evidence": compact_mapping(warning),
     }

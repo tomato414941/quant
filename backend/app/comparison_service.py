@@ -2335,14 +2335,8 @@ def classify_availability_warning(
         if is_small_calendar_gap(warning, availability_policy, "requestedEndDate", "alignedEndDate"):
             return "calendar_boundary"
         return "actionable"
-    if kind == "asset_available_after_aligned_start":
-        if is_small_calendar_gap(warning, availability_policy, "alignedStartDate", "firstValidDate"):
-            return "calendar_boundary"
-        return "actionable"
-    if kind == "asset_unavailable_before_aligned_end":
-        if is_small_calendar_gap(warning, availability_policy, "lastValidDate", "alignedEndDate"):
-            return "calendar_boundary"
-        return "actionable"
+    if kind in {"asset_available_after_aligned_start", "asset_unavailable_before_aligned_end"}:
+        return "asset_lifecycle"
     return "actionable"
 
 
@@ -2352,18 +2346,23 @@ def build_availability_diagnostics(
 ) -> dict[str, object]:
     actionable_warnings = []
     calendar_boundary_warnings = []
+    asset_lifecycle_warnings = []
     for warning in warnings:
         classification = classify_availability_warning(warning, availability_policy)
         if classification == "calendar_boundary":
             calendar_boundary_warnings.append(warning)
+        elif classification == "asset_lifecycle":
+            asset_lifecycle_warnings.append(warning)
         else:
             actionable_warnings.append(warning)
     return {
         "warningCount": len(warnings),
         "actionableWarningCount": len(actionable_warnings),
         "calendarBoundaryWarningCount": len(calendar_boundary_warnings),
+        "assetLifecycleWarningCount": len(asset_lifecycle_warnings),
         "actionableWarnings": actionable_warnings,
         "calendarBoundaryWarnings": calendar_boundary_warnings,
+        "assetLifecycleWarnings": asset_lifecycle_warnings,
     }
 
 

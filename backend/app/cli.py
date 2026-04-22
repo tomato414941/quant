@@ -282,6 +282,7 @@ def render_availability_diagnostics(lines: list[str], diagnostics: dict | None) 
         return
     actionable_warnings = diagnostics.get("actionableWarnings") or []
     calendar_boundary_warning_count = int(diagnostics.get("calendarBoundaryWarningCount") or 0)
+    asset_lifecycle_warning_count = int(diagnostics.get("assetLifecycleWarningCount") or 0)
     if actionable_warnings:
         lines.append("Warnings:")
         for warning in actionable_warnings:
@@ -293,7 +294,14 @@ def render_availability_diagnostics(lines: list[str], diagnostics: dict | None) 
             "Calendar boundary differences: "
             f"{calendar_boundary_warning_count} classified as non-actionable."
         )
-    if actionable_warnings or calendar_boundary_warning_count:
+    if asset_lifecycle_warning_count:
+        if actionable_warnings or calendar_boundary_warning_count:
+            lines.append("")
+        lines.append(
+            "Asset lifecycle differences: "
+            f"{asset_lifecycle_warning_count} classified as non-actionable."
+        )
+    if actionable_warnings or calendar_boundary_warning_count or asset_lifecycle_warning_count:
         lines.append("")
 
 

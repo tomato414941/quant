@@ -140,12 +140,10 @@ def test_collect_scenario_diagnostics_normalizes_events() -> None:
                     "availabilityDiagnostics": {
                         "actionableWarnings": [
                             {
-                                "kind": "asset_available_after_aligned_start",
-                                "message": "BTC starts after the aligned start",
-                                "ticker": "BTC-USD",
+                                "kind": "requested_asset_unavailable",
+                                "message": "1d data has no usable rows for MISSING.",
+                                "asset": "MISSING",
                                 "timeframe": "1d",
-                                "alignedStartDate": "2015-01-01",
-                                "firstValidDate": "2015-01-05",
                             }
                         ],
                         "calendarBoundaryWarnings": [
@@ -153,6 +151,16 @@ def test_collect_scenario_diagnostics_normalizes_events() -> None:
                                 "kind": "aligned_start_after_requested_start",
                                 "message": "Calendar boundary moved start",
                                 "timeframe": "1d",
+                            }
+                        ],
+                        "assetLifecycleWarnings": [
+                            {
+                                "kind": "asset_available_after_aligned_start",
+                                "message": "BTC starts after the aligned start",
+                                "ticker": "BTC-USD",
+                                "timeframe": "1d",
+                                "alignedStartDate": "2015-01-01",
+                                "firstValidDate": "2015-01-05",
                             }
                         ],
                     },
@@ -171,23 +179,27 @@ def test_collect_scenario_diagnostics_normalizes_events() -> None:
 
     assert diagnostics["actionableWarningCount"] == 1
     assert diagnostics["calendarBoundaryWarningCount"] == 1
+    assert diagnostics["assetLifecycleWarningCount"] == 1
     assert diagnostics["flags"] == [
         "actionable availability warning",
         "mixed calendar",
         "unknown symbols",
     ]
     assert diagnostics["diagnosticSummary"]["severityCounts"] == {
-        "info": 2,
+        "info": 3,
         "invalidating": 2,
     }
+    lifecycle_events = [
+        event
+        for event in diagnostics["diagnosticEvents"]
+        if event["scope"] == "asset_lifecycle"
+    ]
+    assert lifecycle_events[0]["severity"] == "info"
+    assert lifecycle_events[0]["symbol"] == "BTC-USD"
     representative = diagnostics["representativeDiagnostic"]
     assert representative["severity"] == "invalidating"
     assert representative["category"] == "availability"
-    assert representative["symbol"] == "BTC-USD"
-    assert representative["dates"] == {
-        "alignedStartDate": "2015-01-01",
-        "firstValidDate": "2015-01-05",
-    }
+    assert representative["symbol"] == "MISSING"
 
 
 def test_build_robustness_decision_uses_invalidating_events() -> None:
@@ -210,6 +222,30 @@ def test_build_robustness_decision_uses_invalidating_events() -> None:
     assert decision == {
         "decision": "INVALID",
         "reasons": ["actionable availability warning"],
+    }
+
+
+def test_build_robustness_decision_does_not_invalidate_lifecycle_events() -> None:
+    decision = robustness_service.build_robustness_decision(
+        scenario_count=10,
+        worst_sharpe=-0.1,
+        top5_count=10,
+        diagnostic_flags=[],
+        crypto_sensitivity=0.0,
+        cost_sensitivity=0.0,
+        diagnostic_events=[
+            {
+                "kind": "asset_available_after_aligned_start",
+                "category": "availability",
+                "severity": "info",
+                "scope": "asset_lifecycle",
+            }
+        ],
+    )
+
+    assert decision == {
+        "decision": "FAIL",
+        "reasons": ["worst Sharpe below 0.0"],
     }
 
 

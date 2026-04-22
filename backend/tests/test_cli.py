@@ -394,8 +394,8 @@ def test_render_availability_diagnostics_shows_calendar_boundary_classification(
                     "message": "1d data starts at 2025-01-02, after requested start 2025-01-01.",
                 },
                 {
-                    "kind": "asset_unavailable_before_aligned_end",
-                    "message": "SPY last valid data is 2025-12-25, before aligned end 2025-12-29.",
+                    "kind": "aligned_end_before_requested_end",
+                    "message": "1d data ends at 2025-12-25, before requested end 2025-12-29.",
                 },
             ],
         },
@@ -405,10 +405,10 @@ def test_render_availability_diagnostics_shows_calendar_boundary_classification(
     assert "Warnings:" not in output
     assert "Calendar boundary differences:" in output
     assert "classified as non-actionable" in output
-    assert "SPY last valid data" not in output
+    assert "1d data ends" not in output
 
 
-def test_render_availability_diagnostics_keeps_asset_availability_risks() -> None:
+def test_render_availability_diagnostics_keeps_actionable_risks() -> None:
     lines = []
 
     cli_module.render_availability_diagnostics(
@@ -416,18 +416,27 @@ def test_render_availability_diagnostics_keeps_asset_availability_risks() -> Non
         {
             "actionableWarnings": [
                 {
-                    "kind": "asset_available_after_aligned_start",
-                    "message": "ETH-USD becomes available on 2017-11-09, after aligned start 2015-01-01.",
+                    "kind": "requested_asset_unavailable",
+                    "message": "1d data has no usable rows for MISSING.",
                 }
             ],
             "calendarBoundaryWarningCount": 0,
             "calendarBoundaryWarnings": [],
+            "assetLifecycleWarningCount": 1,
+            "assetLifecycleWarnings": [
+                {
+                    "kind": "asset_available_after_aligned_start",
+                    "message": "ETH-USD becomes available on 2017-11-09, after aligned start 2015-01-01.",
+                }
+            ],
         },
     )
 
     output = "\n".join(lines)
     assert "Warnings:" in output
-    assert "ETH-USD becomes available" in output
+    assert "MISSING" in output
+    assert "Asset lifecycle differences:" in output
+    assert "ETH-USD becomes available" not in output
 
 
 def test_sort_candidate_runs_uses_test_metrics() -> None:
@@ -520,7 +529,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 0
     assert payload["comparisonId"] == config.comparison_id
     assert payload["recordCount"] > 0
-    assert payload["records"][0]["logicVersion"] == "v65"
+    assert payload["records"][0]["logicVersion"] == "v66"
     assert payload["records"][0]["strategyDefinitionFingerprint"]
     assert payload["records"][0]["evaluationSubjectFingerprint"]
     assert payload["records"][0]["marketDataFingerprint"]

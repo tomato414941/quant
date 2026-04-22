@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from app.portfolio import (
+    COST_AWARE_NO_TRADE_DECISION_POLICY,
     PREDICTION_FEATURE_NAMES,
     build_observation_spec,
     build_prediction_combiner_spec,
@@ -46,6 +47,7 @@ from app.portfolio import (
     convert_window_spec_to_bars,
     compute_trade_cost,
     compute_strategy_score_series,
+    build_strategy_forecast_snapshot,
     evaluate_predictor_spec,
     get_direct_execution_strategy_definition_compatibility_issues,
     get_strategy_definition_signal_execution_contexts,
@@ -642,6 +644,7 @@ def test_full_universe_candidates_are_strategy_definitions() -> None:
         "stg-fu-momomac8515-top025-hrp-month",
         "stg-fu-momo12-soft025-hrp-month",
         "stg-fu-momo12-lin050-hrp-month",
+        "stg-fu-momolv8515-top025-hrp-month-costaware",
     }
     monthly_candidates = {
         definition.strategy_id: definition
@@ -654,6 +657,8 @@ def test_full_universe_candidates_are_strategy_definitions() -> None:
         assert definition.execution_plan.rebalance_schedule == "month_end"
         assert definition.signals[0].source_kind == "selection_signal"
         assert definition.signals[0].data_timeframe.key == "1d"
+    cost_aware = monthly_candidates["stg-fu-momolv8515-top025-hrp-month-costaware"]
+    assert dict(cost_aware.extensions)["decision_policy"] == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 
 
@@ -2145,6 +2150,94 @@ def test_compare_portfolio_runs_uses_explicit_decision_schedule() -> None:
     assert "DDD" not in hold_run["selectedAssets"]
     assert "DDD" in adaptive_run["selectedAssets"]
     assert adaptive_run["summary"]["turnoverPct"] > hold_run["summary"]["turnoverPct"]
+
+
+def test_build_strategy_forecast_snapshot_wraps_ranking_score() -> None:
+    returns = pd.DataFrame(
+        {
+            "AAA": [0.01, 0.02, 0.03, 0.01],
+            "BBB": [0.01, -0.01, 0.0, 0.01],
+            "CCC": [-0.01, -0.02, -0.01, 0.0],
+        },
+        index=pd.date_range("2025-01-01", periods=4, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(returns.columns),
+            key="forecast_universe",
+            label="Forecast universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "bars", "value": 3}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    forecast = build_strategy_forecast_snapshot(
+        returns,
+        None,
+        strategy,
+        bars_per_year=252.0,
+        current_date="2025-01-04",
+    )
+
+    assert forecast is not None
+    assert forecast.as_of_date == "2025-01-04"
+    assert set(forecast.score.index) == set(returns.columns)
+    assert forecast.expected_return_proxy is not None
+    assert forecast.percentile_rank["AAA"] > forecast.percentile_rank["CCC"]
+    assert forecast.confidence["AAA"] == 1.0
+
+
+def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 101, 102, 103, 104, 105, 106, 107],
+            "BBB": [100, 99, 98, 97, 96, 95, 94, 93],
+            "CCC": [100, 100, 101, 101, 102, 102, 103, 103],
+        },
+        index=pd.date_range("2025-01-01", periods=8, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        strategy_id="cost_aware_no_trade_test",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="cost_aware_universe",
+            label="Cost aware universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "bars", "value": 3}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        decision_schedule="every_bar",
+        extensions={"decision_policy": COST_AWARE_NO_TRADE_DECISION_POLICY},
+    )
+
+    run = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.2,
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+    )[0]
+
+    decision_summary = run["decisionSummary"]
+    assert decision_summary["policyCounts"][COST_AWARE_NO_TRADE_DECISION_POLICY] >= 1
+    assert decision_summary["noTradeCount"] >= 1
+    assert "edge_below_cost" in decision_summary["reasonCounts"]
+    assert run["strategy"]["components"]["optional"]["decisionPolicy"]["key"] == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 
 def test_prepare_strategy_market_data_resamples_daily_source_to_weekly_signal_timeframe() -> None:

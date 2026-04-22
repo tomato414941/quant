@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 import statistics
 
@@ -9,6 +10,41 @@ from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunc
 from app.instrument_registry import get_instrument
 from app.portfolio_domain import *
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
+
+DECISION_POLICY_EXTENSION_KEY = "decision_policy"
+DIRECT_SCORE_DECISION_POLICY = "direct_score_to_weight"
+COST_AWARE_NO_TRADE_DECISION_POLICY = "cost_aware_no_trade"
+SUPPORTED_DECISION_POLICIES = {
+    DIRECT_SCORE_DECISION_POLICY,
+    COST_AWARE_NO_TRADE_DECISION_POLICY,
+}
+DEFAULT_NO_TRADE_BAND = 0.02
+DEFAULT_CONFIDENCE_FLOOR = 0.25
+
+
+@dataclass(frozen=True)
+class ForecastSnapshot:
+    as_of_date: str | None
+    horizon: str
+    score: pd.Series
+    percentile_rank: pd.Series
+    expected_return_proxy: pd.Series | None
+    confidence: pd.Series
+    risk_proxy: pd.Series
+
+
+@dataclass(frozen=True)
+class PortfolioDecision:
+    selected_assets: list[str]
+    weights: np.ndarray
+    policy: str
+    action: str
+    reason: str
+    turnover: float
+    estimated_cost_pct: float
+    estimated_edge_pct: float | None
+    average_confidence: float | None
+
 
 def freeze_parameter_value(value: object) -> object:
     if isinstance(value, dict):
@@ -1058,6 +1094,229 @@ def compute_dynamic_portfolio_allocation(
         return [], np.zeros(len(universe_columns), dtype="float64")
 
 
+def resolve_decision_policy_kind(strategy: EvaluatorStrategySpec) -> str:
+    policy = dict(strategy.extensions).get(DECISION_POLICY_EXTENSION_KEY, DIRECT_SCORE_DECISION_POLICY)
+    if policy not in SUPPORTED_DECISION_POLICIES:
+        raise ValueError(f"Unsupported decision policy: {policy}")
+    return policy
+
+
+def resolve_selected_assets_from_weights(universe_columns: pd.Index, weights: np.ndarray) -> list[str]:
+    return [
+        str(asset)
+        for asset, weight in zip(universe_columns, weights, strict=True)
+        if abs(float(weight)) > 1e-9
+    ]
+
+
+def build_decision_forecast_snapshot(
+    *,
+    history_returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy: EvaluatorStrategySpec,
+    bars_per_year: float,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None,
+    predictor_context: dict[str, object] | None,
+    availability_policy: dict[str, object],
+) -> ForecastSnapshot | None:
+    eligible_assets = resolve_eligible_assets(history_returns, availability_policy)
+    if len(eligible_assets) < 2:
+        return None
+    clean_history_returns = prepare_history_returns_for_assets(history_returns, eligible_assets)
+    if len(clean_history_returns) < 3 or len(clean_history_returns.columns) < 2:
+        return None
+    clean_volume_history = prepare_volume_history_for_assets(volume_history, clean_history_returns)
+    try:
+        return build_strategy_forecast_snapshot(
+            clean_history_returns,
+            clean_volume_history,
+            strategy,
+            bars_per_year=bars_per_year,
+            current_date=current_date,
+            predictor_panel=predictor_panel,
+            selection_contexts=selection_contexts,
+            predictor_context=predictor_context,
+        )
+    except ValueError:
+        return None
+
+
+def compute_weighted_forecast_confidence(
+    forecast: ForecastSnapshot | None,
+    universe_columns: pd.Index,
+    target_weights: np.ndarray,
+) -> float | None:
+    if forecast is None:
+        return None
+    confidence = forecast.confidence.reindex(universe_columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    weight_values = np.abs(np.asarray(target_weights, dtype="float64"))
+    weight_sum = float(weight_values.sum())
+    if weight_sum <= 0:
+        finite_confidence = confidence.replace([np.inf, -np.inf], np.nan).dropna()
+        return None if finite_confidence.empty else float(finite_confidence.mean())
+    return float(np.dot(confidence.to_numpy(dtype="float64"), weight_values) / weight_sum)
+
+
+def compute_forecast_edge(
+    forecast: ForecastSnapshot | None,
+    universe_columns: pd.Index,
+    current_weights: np.ndarray,
+    target_weights: np.ndarray,
+) -> float | None:
+    if forecast is None or forecast.expected_return_proxy is None:
+        return None
+    proxy = forecast.expected_return_proxy.reindex(universe_columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    weight_delta = np.asarray(target_weights, dtype="float64") - np.asarray(current_weights, dtype="float64")
+    return float(np.dot(weight_delta, proxy.to_numpy(dtype="float64")))
+
+
+def build_portfolio_decision(
+    *,
+    history_returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy: EvaluatorStrategySpec,
+    bars_per_year: float,
+    universe_columns: pd.Index,
+    current_weights: np.ndarray,
+    current_selected_assets: list[str],
+    target_weights: np.ndarray,
+    target_selected_assets: list[str],
+    transaction_cost: float,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None,
+    predictor_context: dict[str, object] | None,
+    availability_policy: dict[str, object],
+) -> PortfolioDecision:
+    policy = resolve_decision_policy_kind(strategy)
+    turnover = float(np.abs(target_weights - current_weights).sum())
+    estimated_cost = turnover * float(transaction_cost)
+    if policy == DIRECT_SCORE_DECISION_POLICY:
+        return PortfolioDecision(
+            selected_assets=list(target_selected_assets),
+            weights=target_weights.copy(),
+            policy=policy,
+            action="rebalance",
+            reason="direct_policy",
+            turnover=turnover,
+            estimated_cost_pct=round(estimated_cost * 100, 4),
+            estimated_edge_pct=None,
+            average_confidence=None,
+        )
+
+    if float(np.sum(target_weights)) <= 0:
+        return PortfolioDecision(
+            selected_assets=[],
+            weights=target_weights.copy(),
+            policy=policy,
+            action="rebalance",
+            reason="target_cash",
+            turnover=turnover,
+            estimated_cost_pct=round(estimated_cost * 100, 4),
+            estimated_edge_pct=None,
+            average_confidence=None,
+        )
+
+    forecast = build_decision_forecast_snapshot(
+        history_returns=history_returns,
+        volume_history=volume_history,
+        strategy=strategy,
+        bars_per_year=bars_per_year,
+        current_date=current_date,
+        predictor_panel=predictor_panel,
+        selection_contexts=selection_contexts,
+        predictor_context=predictor_context,
+        availability_policy=availability_policy,
+    )
+    average_confidence = compute_weighted_forecast_confidence(forecast, universe_columns, target_weights)
+    estimated_edge = compute_forecast_edge(forecast, universe_columns, current_weights, target_weights)
+    no_trade_reason = None
+    if turnover <= DEFAULT_NO_TRADE_BAND:
+        no_trade_reason = "turnover_below_band"
+    elif average_confidence is not None and average_confidence < DEFAULT_CONFIDENCE_FLOOR:
+        no_trade_reason = "confidence_below_floor"
+    elif estimated_edge is not None and estimated_edge <= estimated_cost:
+        no_trade_reason = "edge_below_cost"
+
+    if no_trade_reason is not None:
+        held_assets = current_selected_assets or resolve_selected_assets_from_weights(universe_columns, current_weights)
+        return PortfolioDecision(
+            selected_assets=list(held_assets),
+            weights=current_weights.copy(),
+            policy=policy,
+            action="no_trade",
+            reason=no_trade_reason,
+            turnover=turnover,
+            estimated_cost_pct=round(estimated_cost * 100, 4),
+            estimated_edge_pct=None if estimated_edge is None else round(estimated_edge * 100, 4),
+            average_confidence=None if average_confidence is None else round(average_confidence, 4),
+        )
+
+    return PortfolioDecision(
+        selected_assets=list(target_selected_assets),
+        weights=target_weights.copy(),
+        policy=policy,
+        action="rebalance",
+        reason="edge_after_cost",
+        turnover=turnover,
+        estimated_cost_pct=round(estimated_cost * 100, 4),
+        estimated_edge_pct=None if estimated_edge is None else round(estimated_edge * 100, 4),
+        average_confidence=None if average_confidence is None else round(average_confidence, 4),
+    )
+
+
+def serialize_portfolio_decision_event(date: str, decision: PortfolioDecision) -> dict[str, object]:
+    return {
+        "date": date,
+        "policy": decision.policy,
+        "action": decision.action,
+        "reason": decision.reason,
+        "turnoverPct": round(decision.turnover * 100, 2),
+        "estimatedCostPct": decision.estimated_cost_pct,
+        "estimatedEdgePct": decision.estimated_edge_pct,
+        "averageConfidence": decision.average_confidence,
+        "selectedAssetCount": len(decision.selected_assets),
+    }
+
+
+def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]:
+    if not events:
+        return {
+            "decisionCount": 0,
+            "rebalanceCount": 0,
+            "noTradeCount": 0,
+            "policyCounts": {},
+            "reasonCounts": {},
+            "averageTurnoverPct": None,
+            "averageEstimatedCostPct": None,
+            "averageEstimatedEdgePct": None,
+            "averageConfidence": None,
+        }
+
+    policy_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    for event in events:
+        policy = str(event["policy"])
+        reason = str(event["reason"])
+        policy_counts[policy] = policy_counts.get(policy, 0) + 1
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    edge_values = [float(event["estimatedEdgePct"]) for event in events if event["estimatedEdgePct"] is not None]
+    confidence_values = [float(event["averageConfidence"]) for event in events if event["averageConfidence"] is not None]
+    return {
+        "decisionCount": len(events),
+        "rebalanceCount": sum(1 for event in events if event["action"] == "rebalance"),
+        "noTradeCount": sum(1 for event in events if event["action"] == "no_trade"),
+        "policyCounts": policy_counts,
+        "reasonCounts": reason_counts,
+        "averageTurnoverPct": round(float(np.mean([event["turnoverPct"] for event in events])), 2),
+        "averageEstimatedCostPct": round(float(np.mean([event["estimatedCostPct"] for event in events])), 4),
+        "averageEstimatedEdgePct": None if not edge_values else round(float(np.mean(edge_values)), 4),
+        "averageConfidence": None if not confidence_values else round(float(np.mean(confidence_values)), 4),
+    }
+
 def summarize_availability_series(series: list[dict]) -> dict[str, object]:
     if not series:
         return {
@@ -1226,6 +1485,8 @@ def compare_portfolio_runs(
                 "splitAnalysis": backtest["splitAnalysis"],
                 "series": backtest["series"],
                 "availabilitySummary": backtest["availabilitySummary"],
+                "decisionSummary": backtest["decisionSummary"],
+                "decisionEvents": backtest["decisionEvents"],
                 "availabilityPolicy": availability_policy,
             }
         )
@@ -1998,6 +2259,71 @@ def compute_strategy_score_series(
     )
 
 
+def compute_expected_return_proxy_series(
+    returns: pd.DataFrame,
+    aligned_scores: pd.Series,
+) -> pd.Series | None:
+    if aligned_scores.isna().all():
+        return None
+
+    filled_scores = aligned_scores.fillna(float(aligned_scores.mean()))
+    if filled_scores.nunique() < 2:
+        return None
+
+    standardized_scores = (filled_scores - filled_scores.mean()) / filled_scores.std(ddof=0)
+    standardized_scores = standardized_scores.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    historical_mean = returns.mean(axis=0)
+    proxy_scale = float(max(historical_mean.std(ddof=0), 1e-4))
+    proxy = np.clip(standardized_scores.to_numpy(dtype="float64") * proxy_scale, -0.05, 0.05)
+    return pd.Series(proxy, index=returns.columns, dtype="float64")
+
+
+def compute_forecast_confidence_series(aligned_scores: pd.Series) -> pd.Series:
+    confidence = pd.Series(0.0, index=aligned_scores.index, dtype="float64")
+    confidence.loc[aligned_scores.notna()] = 1.0
+    return confidence
+
+
+def build_strategy_forecast_snapshot(
+    returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy_or_selection: EvaluatorStrategySpec | RankingSourceSpec,
+    *,
+    bars_per_year: float,
+    current_date: str | None = None,
+    predictor_panel: pd.DataFrame | None = None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
+) -> ForecastSnapshot | None:
+    score_series = compute_strategy_score_series(
+        returns,
+        volume_history,
+        strategy_or_selection,
+        bars_per_year=bars_per_year,
+        current_date=current_date,
+        predictor_panel=predictor_panel,
+        selection_contexts=selection_contexts,
+        predictor_context=predictor_context,
+    )
+    if score_series is None:
+        return None
+
+    aligned_scores = score_series.reindex(returns.columns).replace([np.inf, -np.inf], np.nan)
+    if aligned_scores.isna().all():
+        return None
+
+    risk_proxy = returns.std(axis=0).reindex(returns.columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return ForecastSnapshot(
+        as_of_date=current_date,
+        horizon="strategy_default",
+        score=aligned_scores,
+        percentile_rank=aligned_scores.rank(method="average", pct=True),
+        expected_return_proxy=compute_expected_return_proxy_series(returns, aligned_scores),
+        confidence=compute_forecast_confidence_series(aligned_scores),
+        risk_proxy=risk_proxy,
+    )
+
+
 def evaluate_asset_ranking_spec(
     returns: pd.DataFrame,
     volumes: pd.DataFrame | None,
@@ -2384,7 +2710,7 @@ def apply_strategy_weight_tilt(
     if "tilt_strength" not in score_parameters:
         return weights
 
-    score_series = compute_strategy_score_series(
+    forecast = build_strategy_forecast_snapshot(
         history_returns,
         None,
         strategy,
@@ -2394,9 +2720,9 @@ def apply_strategy_weight_tilt(
         selection_contexts=selection_contexts,
         predictor_context=predictor_context,
     )
-    if score_series is None:
+    if forecast is None:
         return weights
-    percentile_ranks = score_series.rank(method="average", pct=True)
+    percentile_ranks = forecast.percentile_rank.reindex(history_returns.columns)
     tilt_strength = float(score_parameters.get("tilt_strength", 0.5))
     tilt_shape = float(score_parameters.get("tilt_shape", 0.0))
     rank_values = percentile_ranks.to_numpy(dtype="float64")
@@ -2438,7 +2764,7 @@ def compute_expected_return_proxy(
     selection_contexts: list[dict[str, object]] | None = None,
     predictor_context: dict[str, object] | None = None,
 ) -> np.ndarray | None:
-    score_series = compute_strategy_score_series(
+    forecast = build_strategy_forecast_snapshot(
         returns,
         volume_history,
         strategy,
@@ -2448,24 +2774,9 @@ def compute_expected_return_proxy(
         selection_contexts=selection_contexts,
         predictor_context=predictor_context,
     )
-    if score_series is None:
+    if forecast is None or forecast.expected_return_proxy is None:
         return None
-
-    aligned_scores = score_series.reindex(returns.columns).replace([np.inf, -np.inf], np.nan)
-    if aligned_scores.isna().all():
-        return None
-
-    aligned_scores = aligned_scores.fillna(aligned_scores.mean())
-    if aligned_scores.nunique() < 2:
-        return None
-
-    standardized_scores = (aligned_scores - aligned_scores.mean()) / aligned_scores.std(ddof=0)
-    standardized_scores = standardized_scores.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    historical_mean = returns.mean(axis=0)
-    proxy_scale = float(max(historical_mean.std(ddof=0), 1e-4))
-    proxy = standardized_scores.to_numpy(dtype="float64") * proxy_scale
-    return np.clip(proxy, -0.05, 0.05)
+    return forecast.expected_return_proxy.reindex(returns.columns).to_numpy(dtype="float64")
 
 
 def shrink_expected_return_proxy(
@@ -2646,6 +2957,7 @@ def run_portfolio_backtest(
     next_rebalance_weights: np.ndarray | None = None
     next_rebalance_selected_assets: list[str] | None = None
     previous_eligible_assets: set[str] = set()
+    decision_events: list[dict] = []
 
     for index, (date, row) in enumerate(returns.iterrows()):
         trade_turnover = 0.0
@@ -2675,8 +2987,28 @@ def run_portfolio_backtest(
             current_selected_assets = [asset for asset in current_selected_assets if asset in eligible_asset_set]
 
         if index == split_index:
-            next_rebalance_weights = initial_weights.copy()
-            next_rebalance_selected_assets = list(initial_selected_assets)
+            split_history_returns = returns.iloc[:index]
+            split_history_volumes = volumes.iloc[:index] if volumes is not None else None
+            split_decision = build_portfolio_decision(
+                history_returns=split_history_returns,
+                volume_history=split_history_volumes,
+                strategy=strategy,
+                bars_per_year=bars_per_year,
+                universe_columns=returns.columns,
+                current_weights=current_weights,
+                current_selected_assets=current_selected_assets,
+                target_weights=initial_weights,
+                target_selected_assets=initial_selected_assets,
+                transaction_cost=transaction_cost,
+                current_date=str(date),
+                predictor_panel=predictor_panel,
+                selection_contexts=selection_contexts,
+                predictor_context=predictor_context,
+                availability_policy=availability_policy,
+            )
+            decision_events.append(serialize_portfolio_decision_event(str(date), split_decision))
+            next_rebalance_weights = split_decision.weights.copy()
+            next_rebalance_selected_assets = list(split_decision.selected_assets)
 
         if index >= split_index and next_rebalance_weights is not None:
             rebalanced_weights = zero_weights_outside_assets(
@@ -2740,7 +3072,7 @@ def run_portfolio_backtest(
             current_date=date,
             rebalance_schedule=decision_schedule,
         ):
-            pending_decision_selected_assets, pending_decision_weights = compute_dynamic_portfolio_allocation(
+            target_selected_assets, target_weights = compute_dynamic_portfolio_allocation(
                 history_returns=returns.iloc[: index + 1],
                 volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
                 strategy=strategy,
@@ -2757,6 +3089,26 @@ def run_portfolio_backtest(
                 predictor_context=predictor_context,
                 availability_policy=availability_policy,
             )
+            portfolio_decision = build_portfolio_decision(
+                history_returns=returns.iloc[: index + 1],
+                volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
+                strategy=strategy,
+                bars_per_year=bars_per_year,
+                universe_columns=returns.columns,
+                current_weights=current_weights,
+                current_selected_assets=current_selected_assets,
+                target_weights=target_weights,
+                target_selected_assets=target_selected_assets,
+                transaction_cost=transaction_cost,
+                current_date=str(date),
+                predictor_panel=predictor_panel,
+                selection_contexts=selection_contexts,
+                predictor_context=predictor_context,
+                availability_policy=availability_policy,
+            )
+            decision_events.append(serialize_portfolio_decision_event(str(date), portfolio_decision))
+            pending_decision_selected_assets = list(portfolio_decision.selected_assets)
+            pending_decision_weights = portfolio_decision.weights.copy()
         if should_rebalance(
             previous_date=previous_date,
             current_date=date,
@@ -2783,6 +3135,8 @@ def run_portfolio_backtest(
         "latestWeights": latest_weights,
         "latestSelectedAssets": latest_selected_assets,
         "availabilitySummary": summarize_availability_series(series),
+        "decisionSummary": summarize_portfolio_decision_events(decision_events),
+        "decisionEvents": decision_events,
         "splitAnalysis": {
             "config": {"splitRatioPct": round(split_ratio * 100, 1)},
             "train": train_summary,

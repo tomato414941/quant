@@ -1949,6 +1949,9 @@ def serialize_evaluator_strategy_spec(strategy: EvaluatorStrategySpec) -> dict:
                 "fallbackRule": fallback_rule,
                 "riskControls": serialize_risk_controls_spec(strategy.risk_controls),
                 "tiltRule": serialize_tilt_rule(strategy),
+                "decisionPolicy": {
+                    "key": dict(strategy.extensions).get("decision_policy", "direct_score_to_weight"),
+                },
                 "signalExecutionContexts": {
                     "selectionSignals": [
                         serialize_strategy_execution_context_payload(context)

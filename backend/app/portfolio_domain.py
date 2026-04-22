@@ -7,7 +7,6 @@ import statistics
 
 import numpy as np
 import pandas as pd
-from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
 from app.timeframe_models import (
     DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_MONTHLY_TIMEFRAME,
@@ -768,8 +767,8 @@ def build_portfolio_model_spec(
         "risk_budgeting": "各資産のリスク寄与が近づくように配分する",
         "minimum_variance": "分散が最小になるように配分する",
         "hierarchical_risk_parity": "相関クラスタを使って階層的にリスクを分散する",
-        "mean_risk_utility": "期待リターン proxy とリスクを同時に見て効用最大化する",
-        "mean_risk_utility_conservative": "期待リターン proxy を弱めに使い、リスクをより強く見る",
+        "mean_risk_utility": "校正済みforecastがない場合は等ウェイトfallbackで配分する",
+        "mean_risk_utility_conservative": "校正済みforecastがない場合は保守的に等ウェイトfallbackで配分する",
     }
 
     return PortfolioModelSpec(

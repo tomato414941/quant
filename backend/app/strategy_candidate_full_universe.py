@@ -211,31 +211,6 @@ FULL_UNIVERSE_CANDIDATE_DEFINITIONS = [
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
-    *attach_decision_policy(
-        build_selection_strategy_definition_product(
-            strategy_id_pattern="stg-fu-momolv8515-top025-hrp-month-costaware",
-            selection_variants=[
-                SelectionVariantDefinition(
-                    key="stg-fu-momolv8515-top025-hrp-month-costaware",
-                    selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
-                    hypothesis="月次低ボラ弱め傾斜にcost-aware no-tradeを加え、予測edgeがコストを下回る売買を抑える",
-                ),
-            ],
-            portfolio_model_variants=[
-                PortfolioModelVariantDefinition(key="hrp", portfolio_model=HIERARCHICAL_RISK_PARITY),
-            ],
-            execution_variants=[
-                ExecutionVariantDefinition(
-                    key="month",
-                    timeframe=DEFAULT_DAILY_TIMEFRAME,
-                    execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
-                ),
-            ],
-            investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
-            risk_controls=DEFAULT_RISK_CONTROLS,
-        ),
-        "cost_aware_no_trade",
-    ),
     *build_selection_strategy_definition_product(
         strategy_id_pattern="stg-fu-momo12-top035-{portfolio_model}",
         selection_variants=[
@@ -261,7 +236,34 @@ FULL_UNIVERSE_CANDIDATE_DEFINITIONS = [
 ]
 
 
+EXPERIMENTAL_FULL_UNIVERSE_CANDIDATE_DEFINITIONS = attach_decision_policy(
+    build_selection_strategy_definition_product(
+        strategy_id_pattern="stg-fu-momolv8515-top025-hrp-month-costaware",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="stg-fu-momolv8515-top025-hrp-month-costaware",
+                selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
+                hypothesis="月次低ボラ弱め傾斜に実験用cost-aware no-tradeを加え、未校正proxyの診断に使う",
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(key="hrp", portfolio_model=HIERARCHICAL_RISK_PARITY),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="month",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
+            ),
+        ],
+        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        risk_controls=DEFAULT_RISK_CONTROLS,
+    ),
+    "cost_aware_no_trade",
+)
+
 
 __all__ = [
+    "EXPERIMENTAL_FULL_UNIVERSE_CANDIDATE_DEFINITIONS",
     "FULL_UNIVERSE_CANDIDATE_DEFINITIONS",
 ]

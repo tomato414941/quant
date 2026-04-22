@@ -6,7 +6,7 @@ import statistics
 
 import numpy as np
 import pandas as pd
-from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
+from skfolio.optimization import HierarchicalRiskParity, MeanRisk, RiskBudgeting
 from app.instrument_registry import get_instrument
 from app.portfolio_domain import *
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
@@ -2810,16 +2810,6 @@ def compute_portfolio_allocation(
         strategy=strategy,
         predictor_context=predictor_context,
     )
-    expected_return_proxy = compute_expected_return_proxy(
-        returns=strategy_returns,
-        volume_history=signal_volumes[selected_assets] if signal_volumes is not None else None,
-        strategy=strategy,
-        bars_per_year=signal_bars_per_year,
-        current_date=current_date,
-        predictor_panel=prepared_predictor_panel,
-        selection_contexts=selection_contexts,
-        predictor_context=predictor_context,
-    )
     weights = fit_portfolio_model(
         strategy_returns,
         portfolio_model,
@@ -2827,7 +2817,7 @@ def compute_portfolio_allocation(
         max_weight=max_weight,
         previous_weights=selected_previous_weights,
         transaction_cost=transaction_cost,
-        expected_return_proxy=expected_return_proxy,
+        expected_return_proxy=None,
     ) * max_investment_ratio
     if portfolio_model.model_type != "mean_risk_utility":
         weights = apply_strategy_weight_tilt(
@@ -2940,15 +2930,6 @@ def compute_expected_return_proxy(
     return forecast.expected_return_proxy.reindex(returns.columns).to_numpy(dtype="float64")
 
 
-def shrink_expected_return_proxy(
-    expected_return_proxy: np.ndarray | None,
-    strength: float,
-) -> np.ndarray | None:
-    if expected_return_proxy is None:
-        return None
-    return np.asarray(expected_return_proxy, dtype="float64") * float(strength)
-
-
 def fit_portfolio_model(
     returns: pd.DataFrame,
     portfolio_model: PortfolioModelSpec,
@@ -3014,43 +2995,8 @@ def fit_portfolio_model(
                 weights = estimator.weights_
             except Exception:
                 weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif portfolio_model.model_type == "mean_risk_utility":
-        try:
-            estimator = MeanRisk(
-                objective_function=ObjectiveFunction.MAXIMIZE_UTILITY,
-                risk_aversion=3.0,
-                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                transaction_costs=transaction_cost,
-                previous_weights=previous_weights,
-                overwrite_expected_return=(
-                    None
-                    if expected_return_proxy is None
-                    else lambda w, proxy=expected_return_proxy: proxy @ w
-                ),
-            )
-            estimator.fit(returns)
-            weights = estimator.weights_
-        except Exception:
-            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif portfolio_model.model_type == "mean_risk_utility_conservative":
-        try:
-            conservative_proxy = shrink_expected_return_proxy(expected_return_proxy, 0.35)
-            estimator = MeanRisk(
-                objective_function=ObjectiveFunction.MAXIMIZE_UTILITY,
-                risk_aversion=8.0,
-                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                transaction_costs=transaction_cost,
-                previous_weights=previous_weights,
-                overwrite_expected_return=(
-                    None
-                    if conservative_proxy is None
-                    else lambda w, proxy=conservative_proxy: proxy @ w
-                ),
-            )
-            estimator.fit(returns)
-            weights = estimator.weights_
-        except Exception:
-            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+    elif portfolio_model.model_type in {"mean_risk_utility", "mean_risk_utility_conservative"}:
+        weights = build_equal_weight_fallback(asset_count, raw_max_weight)
     else:
         raise ValueError("Unsupported portfolio model.")
 

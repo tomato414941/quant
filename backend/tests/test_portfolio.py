@@ -44,6 +44,7 @@ from app.portfolio import (
     build_selection_spec,
     build_evaluator_strategy_spec,
     compare_portfolio_runs,
+    compute_portfolio_allocation,
     compute_predictor_panel,
     convert_window_spec_to_bars,
     compute_trade_cost,
@@ -92,6 +93,7 @@ from app.strategy_candidate_predictors import (
     PREDICTOR_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_full_universe import (
+    EXPERIMENTAL_FULL_UNIVERSE_CANDIDATE_DEFINITIONS,
     FULL_UNIVERSE_CANDIDATE_DEFINITIONS,
 )
 from app.strategy_candidate_timeframes import (
@@ -646,7 +648,6 @@ def test_full_universe_candidates_are_strategy_definitions() -> None:
         "stg-fu-momomac8515-top025-hrp-month",
         "stg-fu-momo12-soft025-hrp-month",
         "stg-fu-momo12-lin050-hrp-month",
-        "stg-fu-momolv8515-top025-hrp-month-costaware",
     }
     monthly_candidates = {
         definition.strategy_id: definition
@@ -654,12 +655,19 @@ def test_full_universe_candidates_are_strategy_definitions() -> None:
         if definition.strategy_id in monthly_keys
     }
     assert set(monthly_candidates) == monthly_keys
+    assert all(
+        definition.strategy_id != "stg-fu-momolv8515-top025-hrp-month-costaware"
+        for definition in FULL_UNIVERSE_CANDIDATE_DEFINITIONS
+    )
     for definition in monthly_candidates.values():
         assert definition.execution_plan.decision_schedule == "month_end"
         assert definition.execution_plan.rebalance_schedule == "month_end"
         assert definition.signals[0].source_kind == "selection_signal"
         assert definition.signals[0].data_timeframe.key == "1d"
-    cost_aware = monthly_candidates["stg-fu-momolv8515-top025-hrp-month-costaware"]
+
+    assert len(EXPERIMENTAL_FULL_UNIVERSE_CANDIDATE_DEFINITIONS) == 1
+    cost_aware = EXPERIMENTAL_FULL_UNIVERSE_CANDIDATE_DEFINITIONS[0]
+    assert cost_aware.strategy_id == "stg-fu-momolv8515-top025-hrp-month-costaware"
     assert dict(cost_aware.extensions)["decision_policy"] == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 
@@ -2277,6 +2285,56 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
     assert summary["edgeHitSampleCount"] == 2
     assert summary["edgeHitRate"] == 0.5
     assert summary["estimatedVsRealizedEdgeCorrelation"] == 1.0
+
+
+def test_mean_risk_utility_does_not_use_uncalibrated_signal_proxy_for_allocation() -> None:
+    returns = pd.DataFrame(
+        {
+            "AAA": [0.01, 0.02, 0.01, 0.03, 0.02, 0.01],
+            "BBB": [0.00, 0.01, 0.00, 0.01, 0.00, 0.01],
+            "CCC": [-0.01, -0.02, -0.01, -0.02, -0.01, -0.02],
+        },
+        index=pd.date_range("2025-01-01", periods=6, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        strategy_id="mean_risk_utility_proxy_guard_test",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(returns.columns),
+            key="mean_risk_utility_proxy_guard_universe",
+            label="Mean risk utility proxy guard universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "bars", "value": 3}},
+        ),
+        portfolio_model=build_portfolio_model_spec("mean_risk_utility"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    with patch("app.portfolio.compute_expected_return_proxy", side_effect=AssertionError("proxy used")):
+        selected_assets, weights = compute_portfolio_allocation(
+            history_returns=returns,
+            volume_history=None,
+            strategy=strategy,
+            portfolio_model=build_portfolio_model_spec("mean_risk_utility"),
+            bars_per_year=252.0,
+            universe_columns=returns.columns,
+            max_investment_ratio=1.0,
+            max_weight=None,
+            previous_weights=None,
+            transaction_cost=0.001,
+            current_date="2025-01-06",
+            predictor_panel=None,
+        )
+
+    assert selected_assets
+    assert np.isclose(weights.sum(), 1.0)
 
 
 def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost() -> None:

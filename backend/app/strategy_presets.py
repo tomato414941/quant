@@ -255,13 +255,13 @@ MEAN_RISK_UTILITY = build_portfolio_model_spec(
     model_type="mean_risk_utility",
     key="mean_risk_utility",
     label="MeanRisk効用最大化",
-    description="モメンタム順位から作った期待リターン proxy とリスクの両方で配分する",
+    description="校正済みforecastがない場合は等ウェイトfallbackで配分する",
 )
 MEAN_RISK_UTILITY_CONSERVATIVE = build_portfolio_model_spec(
     model_type="mean_risk_utility_conservative",
     key="mean_risk_utility_conservative",
     label="MeanRisk効用最大化 弱",
-    description="モメンタム順位の期待リターン proxy を弱めに使い、リスクをより強く見る",
+    description="校正済みforecastがない場合は保守的に等ウェイトfallbackで配分する",
 )
 
 DEFAULT_INVESTMENT_UNIVERSE = build_investment_universe_spec(

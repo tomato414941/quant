@@ -1353,6 +1353,22 @@ def summarize_execution_decision_summaries(summaries: list[dict]) -> dict:
             clean_summaries,
             "averageConfidence",
         ),
+        "estimatedEdgePctDistribution": merge_summary_distributions(
+            clean_summaries,
+            "estimatedEdgePctDistribution",
+        ),
+        "estimatedCostPctDistribution": merge_summary_distributions(
+            clean_summaries,
+            "estimatedCostPctDistribution",
+        ),
+        "estimatedEdgeAfterCostPctDistribution": merge_summary_distributions(
+            clean_summaries,
+            "estimatedEdgeAfterCostPctDistribution",
+        ),
+        "confidenceDistribution": merge_summary_distributions(
+            clean_summaries,
+            "confidenceDistribution",
+        ),
     }
 
 
@@ -1377,6 +1393,44 @@ def weighted_average_summary_metric(summaries: list[dict], key: str) -> float | 
     if total_weight == 0:
         return None
     return round(weighted_total / total_weight, 6)
+
+
+def empty_summary_distribution() -> dict:
+    return {
+        "count": 0,
+        "minimum": None,
+        "median": None,
+        "maximum": None,
+    }
+
+
+def merge_summary_distributions(summaries: list[dict], key: str) -> dict:
+    distributions = [
+        summary.get(key)
+        for summary in summaries
+        if summary.get(key) and int(summary.get(key, {}).get("count", 0)) > 0
+    ]
+    if not distributions:
+        return empty_summary_distribution()
+
+    total_count = sum(int(distribution["count"]) for distribution in distributions)
+    weighted_median_total = sum(
+        float(distribution["median"]) * int(distribution["count"])
+        for distribution in distributions
+        if distribution.get("median") is not None
+    )
+    median_weight = sum(
+        int(distribution["count"])
+        for distribution in distributions
+        if distribution.get("median") is not None
+    )
+    return {
+        "count": total_count,
+        "minimum": round(min(float(distribution["minimum"]) for distribution in distributions), 6),
+        "median": None if median_weight == 0 else round(weighted_median_total / median_weight, 6),
+        "maximum": round(max(float(distribution["maximum"]) for distribution in distributions), 6),
+    }
+
 
 def sort_walk_forward_results(results: list[dict]) -> list[dict]:
     return sorted(

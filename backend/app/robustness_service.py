@@ -638,6 +638,34 @@ def project_execution_decision_summary(summary: dict) -> dict:
         "averageEstimatedCostPct": optional_float(summary.get("averageEstimatedCostPct")),
         "averageEstimatedEdgePct": optional_float(summary.get("averageEstimatedEdgePct")),
         "averageConfidence": optional_float(summary.get("averageConfidence")),
+        "estimatedEdgePctDistribution": project_number_distribution(
+            summary.get("estimatedEdgePctDistribution")
+        ),
+        "estimatedCostPctDistribution": project_number_distribution(
+            summary.get("estimatedCostPctDistribution")
+        ),
+        "estimatedEdgeAfterCostPctDistribution": project_number_distribution(
+            summary.get("estimatedEdgeAfterCostPctDistribution")
+        ),
+        "confidenceDistribution": project_number_distribution(
+            summary.get("confidenceDistribution")
+        ),
+    }
+
+
+def project_number_distribution(distribution: object) -> dict:
+    if not isinstance(distribution, dict):
+        return {
+            "count": 0,
+            "minimum": None,
+            "median": None,
+            "maximum": None,
+        }
+    return {
+        "count": int(distribution.get("count", 0)),
+        "minimum": optional_float(distribution.get("minimum")),
+        "median": optional_float(distribution.get("median")),
+        "maximum": optional_float(distribution.get("maximum")),
     }
 
 

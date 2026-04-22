@@ -65,6 +65,7 @@ from app.portfolio import (
     serialize_strategy_definition,
     serialize_evaluator_strategy_spec,
     serialize_strategy_signal_spec,
+    summarize_portfolio_decision_events,
     select_assets,
     should_rebalance,
 )
@@ -2189,6 +2190,63 @@ def test_build_strategy_forecast_snapshot_wraps_ranking_score() -> None:
     assert forecast.expected_return_proxy is not None
     assert forecast.percentile_rank["AAA"] > forecast.percentile_rank["CCC"]
     assert forecast.confidence["AAA"] == 1.0
+
+
+def test_summarize_portfolio_decision_events_reports_decision_distributions() -> None:
+    summary = summarize_portfolio_decision_events([
+        {
+            "policy": "cost_aware_no_trade",
+            "action": "no_trade",
+            "reason": "edge_below_cost",
+            "turnoverPct": 10.0,
+            "estimatedCostPct": 0.2,
+            "estimatedEdgePct": 0.1,
+            "averageConfidence": 0.5,
+        },
+        {
+            "policy": "cost_aware_no_trade",
+            "action": "rebalance",
+            "reason": "edge_after_cost",
+            "turnoverPct": 20.0,
+            "estimatedCostPct": 0.3,
+            "estimatedEdgePct": 0.7,
+            "averageConfidence": 0.9,
+        },
+        {
+            "policy": "direct_score_to_weight",
+            "action": "rebalance",
+            "reason": "direct_policy",
+            "turnoverPct": 30.0,
+            "estimatedCostPct": 0.1,
+            "estimatedEdgePct": None,
+            "averageConfidence": None,
+        },
+    ])
+
+    assert summary["estimatedEdgePctDistribution"] == {
+        "count": 2,
+        "minimum": 0.1,
+        "median": 0.4,
+        "maximum": 0.7,
+    }
+    assert summary["estimatedCostPctDistribution"] == {
+        "count": 3,
+        "minimum": 0.1,
+        "median": 0.2,
+        "maximum": 0.3,
+    }
+    assert summary["estimatedEdgeAfterCostPctDistribution"] == {
+        "count": 2,
+        "minimum": -0.1,
+        "median": 0.15,
+        "maximum": 0.4,
+    }
+    assert summary["confidenceDistribution"] == {
+        "count": 2,
+        "minimum": 0.5,
+        "median": 0.7,
+        "maximum": 0.9,
+    }
 
 
 def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost() -> None:

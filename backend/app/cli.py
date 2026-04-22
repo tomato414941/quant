@@ -306,6 +306,32 @@ def format_optional_percent(value: object) -> str:
     return format_percent(float(value))
 
 
+def format_optional_decimal(value: object) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.3f}"
+
+
+def format_percent_distribution(distribution: dict | None) -> str:
+    if not distribution or int(distribution.get("count", 0)) <= 0:
+        return "n/a"
+    return (
+        f"min {format_optional_percent(distribution.get('minimum'))} / "
+        f"med {format_optional_percent(distribution.get('median'))} / "
+        f"max {format_optional_percent(distribution.get('maximum'))}"
+    )
+
+
+def format_decimal_distribution(distribution: dict | None) -> str:
+    if not distribution or int(distribution.get("count", 0)) <= 0:
+        return "n/a"
+    return (
+        f"min {format_optional_decimal(distribution.get('minimum'))} / "
+        f"med {format_optional_decimal(distribution.get('median'))} / "
+        f"max {format_optional_decimal(distribution.get('maximum'))}"
+    )
+
+
 def format_count_map(counts: dict, *, limit: int = 3) -> str:
     if not counts:
         return "none"
@@ -824,6 +850,20 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
             lines.append(
                 "   "
                 f"Exec reasons {format_count_map(execution_decisions.get('reasonCounts') or {})}"
+            )
+            lines.append(
+                "   "
+                "Exec edge "
+                f"{format_percent_distribution(execution_decisions.get('estimatedEdgePctDistribution'))} | "
+                "cost "
+                f"{format_percent_distribution(execution_decisions.get('estimatedCostPctDistribution'))} | "
+                "edge-cost "
+                f"{format_percent_distribution(execution_decisions.get('estimatedEdgeAfterCostPctDistribution'))}"
+            )
+            lines.append(
+                "   "
+                "Exec confidence "
+                f"{format_decimal_distribution(execution_decisions.get('confidenceDistribution'))}"
             )
         delta = result.get("deltaVsBaseline")
         if delta:

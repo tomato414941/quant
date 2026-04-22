@@ -407,6 +407,30 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
                     "averageEstimatedCostPct": 0.2,
                     "averageEstimatedEdgePct": 0.5,
                     "averageConfidence": 0.7,
+                    "estimatedEdgePctDistribution": {
+                        "count": 2,
+                        "minimum": 0.1,
+                        "median": 0.5,
+                        "maximum": 0.9,
+                    },
+                    "estimatedCostPctDistribution": {
+                        "count": 2,
+                        "minimum": 0.2,
+                        "median": 0.3,
+                        "maximum": 0.4,
+                    },
+                    "estimatedEdgeAfterCostPctDistribution": {
+                        "count": 2,
+                        "minimum": -0.1,
+                        "median": 0.2,
+                        "maximum": 0.5,
+                    },
+                    "confidenceDistribution": {
+                        "count": 2,
+                        "minimum": 0.6,
+                        "median": 0.7,
+                        "maximum": 0.8,
+                    },
                 },
                 "testAvailability": {},
                 "trainAvailability": {},
@@ -422,6 +446,30 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
             "averageEstimatedCostPct": 0.2,
             "averageEstimatedEdgePct": 0.5,
             "averageConfidence": 0.7,
+            "estimatedEdgePctDistribution": {
+                "count": 2,
+                "minimum": 0.1,
+                "median": 0.5,
+                "maximum": 0.9,
+            },
+            "estimatedCostPctDistribution": {
+                "count": 2,
+                "minimum": 0.2,
+                "median": 0.3,
+                "maximum": 0.4,
+            },
+            "estimatedEdgeAfterCostPctDistribution": {
+                "count": 2,
+                "minimum": -0.1,
+                "median": 0.2,
+                "maximum": 0.5,
+            },
+            "confidenceDistribution": {
+                "count": 2,
+                "minimum": 0.6,
+                "median": 0.7,
+                "maximum": 0.8,
+            },
         },
     }
 
@@ -436,8 +484,10 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
     assert projected["exposureSummary"]["averageCashWeightPct"] == 25.0
     assert projected["executionDecisionSummary"]["noTradeCount"] == 1
     assert projected["executionDecisionSummary"]["reasonCounts"]["edge_below_cost"] == 1
+    assert projected["executionDecisionSummary"]["estimatedEdgeAfterCostPctDistribution"]["median"] == 0.2
     assert projected["windows"][0]["weights"][0] == {"asset": "SPY", "weightPct": 30.0}
     assert projected["windows"][0]["executionDecisionSummary"]["decisionCount"] == 2
+    assert projected["windows"][0]["executionDecisionSummary"]["confidenceDistribution"]["count"] == 2
 
 
 def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
@@ -474,6 +524,30 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                     "averageEstimatedCostPct": 0.2,
                     "averageEstimatedEdgePct": 0.6,
                     "averageConfidence": 0.8,
+                    "estimatedEdgePctDistribution": {
+                        "count": 2,
+                        "minimum": 0.1,
+                        "median": 0.5,
+                        "maximum": 0.9,
+                    },
+                    "estimatedCostPctDistribution": {
+                        "count": 2,
+                        "minimum": 0.2,
+                        "median": 0.3,
+                        "maximum": 0.4,
+                    },
+                    "estimatedEdgeAfterCostPctDistribution": {
+                        "count": 2,
+                        "minimum": -0.1,
+                        "median": 0.2,
+                        "maximum": 0.5,
+                    },
+                    "confidenceDistribution": {
+                        "count": 2,
+                        "minimum": 0.7,
+                        "median": 0.8,
+                        "maximum": 0.9,
+                    },
                 },
                 "windows": [
                     {
@@ -515,6 +589,30 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                     "averageEstimatedCostPct": 0.1,
                     "averageEstimatedEdgePct": 0.3,
                     "averageConfidence": 0.5,
+                    "estimatedEdgePctDistribution": {
+                        "count": 1,
+                        "minimum": 0.3,
+                        "median": 0.3,
+                        "maximum": 0.3,
+                    },
+                    "estimatedCostPctDistribution": {
+                        "count": 1,
+                        "minimum": 0.1,
+                        "median": 0.1,
+                        "maximum": 0.1,
+                    },
+                    "estimatedEdgeAfterCostPctDistribution": {
+                        "count": 1,
+                        "minimum": 0.2,
+                        "median": 0.2,
+                        "maximum": 0.2,
+                    },
+                    "confidenceDistribution": {
+                        "count": 1,
+                        "minimum": 0.5,
+                        "median": 0.5,
+                        "maximum": 0.5,
+                    },
                 },
                 "windows": [
                     {
@@ -537,6 +635,18 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
     assert execution_summary["noTradeCount"] == 2
     assert execution_summary["reasonCounts"] == {"edge_below_cost": 2, "edge_after_cost": 1}
     assert execution_summary["averageEstimatedEdgePct"] == 0.5
+    assert execution_summary["estimatedEdgePctDistribution"] == {
+        "count": 3,
+        "minimum": 0.1,
+        "median": 0.433333,
+        "maximum": 0.9,
+    }
+    assert execution_summary["estimatedEdgeAfterCostPctDistribution"] == {
+        "count": 3,
+        "minimum": -0.1,
+        "median": 0.2,
+        "maximum": 0.5,
+    }
 
 
 def test_attach_delta_vs_baseline_reports_zero_for_baseline() -> None:

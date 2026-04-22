@@ -1281,6 +1281,42 @@ def serialize_portfolio_decision_event(date: str, decision: PortfolioDecision) -
     }
 
 
+def empty_number_distribution() -> dict[str, object]:
+    return {
+        "count": 0,
+        "minimum": None,
+        "median": None,
+        "maximum": None,
+    }
+
+
+def summarize_optional_number_distribution(values: list[object]) -> dict[str, object]:
+    numeric_values = [
+        float(value)
+        for value in values
+        if value is not None and math.isfinite(float(value))
+    ]
+    if not numeric_values:
+        return empty_number_distribution()
+    return {
+        "count": len(numeric_values),
+        "minimum": round(min(numeric_values), 4),
+        "median": round(float(statistics.median(numeric_values)), 4),
+        "maximum": round(max(numeric_values), 4),
+    }
+
+
+def compute_decision_event_edge_after_cost_values(events: list[dict]) -> list[float]:
+    spreads = []
+    for event in events:
+        edge = event.get("estimatedEdgePct")
+        cost = event.get("estimatedCostPct")
+        if edge is None or cost is None:
+            continue
+        spreads.append(float(edge) - float(cost))
+    return spreads
+
+
 def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]:
     if not events:
         return {
@@ -1293,6 +1329,10 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
             "averageEstimatedCostPct": None,
             "averageEstimatedEdgePct": None,
             "averageConfidence": None,
+            "estimatedEdgePctDistribution": empty_number_distribution(),
+            "estimatedCostPctDistribution": empty_number_distribution(),
+            "estimatedEdgeAfterCostPctDistribution": empty_number_distribution(),
+            "confidenceDistribution": empty_number_distribution(),
         }
 
     policy_counts: dict[str, int] = {}
@@ -1305,6 +1345,8 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
 
     edge_values = [float(event["estimatedEdgePct"]) for event in events if event["estimatedEdgePct"] is not None]
     confidence_values = [float(event["averageConfidence"]) for event in events if event["averageConfidence"] is not None]
+    cost_values = [event.get("estimatedCostPct") for event in events]
+    spread_values = compute_decision_event_edge_after_cost_values(events)
     return {
         "decisionCount": len(events),
         "rebalanceCount": sum(1 for event in events if event["action"] == "rebalance"),
@@ -1315,6 +1357,10 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
         "averageEstimatedCostPct": round(float(np.mean([event["estimatedCostPct"] for event in events])), 4),
         "averageEstimatedEdgePct": None if not edge_values else round(float(np.mean(edge_values)), 4),
         "averageConfidence": None if not confidence_values else round(float(np.mean(confidence_values)), 4),
+        "estimatedEdgePctDistribution": summarize_optional_number_distribution(edge_values),
+        "estimatedCostPctDistribution": summarize_optional_number_distribution(cost_values),
+        "estimatedEdgeAfterCostPctDistribution": summarize_optional_number_distribution(spread_values),
+        "confidenceDistribution": summarize_optional_number_distribution(confidence_values),
     }
 
 def summarize_availability_series(series: list[dict]) -> dict[str, object]:

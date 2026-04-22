@@ -6,6 +6,7 @@ import statistics
 import numpy as np
 import pandas as pd
 from skfolio.optimization import HierarchicalRiskParity, MeanRisk, ObjectiveFunction, RiskBudgeting
+from app.instrument_registry import get_instrument
 from app.portfolio_domain import *
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
 
@@ -1018,6 +1019,15 @@ def compute_dynamic_portfolio_allocation(
     availability_policy: dict[str, object],
 ) -> tuple[list[str], np.ndarray]:
     eligible_assets = resolve_eligible_assets(history_returns, availability_policy)
+    if len(eligible_assets) == 1:
+        weights = np.zeros(len(universe_columns), dtype="float64")
+        asset = eligible_assets[0]
+        asset_index = list(universe_columns).index(asset)
+        asset_weight = max_investment_ratio
+        if max_weight is not None:
+            asset_weight = min(asset_weight, max_weight)
+        weights[asset_index] = asset_weight
+        return [asset], weights
     if len(eligible_assets) < 2:
         return [], np.zeros(len(universe_columns), dtype="float64")
     clean_history_returns = prepare_history_returns_for_assets(history_returns, eligible_assets)
@@ -1126,8 +1136,8 @@ def compare_portfolio_runs(
             for asset in strategy.investment_universe.tickers
             if asset in closes.columns
         ]
-        if len(strategy_universe) < 2:
-            raise ValueError("Strategy investment universe must contain at least two available assets.")
+        if len(strategy_universe) < 1:
+            raise ValueError("Strategy investment universe must contain at least one available asset.")
 
         strategy_closes = closes[strategy_universe]
         strategy_volumes = volumes[strategy_universe] if volumes is not None else None
@@ -1448,7 +1458,127 @@ def select_assets(
         if selected.empty:
             return [str(volume_score.idxmax())]
         return list(selected.index)
+    if base_selection.strategy_type == "positive_trend_short_reversal":
+        return select_positive_trend_short_reversal_assets(
+            returns,
+            base_selection,
+            bars_per_year=bars_per_year,
+        )
+    if base_selection.strategy_type == "risk_regime_positive_momentum":
+        return select_risk_regime_positive_momentum_assets(
+            returns,
+            trailing_total_returns,
+            base_selection,
+            bars_per_year=bars_per_year,
+        )
     raise ValueError("Unsupported portfolio strategy.")
+
+
+def select_positive_trend_short_reversal_assets(
+    returns: pd.DataFrame,
+    selection: RankingSourceSpec,
+    *,
+    bars_per_year: float,
+) -> list[str]:
+    score_parameters = dict(selection.ranking_signal.score_parameters)
+    trend_window_bars = get_score_parameter_window_bars(
+        selection,
+        "trendWindowSpec",
+        bars_per_year=bars_per_year,
+        default_window_spec={"unit": "days", "value": 60},
+    )
+    reversal_window_bars = get_score_parameter_window_bars(
+        selection,
+        "reversalWindowSpec",
+        bars_per_year=bars_per_year,
+        default_window_spec={"unit": "days", "value": 5},
+    )
+    asset_count = max(1, int(float(score_parameters.get("assetCount", 5))))
+    trend_returns = compute_window_total_returns(returns, trend_window_bars)
+    reversal_returns = compute_window_total_returns(returns, reversal_window_bars)
+    positive_trend_assets = trend_returns[trend_returns > 0].index
+    if len(positive_trend_assets) == 0:
+        return []
+    candidates = reversal_returns.reindex(positive_trend_assets).replace([np.inf, -np.inf], np.nan).dropna()
+    if candidates.empty:
+        return []
+    selected = candidates.sort_values(ascending=True).head(min(asset_count, len(candidates)))
+    return [str(asset) for asset in selected.index]
+
+
+def select_risk_regime_positive_momentum_assets(
+    returns: pd.DataFrame,
+    trailing_total_returns: pd.Series,
+    selection: RankingSourceSpec,
+    *,
+    bars_per_year: float,
+) -> list[str]:
+    score_parameters = dict(selection.ranking_signal.score_parameters)
+    eligible_returns = trailing_total_returns
+    risk_proxy_assets = parse_score_parameter_strings(
+        score_parameters.get("riskProxyAssets"),
+        default=("SPY", "QQQ"),
+    )
+    risk_proxy_columns = [asset for asset in risk_proxy_assets if asset in returns.columns]
+    if risk_proxy_columns:
+        risk_window_bars = get_score_parameter_window_bars(
+            selection,
+            "riskWindowSpec",
+            bars_per_year=bars_per_year,
+            default_window_spec={"unit": "days", "value": 60},
+        )
+        risk_proxy_returns = compute_window_total_returns(returns[risk_proxy_columns], risk_window_bars)
+        risk_proxy_return = float(risk_proxy_returns.mean())
+        if risk_proxy_return < 0:
+            defensive_asset_classes = set(
+                parse_score_parameter_strings(
+                    score_parameters.get("defensiveAssetClasses"),
+                    default=("bond_etf", "commodity_etf", "currency_etf"),
+                )
+            )
+            defensive_assets = [
+                str(asset)
+                for asset in returns.columns
+                if (instrument := get_instrument(str(asset))) is not None
+                and instrument.asset_class in defensive_asset_classes
+            ]
+            eligible_returns = trailing_total_returns.reindex(defensive_assets).dropna()
+
+    positive_returns = eligible_returns[eligible_returns > 0]
+    if positive_returns.empty:
+        return []
+    return [str(asset) for asset in positive_returns.sort_values(ascending=False).index]
+
+
+def parse_score_parameter_strings(value: object, *, default: tuple[str, ...]) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        parsed = tuple(str(item) for item in value if str(item))
+        return parsed or default
+    return default
+
+
+def get_score_parameter_window_bars(
+    selection: RankingSourceSpec,
+    parameter_key: str,
+    *,
+    bars_per_year: float,
+    default_window_spec: dict[str, object],
+) -> int:
+    score_parameters = dict(selection.ranking_signal.score_parameters)
+    window_spec = score_parameters.get(parameter_key, default_window_spec)
+    if not isinstance(window_spec, dict):
+        window_spec = default_window_spec
+    return convert_window_spec_to_bars(window_spec, bars_per_year=bars_per_year)
+
+
+def compute_window_total_returns(returns: pd.DataFrame, window_bars: int) -> pd.Series:
+    lookback = min(len(returns), max(1, int(window_bars)))
+    window_returns = returns.iloc[-lookback:]
+    return (1 + window_returns).prod() - 1
 
 
 def compute_strategy_score_series_base(

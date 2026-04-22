@@ -43,6 +43,8 @@ DIRECT_EXECUTION_MULTI_SELECTION_STRATEGY_TYPES = {
     "positive_momentum_universe",
     "positive_momentum_low_vol_universe",
     "positive_momentum_high_volume_universe",
+    "positive_trend_short_reversal",
+    "risk_regime_positive_momentum",
 }
 PREDICTION_FEATURE_NAMES = ("score", "momentum", "lowVolRank", "macroRank", "volumeStrength")
 SUPPORTED_PORTFOLIO_STRATEGIES = {
@@ -56,6 +58,8 @@ SUPPORTED_PORTFOLIO_STRATEGIES = {
     "positive_momentum_universe",
     "positive_momentum_low_vol_universe",
     "positive_momentum_high_volume_universe",
+    "positive_trend_short_reversal",
+    "risk_regime_positive_momentum",
 }
 PORTFOLIO_STRATEGY_LABELS = {
     "full_universe": "全資産",
@@ -68,6 +72,8 @@ PORTFOLIO_STRATEGY_LABELS = {
     "positive_momentum_universe": "上昇資産",
     "positive_momentum_low_vol_universe": "上昇低ボラ資産",
     "positive_momentum_high_volume_universe": "上昇出来高資産",
+    "positive_trend_short_reversal": "上昇トレンド短期リバーサル",
+    "risk_regime_positive_momentum": "リスク局面別上昇資産",
 }
 
 UNIVERSE_POLICY_LABELS = {
@@ -481,8 +487,8 @@ def build_investment_universe_spec(
     label: str,
 ) -> InvestmentUniverseSpec:
     normalized_tickers = tuple(dict.fromkeys(ticker.strip().upper() for ticker in tickers if ticker.strip()))
-    if len(normalized_tickers) < 2:
-        raise ValueError("Investment universe must contain at least two tickers.")
+    if len(normalized_tickers) < 1:
+        raise ValueError("Investment universe must contain at least one ticker.")
     return InvestmentUniverseSpec(
         key=key,
         label=label,
@@ -533,6 +539,8 @@ def build_selection_spec(
         "positive_momentum_universe": "上昇しているETFだけを候補にする",
         "positive_momentum_low_vol_universe": "上昇しているETFのうち低ボラ群だけを候補にする",
         "positive_momentum_high_volume_universe": "上昇しているETFのうち出来高が強い群だけを候補にする",
+        "positive_trend_short_reversal": "長期上昇中で直近短期に売られたETFを候補にする",
+        "risk_regime_positive_momentum": "リスク資産が弱い局面では防御資産へ絞り、それ以外は上昇ETFを候補にする",
     }
     feature_inputs = {
         "full_universe": ("close",),
@@ -545,6 +553,8 @@ def build_selection_spec(
         "positive_momentum_universe": ("close",),
         "positive_momentum_low_vol_universe": ("close",),
         "positive_momentum_high_volume_universe": ("close", "volume"),
+        "positive_trend_short_reversal": ("close",),
+        "risk_regime_positive_momentum": ("close",),
     }
     universe_policies = {
         "full_universe": UniversePolicySpec("all_assets", UNIVERSE_POLICY_LABELS["all_assets"]),
@@ -581,6 +591,14 @@ def build_selection_spec(
             "positive_assets_only",
             UNIVERSE_POLICY_LABELS["positive_assets_only"],
         ),
+        "positive_trend_short_reversal": UniversePolicySpec(
+            "positive_assets_only",
+            UNIVERSE_POLICY_LABELS["positive_assets_only"],
+        ),
+        "risk_regime_positive_momentum": UniversePolicySpec(
+            "positive_assets_only",
+            UNIVERSE_POLICY_LABELS["positive_assets_only"],
+        ),
     }
     score_models = {
         "full_universe": RankingModelSpec("none", SCORE_MODEL_LABELS["none"]),
@@ -607,6 +625,14 @@ def build_selection_spec(
         "positive_momentum_high_volume_universe": RankingModelSpec(
             "volume_strength",
             SCORE_MODEL_LABELS["volume_strength"],
+        ),
+        "positive_trend_short_reversal": RankingModelSpec(
+            "trailing_momentum",
+            SCORE_MODEL_LABELS["trailing_momentum"],
+        ),
+        "risk_regime_positive_momentum": RankingModelSpec(
+            "trailing_momentum",
+            SCORE_MODEL_LABELS["trailing_momentum"],
         ),
     }
     default_score_parameters = {
@@ -635,6 +661,17 @@ def build_selection_spec(
         "positive_momentum_universe": {"windowSpec": {"unit": "bars", "value": 252}},
         "positive_momentum_low_vol_universe": {"windowSpec": {"unit": "bars", "value": 252}},
         "positive_momentum_high_volume_universe": {"windowSpec": {"unit": "bars", "value": 252}},
+        "positive_trend_short_reversal": {
+            "trendWindowSpec": {"unit": "days", "value": 60},
+            "reversalWindowSpec": {"unit": "days", "value": 5},
+            "assetCount": 5,
+        },
+        "risk_regime_positive_momentum": {
+            "windowSpec": {"unit": "bars", "value": 252},
+            "riskWindowSpec": {"unit": "days", "value": 60},
+            "riskProxyAssets": ("SPY", "QQQ"),
+            "defensiveAssetClasses": ("bond_etf", "commodity_etf", "currency_etf"),
+        },
     }
     filter_rules = {
         "full_universe": (),
@@ -663,6 +700,12 @@ def build_selection_spec(
             FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
             FilterRuleSpec("high_volume_half", FILTER_RULE_LABELS["high_volume_half"]),
         ),
+        "positive_trend_short_reversal": (
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
+        ),
+        "risk_regime_positive_momentum": (
+            FilterRuleSpec("positive_return", FILTER_RULE_LABELS["positive_return"]),
+        ),
     }
     fallback_rules = {
         "full_universe": FallbackRuleSpec("none", FALLBACK_RULE_LABELS["none"]),
@@ -681,6 +724,8 @@ def build_selection_spec(
             "cash_on_empty",
             FALLBACK_RULE_LABELS["cash_on_empty"],
         ),
+        "positive_trend_short_reversal": FallbackRuleSpec("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
+        "risk_regime_positive_momentum": FallbackRuleSpec("cash_on_empty", FALLBACK_RULE_LABELS["cash_on_empty"]),
     }
 
     normalized_score_parameters = dict(default_score_parameters[strategy_type])

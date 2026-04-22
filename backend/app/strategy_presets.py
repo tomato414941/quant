@@ -179,6 +179,12 @@ DUAL_MOMENTUM_TOP3 = build_selection_spec(
     label="デュアルモメンタム上位3",
     description="上昇しているETFだけからモメンタム上位3を選び、弱い相場ではCASHへ逃がす",
 )
+POSITIVE_MOMENTUM_UNIVERSE = build_selection_spec(
+    strategy_type="positive_momentum_universe",
+    key="positive_momentum_universe",
+    label="上昇資産",
+    description="上昇しているETFだけを候補にして配分する",
+)
 POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE = build_selection_spec(
     strategy_type="positive_momentum_low_vol_universe",
     key="positive_momentum_low_vol_universe",
@@ -196,6 +202,29 @@ POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE = build_selection_spec(
     key="positive_momentum_high_volume_universe",
     label="上昇出来高資産",
     description="上昇しているETFのうち、出来高が強い群だけを候補にして配分する",
+)
+POSITIVE_TREND_SHORT_REVERSAL = build_selection_spec(
+    strategy_type="positive_trend_short_reversal",
+    key="positive_trend_short_reversal",
+    label="上昇トレンド短期リバーサル",
+    description="長期上昇中で直近短期に売られたETFだけを候補にして配分する",
+    score_parameters={
+        "trendWindowSpec": window_spec(unit="days", value=60),
+        "reversalWindowSpec": window_spec(unit="days", value=5),
+        "assetCount": 5,
+    },
+)
+RISK_REGIME_POSITIVE_MOMENTUM = build_selection_spec(
+    strategy_type="risk_regime_positive_momentum",
+    key="risk_regime_positive_momentum",
+    label="リスク局面別上昇資産",
+    description="株式リスクproxyが弱い局面では防御資産へ絞り、それ以外は上昇しているETFだけを候補にする",
+    score_parameters={
+        "windowSpec": window_spec(unit="bars", value=252),
+        "riskWindowSpec": window_spec(unit="days", value=60),
+        "riskProxyAssets": ("SPY", "QQQ"),
+        "defensiveAssetClasses": ("bond_etf", "commodity_etf", "currency_etf"),
+    },
 )
 
 EQUAL_WEIGHT = build_portfolio_model_spec(
@@ -290,7 +319,10 @@ __all__ = [
     "MOMENTUM_TOP3",
     "POSITIVE_MOMENTUM_HIGH_VOLUME_UNIVERSE",
     "POSITIVE_MOMENTUM_LOW_VOL_UNIVERSE",
+    "POSITIVE_MOMENTUM_UNIVERSE",
+    "POSITIVE_TREND_SHORT_REVERSAL",
     "REFERENCE_HOLD_EXECUTION_POLICY",
+    "RISK_REGIME_POSITIVE_MOMENTUM",
     "RISK_BUDGETING",
     "TRAILING_MOMENTUM_LOW_VOL_UNIVERSE",
     "window_spec",

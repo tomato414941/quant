@@ -1945,6 +1945,10 @@ def test_predictor_definition_product_builder_generates_cross_product() -> None:
 def test_filtered_candidates_are_strategy_definitions() -> None:
     assert len({definition.strategy_id for definition in FILTERED_CANDIDATE_DEFINITIONS}) == len(FILTERED_CANDIDATE_DEFINITIONS)
     assert all(definition.signals[0].source_kind == "selection_signal" for definition in FILTERED_CANDIDATE_DEFINITIONS)
+    strategy_by_id = {definition.strategy_id: definition for definition in FILTERED_CANDIDATE_DEFINITIONS}
+    assert strategy_by_id["stg-posmom-hrp-month"].execution_plan.decision_schedule == "month_end"
+    assert strategy_by_id["stg-posrev5-trend60-hrp-month"].execution_plan.decision_schedule == "month_end"
+    assert strategy_by_id["stg-riskoff-posmom-hrp-month"].execution_plan.decision_schedule == "month_end"
 
 
 def test_universe_variant_candidates_are_strategy_definitions() -> None:
@@ -2461,6 +2465,146 @@ def test_compare_portfolio_runs_respects_max_weight_cap() -> None:
 
     assert max(asset_weights) == 20.0
     assert cash_rows[0]["weightPct"] == 20.0
+
+
+def test_compare_portfolio_runs_supports_single_asset_benchmark_with_cash_reserve() -> None:
+    closes = pd.DataFrame(
+        {"SPY": [100, 101, 102, 103, 104, 105, 106]},
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        strategy_id="spy_cash_benchmark",
+        investment_universe=build_investment_universe_spec(
+            tickers=["SPY"],
+            key="spy_only",
+            label="SPY only",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=0.85),
+    )
+
+    payload = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=10_000,
+        split_ratio=0.6,
+        execution_assumptions=make_execution_assumptions(),
+        transaction_cost=0.001,
+        portfolio_state=build_portfolio_state(current_weights={}, cash_weight=1.0),
+    )
+
+    assert payload[0]["selectedAssets"] == ["SPY"]
+    assert payload[0]["weights"] == [
+        {"asset": "SPY", "weightPct": 85.0},
+        {"asset": "CASH", "weightPct": 15.0},
+    ]
+
+
+def test_positive_momentum_universe_selects_only_positive_assets() -> None:
+    returns = pd.DataFrame(
+        {
+            "SPY": [0.01, 0.01, 0.01],
+            "QQQ": [0.02, 0.02, 0.02],
+            "TLT": [-0.01, -0.01, -0.01],
+        }
+    )
+    selection = build_selection_spec(
+        "positive_momentum_universe",
+        score_parameters={"windowSpec": {"unit": "bars", "value": 3}},
+    )
+
+    selected_assets = select_assets(
+        returns,
+        None,
+        selection,
+        bars_per_year=252,
+    )
+
+    assert selected_assets == ["QQQ", "SPY"]
+
+
+def test_positive_momentum_universe_can_fall_back_to_cash() -> None:
+    returns = pd.DataFrame(
+        {
+            "SPY": [-0.01, -0.01, -0.01],
+            "QQQ": [-0.02, -0.02, -0.02],
+            "TLT": [-0.005, -0.005, -0.005],
+        }
+    )
+    selection = build_selection_spec(
+        "positive_momentum_universe",
+        score_parameters={"windowSpec": {"unit": "bars", "value": 3}},
+    )
+
+    selected_assets = select_assets(
+        returns,
+        None,
+        selection,
+        bars_per_year=252,
+    )
+
+    assert selected_assets == []
+
+
+def test_positive_trend_short_reversal_prefers_pullbacks_in_positive_trends() -> None:
+    returns = pd.DataFrame(
+        {
+            "SPY": [0.02, 0.02, 0.02, 0.02, -0.02, -0.02],
+            "QQQ": [0.01, 0.01, 0.01, 0.01, -0.01, -0.01],
+            "TLT": [0.005, 0.005, 0.005, 0.005, 0.005, 0.005],
+            "GLD": [-0.01, -0.01, -0.01, -0.01, -0.01, -0.01],
+        }
+    )
+    selection = build_selection_spec(
+        "positive_trend_short_reversal",
+        score_parameters={
+            "trendWindowSpec": {"unit": "bars", "value": 6},
+            "reversalWindowSpec": {"unit": "bars", "value": 2},
+            "assetCount": 2,
+        },
+    )
+
+    selected_assets = select_assets(
+        returns,
+        None,
+        selection,
+        bars_per_year=252,
+    )
+
+    assert selected_assets == ["SPY", "QQQ"]
+
+
+def test_risk_regime_positive_momentum_limits_to_defensive_assets_when_risk_proxy_is_negative() -> None:
+    returns = pd.DataFrame(
+        {
+            "SPY": [0.01, 0.01, -0.03, -0.03, -0.03],
+            "QQQ": [0.01, 0.01, -0.04, -0.04, -0.04],
+            "TLT": [0.01, 0.01, 0.01, 0.01, 0.01],
+            "GLD": [0.005, 0.005, 0.005, 0.005, 0.005],
+            "UUP": [0.003, 0.003, 0.003, 0.003, 0.003],
+            "BTC-USD": [0.04, 0.04, 0.04, 0.04, 0.04],
+        }
+    )
+    selection = build_selection_spec(
+        "risk_regime_positive_momentum",
+        score_parameters={
+            "windowSpec": {"unit": "bars", "value": 5},
+            "riskWindowSpec": {"unit": "bars", "value": 3},
+            "riskProxyAssets": ("SPY", "QQQ"),
+            "defensiveAssetClasses": ("bond_etf", "commodity_etf", "currency_etf"),
+        },
+    )
+
+    selected_assets = select_assets(
+        returns,
+        None,
+        selection,
+        bars_per_year=252,
+    )
+
+    assert selected_assets == ["TLT", "GLD", "UUP"]
 
 
 def test_trailing_momentum_low_vol_strategy_prefers_recent_winners() -> None:

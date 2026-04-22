@@ -238,6 +238,70 @@ def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, cap
     assert "testAvailability" in payload["candidateResults"][0]["windows"][0]
 
 
+def test_benchmark_decomposition_command_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_multiyear(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main([
+        "benchmark-decomposition",
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    benchmarks_by_key = {benchmark["strategyKey"]: benchmark for benchmark in payload["benchmarks"]}
+    assert exit_code == 0
+    assert payload["kind"] == "benchmark_decomposition"
+    assert payload["schemaVersion"] == "v1"
+    assert payload["baselineKey"] == "ref-fu-eq-cash-15"
+    assert payload["walkForward"]["startYear"] == 2020
+    assert payload["walkForward"]["endYear"] == 2021
+    assert len(payload["benchmarks"]) == 6
+    assert {
+        "ref-fu-eq-cash-15",
+        "ref-fu-eq-cash-0",
+        "ref-fu-eq-cash-25",
+        "ref-etf-eq-cash-15",
+        "ref-spy-hold",
+        "ref-spy-cash-15",
+    } == set(benchmarks_by_key)
+    assert benchmarks_by_key["ref-fu-eq-cash-15"]["summary"]["windowCount"] == 2
+    assert benchmarks_by_key["ref-fu-eq-cash-15"]["deltaVsBaseline"]["averageSharpeRatio"] == 0.0
+    assert any(
+        row["asset"] == "CASH" and row["weightPct"] == 15.0
+        for row in benchmarks_by_key["ref-fu-eq-cash-15"]["finalWeights"]
+    )
+    assert not any(
+        row["asset"] in {"BTC-USD", "ETH-USD"}
+        for row in benchmarks_by_key["ref-etf-eq-cash-15"]["finalWeights"]
+    )
+    assert {row["asset"] for row in benchmarks_by_key["ref-spy-hold"]["finalWeights"]} == {"SPY"}
+    assert benchmarks_by_key["ref-spy-hold"]["worstWindow"] is not None
+
+
+def test_benchmark_decomposition_command(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli_multiyear(monkeypatch, tmp_path)
+
+    exit_code = cli_module.main([
+        "benchmark-decomposition",
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+        "--top",
+        "3",
+    ])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Benchmark decomposition" in captured.out
+    assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
+    assert "Top 3 benchmarks by walk-forward performance:" in captured.out
+    assert "Delta vs ref-fu-eq-cash-15" in captured.out
+
+
 def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_multiyear(monkeypatch, tmp_path)
 

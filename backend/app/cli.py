@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from app import robustness_service
+from app.diagnostics_service import summarize_diagnostic_events
 from app.comparison_service import (
     build_comparison_payload,
     build_comparison_payload_from_run_spec_payload,
@@ -20,6 +21,19 @@ from app.comparison_service import (
 )
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
+from app.portfolio import (
+    build_evaluator_strategy_spec,
+    build_investment_universe_spec,
+    build_risk_controls_spec,
+    build_strategy_definition_from_evaluator_strategy_spec,
+)
+from app.strategy_presets import (
+    DEFAULT_INVESTMENT_UNIVERSE,
+    EQUAL_WEIGHT,
+    ETF_ONLY_INVESTMENT_UNIVERSE,
+    FULL_UNIVERSE,
+    REFERENCE_HOLD_EXECUTION_POLICY,
+)
 from app.instrument_registry import (
     UNIVERSE_VARIANT_KEYS,
     get_universe_variant,
@@ -140,6 +154,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rebuild the local run store index file.",
     )
     rebuild_index_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    benchmark_parser = subparsers.add_parser(
+        "benchmark-decomposition",
+        help="Decompose the benchmark strategy across fixed reference variants.",
+    )
+    benchmark_parser.add_argument("--top", type=int, default=10)
+    benchmark_parser.add_argument("--walk-forward-start-year", type=int, default=2020)
+    benchmark_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
+    benchmark_parser.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
 
@@ -326,6 +349,254 @@ def sort_candidate_runs(candidate_runs: list[dict]) -> list[dict]:
             portfolio_segment_summary(run, "test")["maxDrawdownPct"],
         ),
     )
+
+
+BENCHMARK_BASELINE_KEY = "ref-fu-eq-cash-15"
+
+
+def build_benchmark_decomposition_payload(
+    comparison,
+    *,
+    fetch_market_universe_bundle,
+    start_year: int = 2020,
+    end_year: int = 2025,
+) -> dict:
+    benchmark_comparison = build_benchmark_decomposition_comparison(comparison)
+    walk_forward_payload = build_walk_forward_comparison_payload(
+        benchmark_comparison,
+        fetch_market_universe_bundle=fetch_market_universe_bundle,
+        start_year=start_year,
+        end_year=end_year,
+    )
+    evaluation = walk_forward_payload.get("comparison", {}).get("runSpec", {}).get("evaluation", {})
+    diagnostic_events = evaluation.get("diagnosticEvents") or []
+    diagnostic_summary = summarize_diagnostic_events(diagnostic_events)
+    benchmarks = [
+        build_benchmark_result(result, diagnostic_summary=diagnostic_summary)
+        for result in walk_forward_payload.get("referenceResults", [])
+    ]
+    baseline = next(
+        (benchmark for benchmark in benchmarks if benchmark["strategyKey"] == BENCHMARK_BASELINE_KEY),
+        None,
+    )
+    if baseline is not None:
+        for benchmark in benchmarks:
+            benchmark["deltaVsBaseline"] = build_benchmark_delta(benchmark, baseline)
+
+    return {
+        "kind": "benchmark_decomposition",
+        "schemaVersion": "v1",
+        "baselineKey": BENCHMARK_BASELINE_KEY,
+        "walkForward": walk_forward_payload["walkForward"],
+        "runStoreSummary": walk_forward_payload["runStoreSummary"],
+        "diagnosticSummary": diagnostic_summary,
+        "benchmarks": benchmarks,
+    }
+
+
+def build_benchmark_decomposition_comparison(comparison):
+    benchmark_comparison = copy.deepcopy(comparison)
+    benchmark_comparison.comparison_id = f"{comparison.comparison_id}__benchmark_decomposition"
+    benchmark_comparison.title = "Benchmark decomposition"
+    benchmark_comparison.question = "ref-fu-eq-cash の強さを固定 benchmark variants で分解する"
+    benchmark_comparison.candidate_strategies = []
+    benchmark_comparison.reference_strategies = build_benchmark_reference_strategies()
+    return benchmark_comparison
+
+
+def build_benchmark_reference_strategies() -> list:
+    spy_universe = build_investment_universe_spec(
+        key="spy_only_v1",
+        label="SPY only",
+        tickers=("SPY",),
+    )
+    return [
+        build_equal_weight_hold_benchmark(
+            strategy_id="ref-fu-eq-cash-15",
+            universe=DEFAULT_INVESTMENT_UNIVERSE,
+            cash_weight=0.15,
+            label="全20資産等金額 + CASH 15%",
+        ),
+        build_equal_weight_hold_benchmark(
+            strategy_id="ref-fu-eq-cash-0",
+            universe=DEFAULT_INVESTMENT_UNIVERSE,
+            cash_weight=0.0,
+            label="全20資産等金額 + CASH 0%",
+        ),
+        build_equal_weight_hold_benchmark(
+            strategy_id="ref-fu-eq-cash-25",
+            universe=DEFAULT_INVESTMENT_UNIVERSE,
+            cash_weight=0.25,
+            label="全20資産等金額 + CASH 25%",
+        ),
+        build_equal_weight_hold_benchmark(
+            strategy_id="ref-etf-eq-cash-15",
+            universe=ETF_ONLY_INVESTMENT_UNIVERSE,
+            cash_weight=0.15,
+            label="ETF only 等金額 + CASH 15%",
+        ),
+        build_equal_weight_hold_benchmark(
+            strategy_id="ref-spy-hold",
+            universe=spy_universe,
+            cash_weight=0.0,
+            label="SPY 100% buy and hold",
+        ),
+        build_equal_weight_hold_benchmark(
+            strategy_id="ref-spy-cash-15",
+            universe=spy_universe,
+            cash_weight=0.15,
+            label="SPY 85% + CASH 15%",
+        ),
+    ]
+
+
+def build_equal_weight_hold_benchmark(*, strategy_id: str, universe, cash_weight: float, label: str):
+    max_investment_ratio = round(1.0 - float(cash_weight), 10)
+    strategy = build_evaluator_strategy_spec(
+        strategy_id=strategy_id,
+        investment_universe=universe,
+        selection=FULL_UNIVERSE,
+        portfolio_model=EQUAL_WEIGHT,
+        execution_policy=REFERENCE_HOLD_EXECUTION_POLICY,
+        risk_controls=build_risk_controls_spec(
+            max_investment_ratio=max_investment_ratio,
+            max_weight=None,
+        ),
+        label=label,
+        description=f"{label} benchmark",
+    )
+    return build_strategy_definition_from_evaluator_strategy_spec(strategy)
+
+
+def build_benchmark_result(result: dict, *, diagnostic_summary: dict) -> dict:
+    worst_window = build_benchmark_worst_window(result.get("windows", []))
+    return {
+        "strategyKey": result["strategyKey"],
+        "label": result["strategyLabel"],
+        "summary": {
+            "averageSharpeRatio": result["averageSharpeRatio"],
+            "minimumSharpeRatio": result["minimumSharpeRatio"],
+            "averageTotalReturnPct": result["averageTotalReturnPct"],
+            "averageMaxDrawdownPct": result["averageMaxDrawdownPct"],
+            "averageTurnoverPct": result["averageTurnoverPct"],
+            "positiveReturnWindowCount": result["positiveReturnWindowCount"],
+            "windowCount": result["windowCount"],
+        },
+        "windows": result.get("windows", []),
+        "worstWindow": worst_window,
+        "finalWeights": build_benchmark_final_weights(result["strategy"]),
+        "diagnosticSummary": diagnostic_summary,
+    }
+
+
+def build_benchmark_worst_window(windows: list[dict]) -> dict | None:
+    if not windows:
+        return None
+    return min(
+        windows,
+        key=lambda window: (
+            float(window["test"]["sharpeRatio"]),
+            float(window["test"]["totalReturnPct"]),
+            -float(window["test"]["maxDrawdownPct"]),
+            int(window["year"]),
+        ),
+    )
+
+
+def build_benchmark_final_weights(strategy_payload: dict) -> list[dict]:
+    core = strategy_payload["components"]["core"]
+    optional = strategy_payload["components"]["optional"]
+    tickers = core["investmentUniverse"]["tickers"]
+    max_investment_ratio = float(optional["riskControls"]["maxInvestmentPct"]) / 100
+    asset_weight_pct = round(max_investment_ratio * 100 / len(tickers), 2)
+    rows = [
+        {"asset": ticker, "weightPct": asset_weight_pct}
+        for ticker in tickers
+    ]
+    cash_weight_pct = round((1.0 - max_investment_ratio) * 100, 2)
+    if cash_weight_pct > 0:
+        rows.append({"asset": "CASH", "weightPct": cash_weight_pct})
+    return rows
+
+
+def build_benchmark_delta(benchmark: dict, baseline: dict) -> dict:
+    benchmark_summary = benchmark["summary"]
+    baseline_summary = baseline["summary"]
+    return {
+        "averageSharpeRatio": round(
+            float(benchmark_summary["averageSharpeRatio"]) - float(baseline_summary["averageSharpeRatio"]),
+            6,
+        ),
+        "minimumSharpeRatio": round(
+            float(benchmark_summary["minimumSharpeRatio"]) - float(baseline_summary["minimumSharpeRatio"]),
+            6,
+        ),
+        "averageTotalReturnPct": round(
+            float(benchmark_summary["averageTotalReturnPct"]) - float(baseline_summary["averageTotalReturnPct"]),
+            6,
+        ),
+        "averageMaxDrawdownPct": round(
+            float(benchmark_summary["averageMaxDrawdownPct"]) - float(baseline_summary["averageMaxDrawdownPct"]),
+            6,
+        ),
+        "averageTurnoverPct": round(
+            float(benchmark_summary["averageTurnoverPct"]) - float(baseline_summary["averageTurnoverPct"]),
+            6,
+        ),
+    }
+
+
+def render_benchmark_decomposition(payload: dict, *, top: int) -> str:
+    walk_forward = payload["walkForward"]
+    benchmarks = payload["benchmarks"]
+    lines = [
+        "Benchmark decomposition",
+        f"Baseline: {payload['baselineKey']}",
+        (
+            "Walk-forward: "
+            f"{walk_forward['startYear']}-{walk_forward['endYear']} "
+            f"({walk_forward['windowCount']} windows)"
+        ),
+        (
+            "Run store: "
+            f"cached={payload['runStoreSummary']['cachedRunCount']} "
+            f"computed={payload['runStoreSummary']['computedRunCount']}"
+        ),
+        "",
+        f"Top {min(top, len(benchmarks))} benchmarks by walk-forward performance:",
+    ]
+    for index, benchmark in enumerate(benchmarks[:top], start=1):
+        summary = benchmark["summary"]
+        delta = benchmark.get("deltaVsBaseline", {})
+        lines.append(f"{index}. {benchmark['label']} [{benchmark['strategyKey']}]")
+        lines.append(
+            "   "
+            f"Avg Sharpe {summary['averageSharpeRatio']:.3f} | "
+            f"Min Sharpe {summary['minimumSharpeRatio']:.3f} | "
+            f"Avg Return {format_percent(summary['averageTotalReturnPct'])} | "
+            f"Avg MDD {format_percent(summary['averageMaxDrawdownPct'])} | "
+            f"Avg Turnover {format_percent(summary['averageTurnoverPct'])}"
+        )
+        if delta:
+            lines.append(
+                "   "
+                "Delta vs ref-fu-eq-cash-15: "
+                f"Sharpe {delta['averageSharpeRatio']:+.3f} | "
+                f"Min Sharpe {delta['minimumSharpeRatio']:+.3f} | "
+                f"Return {format_percent(delta['averageTotalReturnPct'])} | "
+                f"Turnover {format_percent(delta['averageTurnoverPct'])}"
+            )
+        worst_window = benchmark.get("worstWindow")
+        if worst_window:
+            test = worst_window["test"]
+            lines.append(
+                "   "
+                f"Worst window {worst_window['year']} | "
+                f"Sharpe {test['sharpeRatio']:.3f} | "
+                f"Return {format_percent(test['totalReturnPct'])} | "
+                f"MDD {format_percent(test['maxDrawdownPct'])}"
+            )
+    return "\n".join(lines)
 
 
 def render_comparison_summary(payload: dict, *, top: int) -> str:
@@ -698,6 +969,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_robustness_summary(payload, top=max(args.top, 1)))
+        return 0
+
+    if args.command == "benchmark-decomposition":
+        payload = build_benchmark_decomposition_payload(
+            DEFAULT_COMPARISON_SPEC,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+            start_year=args.walk_forward_start_year,
+            end_year=args.walk_forward_end_year,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_benchmark_decomposition(payload, top=max(args.top, 1)))
         return 0
 
     if args.command == "comparison-run-spec":

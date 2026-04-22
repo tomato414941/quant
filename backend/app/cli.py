@@ -897,14 +897,24 @@ def render_edge_attribution(payload: dict) -> str:
             "",
             f"Diagnosis: {diagnosis['primaryFinding']}",
             (
-                "Selection effect: "
-                f"Return {format_percent(diagnosis['selectionEffectReturnPct'])} | "
-                f"Sharpe {diagnosis['selectionEffectSharpe']:+.3f}"
+                "Pure selection effect: "
+                f"Return {format_percent(diagnosis['pureSelectionEffectReturnPct'])} | "
+                f"Sharpe {diagnosis['pureSelectionEffectSharpe']:+.3f}"
             ),
             (
-                "Portfolio/execution effect: "
-                f"Return {format_percent(diagnosis['portfolioAndExecutionEffectReturnPct'])} | "
-                f"Sharpe {diagnosis['portfolioAndExecutionEffectSharpe']:+.3f} | "
+                "Tilt effect: "
+                f"Return {format_percent(diagnosis['tiltEffectReturnPct'])} | "
+                f"Sharpe {diagnosis['tiltEffectSharpe']:+.3f}"
+            ),
+            (
+                "Portfolio model effect: "
+                f"Return {format_percent(diagnosis['portfolioModelEffectReturnPct'])} | "
+                f"Sharpe {diagnosis['portfolioModelEffectSharpe']:+.3f}"
+            ),
+            (
+                "Full vs pure selection: "
+                f"Return {format_percent(diagnosis['fullVsPureSelectionEffectReturnPct'])} | "
+                f"Sharpe {diagnosis['fullVsPureSelectionEffectSharpe']:+.3f} | "
                 f"Turnover {format_percent(diagnosis['turnoverIncreasePct'])} | "
                 f"Cost {format_optional_percent(diagnosis.get('estimatedCostIncreasePct'))}"
             ),

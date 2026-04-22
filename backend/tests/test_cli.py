@@ -321,7 +321,7 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     components_by_key = {component["componentKey"]: component for component in payload["components"]}
     assert exit_code == 0
     assert payload["kind"] == "edge_attribution"
-    assert payload["schemaVersion"] == "v1"
+    assert payload["schemaVersion"] == "v2"
     assert payload["strategyKey"] == strategy_key
     assert payload["baselineKey"] == "universe_equal_weight"
     assert payload["walkForward"]["startYear"] == 2020
@@ -329,7 +329,9 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert list(components_by_key) == [
         "cash",
         "universe_equal_weight",
-        "strategy_selection_only",
+        "selection_pure_equal_weight",
+        "selection_tilt_equal_weight",
+        "selection_model_no_tilt",
         "strategy_full",
     ]
     assert components_by_key["cash"]["summary"]["averageFinalValueIndex"] == 100.0
@@ -337,11 +339,15 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "averageCagrPct" in components_by_key["strategy_full"]["summary"]
     assert "allocationSummary" in components_by_key["strategy_full"]
     assert "averageHoldingCount" in components_by_key["strategy_full"]["allocationSummary"]
-    assert "selectionEffectVsUniverse" in payload["effectSummary"]
+    assert "pureSelectionEffectVsUniverse" in payload["effectSummary"]
+    assert "tiltEffectVsPureSelection" in payload["effectSummary"]
+    assert "portfolioModelEffectVsPureSelection" in payload["effectSummary"]
     assert "fullEffectVsCash" in payload["effectSummary"]
     assert "primaryFinding" in payload["diagnosis"]
     assert "likelyCauses" in payload["diagnosis"]
     assert "turnoverIncreasePct" in payload["diagnosis"]
+    assert "tiltEffectReturnPct" in payload["diagnosis"]
+    assert "portfolioModelEffectReturnPct" in payload["diagnosis"]
 
 
 def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
@@ -363,6 +369,8 @@ def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
     assert "Edge attribution:" in captured.out
     assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
     assert "Components:" in captured.out
+    assert "Pure selection effect:" in captured.out
+    assert "Portfolio model effect:" in captured.out
     assert "Strategy full" in captured.out
     assert "Diagnosis:" in captured.out
     assert "Likely causes:" in captured.out

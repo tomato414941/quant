@@ -13,6 +13,7 @@ from app.portfolio_allocation import (
     fit_portfolio_model,
 )
 from app.portfolio_domain import *
+from app.portfolio_tilt import apply_weight_tilt
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
 
 DECISION_POLICY_EXTENSION_KEY = "decision_policy"
@@ -2872,23 +2873,13 @@ def apply_strategy_weight_tilt(
     tilt_strength = float(score_parameters.get("tilt_strength", 0.5))
     tilt_shape = float(score_parameters.get("tilt_shape", 0.0))
     rank_values = percentile_ranks.to_numpy(dtype="float64")
-    if tilt_shape == 1.0:
-        tilt = np.where(rank_values >= 0.75, 1 + tilt_strength, 1.0)
-    elif tilt_shape == 2.0:
-        centered = rank_values - rank_values.mean()
-        scaled = np.exp(np.clip(centered * tilt_strength * 2.0, -2.0, 2.0))
-        tilt = scaled / scaled.mean()
-    else:
-        tilt = 1 + tilt_strength * (rank_values - 0.5)
-    tilt = np.clip(tilt, 0.25, None)
-    tilted_weights = weights * tilt
-    tilted_weights_sum = tilted_weights.sum()
-    if tilted_weights_sum <= 0:
-        return weights
-    tilted_weights = tilted_weights / tilted_weights_sum * weights.sum()
-    if max_weight is not None:
-        tilted_weights = np.minimum(tilted_weights, max_weight)
-    return tilted_weights
+    return apply_weight_tilt(
+        weights=weights,
+        rank_values=rank_values,
+        tilt_strength=tilt_strength,
+        tilt_shape=tilt_shape,
+        max_weight=max_weight,
+    )
 
 
 def filter_positive_variance_assets(returns: pd.DataFrame) -> pd.DataFrame:

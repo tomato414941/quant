@@ -1330,6 +1330,8 @@ def summarize_execution_decision_summaries(summaries: list[dict]) -> dict:
     decision_count = sum(int(summary.get("decisionCount", 0)) for summary in clean_summaries)
     rebalance_count = sum(int(summary.get("rebalanceCount", 0)) for summary in clean_summaries)
     no_trade_count = sum(int(summary.get("noTradeCount", 0)) for summary in clean_summaries)
+    edge_hit_count = sum(int(summary.get("edgeHitCount", 0)) for summary in clean_summaries)
+    edge_hit_sample_count = sum(int(summary.get("edgeHitSampleCount", 0)) for summary in clean_summaries)
 
     return {
         "decisionCount": decision_count,
@@ -1350,9 +1352,25 @@ def summarize_execution_decision_summaries(summaries: list[dict]) -> dict:
             clean_summaries,
             "averageEstimatedEdgePct",
         ),
+        "averageRealizedEdgePct": weighted_average_summary_metric(
+            clean_summaries,
+            "averageRealizedEdgePct",
+        ),
+        "averageRealizedEdgeAfterCostPct": weighted_average_summary_metric(
+            clean_summaries,
+            "averageRealizedEdgeAfterCostPct",
+        ),
         "averageConfidence": weighted_average_summary_metric(
             clean_summaries,
             "averageConfidence",
+        ),
+        "edgeHitCount": edge_hit_count,
+        "edgeHitSampleCount": edge_hit_sample_count,
+        "edgeHitRate": None if edge_hit_sample_count == 0 else round(edge_hit_count / edge_hit_sample_count, 6),
+        "estimatedVsRealizedEdgeCorrelation": weighted_average_summary_metric_by_count(
+            clean_summaries,
+            "estimatedVsRealizedEdgeCorrelation",
+            "edgeHitSampleCount",
         ),
         "estimatedEdgePctDistribution": merge_summary_distributions(
             clean_summaries,
@@ -1365,6 +1383,14 @@ def summarize_execution_decision_summaries(summaries: list[dict]) -> dict:
         "estimatedEdgeAfterCostPctDistribution": merge_summary_distributions(
             clean_summaries,
             "estimatedEdgeAfterCostPctDistribution",
+        ),
+        "realizedEdgePctDistribution": merge_summary_distributions(
+            clean_summaries,
+            "realizedEdgePctDistribution",
+        ),
+        "realizedEdgeAfterCostPctDistribution": merge_summary_distributions(
+            clean_summaries,
+            "realizedEdgeAfterCostPctDistribution",
         ),
         "confidenceDistribution": merge_summary_distributions(
             clean_summaries,
@@ -1382,11 +1408,15 @@ def merge_count_maps(summaries: list[dict], key: str) -> dict:
 
 
 def weighted_average_summary_metric(summaries: list[dict], key: str) -> float | None:
+    return weighted_average_summary_metric_by_count(summaries, key, "decisionCount")
+
+
+def weighted_average_summary_metric_by_count(summaries: list[dict], key: str, weight_key: str) -> float | None:
     weighted_total = 0.0
     total_weight = 0
     for summary in summaries:
         value = summary.get(key)
-        weight = int(summary.get("decisionCount", 0))
+        weight = int(summary.get(weight_key, 0))
         if value is None or weight <= 0:
             continue
         weighted_total += float(value) * weight

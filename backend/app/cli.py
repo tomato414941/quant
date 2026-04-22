@@ -312,6 +312,12 @@ def format_optional_decimal(value: object) -> str:
     return f"{float(value):.3f}"
 
 
+def format_optional_ratio_percent(value: object) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value) * 100:.1f}%"
+
+
 def format_percent_distribution(distribution: dict | None) -> str:
     if not distribution or int(distribution.get("count", 0)) <= 0:
         return "n/a"
@@ -863,6 +869,20 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
                 f"{format_percent_distribution(execution_decisions.get('estimatedCostPctDistribution'))} | "
                 "edge-cost "
                 f"{format_percent_distribution(execution_decisions.get('estimatedEdgeAfterCostPctDistribution'))}"
+            )
+            lines.append(
+                "   "
+                "Exec realized edge "
+                f"{format_percent_distribution(execution_decisions.get('realizedEdgePctDistribution'))} | "
+                "realized edge-cost "
+                f"{format_percent_distribution(execution_decisions.get('realizedEdgeAfterCostPctDistribution'))}"
+            )
+            lines.append(
+                "   "
+                "Exec edge hit "
+                f"{format_optional_ratio_percent(execution_decisions.get('edgeHitRate'))} | "
+                f"corr {format_optional_decimal(execution_decisions.get('estimatedVsRealizedEdgeCorrelation'))} | "
+                f"samples {execution_decisions.get('edgeHitSampleCount', 0)}"
             )
             lines.append(
                 "   "

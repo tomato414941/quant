@@ -1275,7 +1275,48 @@ def build_portfolio_decision(
     )
 
 
-def serialize_portfolio_decision_event(date: str, decision: PortfolioDecision) -> dict[str, object]:
+def compute_realized_decision_edge_pct(
+    *,
+    universe_columns: pd.Index,
+    current_weights: np.ndarray,
+    target_weights: np.ndarray,
+    realized_returns: pd.Series | None,
+) -> float | None:
+    if realized_returns is None:
+        return None
+    clean_returns = realized_returns.reindex(universe_columns).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    weight_delta = np.asarray(target_weights, dtype="float64") - np.asarray(current_weights, dtype="float64")
+    return round(float(np.dot(weight_delta, clean_returns.to_numpy(dtype="float64"))) * 100, 4)
+
+
+def compute_edge_hit(estimated_edge_pct: float | None, realized_edge_pct: float | None) -> bool | None:
+    if estimated_edge_pct is None or realized_edge_pct is None:
+        return None
+    if not math.isfinite(float(estimated_edge_pct)) or not math.isfinite(float(realized_edge_pct)):
+        return None
+    return float(np.sign(float(estimated_edge_pct))) == float(np.sign(float(realized_edge_pct)))
+
+
+def serialize_portfolio_decision_event(
+    date: str,
+    decision: PortfolioDecision,
+    *,
+    universe_columns: pd.Index | None = None,
+    current_weights: np.ndarray | None = None,
+    target_weights: np.ndarray | None = None,
+    realized_returns: pd.Series | None = None,
+) -> dict[str, object]:
+    realized_edge_pct = None
+    if universe_columns is not None and current_weights is not None and target_weights is not None:
+        realized_edge_pct = compute_realized_decision_edge_pct(
+            universe_columns=universe_columns,
+            current_weights=current_weights,
+            target_weights=target_weights,
+            realized_returns=realized_returns,
+        )
+    realized_edge_after_cost_pct = (
+        None if realized_edge_pct is None else round(realized_edge_pct - decision.estimated_cost_pct, 4)
+    )
     return {
         "date": date,
         "policy": decision.policy,
@@ -1285,6 +1326,9 @@ def serialize_portfolio_decision_event(date: str, decision: PortfolioDecision) -
         "estimatedCostPct": decision.estimated_cost_pct,
         "estimatedEdgePct": decision.estimated_edge_pct,
         "edgeSource": decision.edge_source,
+        "realizedEdgePct": realized_edge_pct,
+        "realizedEdgeAfterCostPct": realized_edge_after_cost_pct,
+        "edgeHit": compute_edge_hit(decision.estimated_edge_pct, realized_edge_pct),
         "averageConfidence": decision.average_confidence,
         "selectedAssetCount": len(decision.selected_assets),
     }
@@ -1326,6 +1370,24 @@ def compute_decision_event_edge_after_cost_values(events: list[dict]) -> list[fl
     return spreads
 
 
+def compute_estimated_realized_edge_correlation(events: list[dict]) -> float | None:
+    pairs = [
+        (float(event["estimatedEdgePct"]), float(event["realizedEdgePct"]))
+        for event in events
+        if event.get("estimatedEdgePct") is not None and event.get("realizedEdgePct") is not None
+    ]
+    if len(pairs) < 2:
+        return None
+    estimated_values = np.asarray([pair[0] for pair in pairs], dtype="float64")
+    realized_values = np.asarray([pair[1] for pair in pairs], dtype="float64")
+    if float(np.std(estimated_values)) == 0.0 or float(np.std(realized_values)) == 0.0:
+        return None
+    correlation = float(np.corrcoef(estimated_values, realized_values)[0, 1])
+    if not math.isfinite(correlation):
+        return None
+    return round(correlation, 4)
+
+
 def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]:
     if not events:
         return {
@@ -1338,10 +1400,18 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
             "averageTurnoverPct": None,
             "averageEstimatedCostPct": None,
             "averageEstimatedEdgePct": None,
+            "averageRealizedEdgePct": None,
+            "averageRealizedEdgeAfterCostPct": None,
             "averageConfidence": None,
+            "edgeHitCount": 0,
+            "edgeHitSampleCount": 0,
+            "edgeHitRate": None,
+            "estimatedVsRealizedEdgeCorrelation": None,
             "estimatedEdgePctDistribution": empty_number_distribution(),
             "estimatedCostPctDistribution": empty_number_distribution(),
             "estimatedEdgeAfterCostPctDistribution": empty_number_distribution(),
+            "realizedEdgePctDistribution": empty_number_distribution(),
+            "realizedEdgeAfterCostPctDistribution": empty_number_distribution(),
             "confidenceDistribution": empty_number_distribution(),
         }
 
@@ -1358,9 +1428,20 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
             edge_source_counts[str(edge_source)] = edge_source_counts.get(str(edge_source), 0) + 1
 
     edge_values = [float(event["estimatedEdgePct"]) for event in events if event["estimatedEdgePct"] is not None]
+    realized_edge_values = [
+        float(event["realizedEdgePct"]) for event in events if event.get("realizedEdgePct") is not None
+    ]
+    realized_edge_after_cost_values = [
+        float(event["realizedEdgeAfterCostPct"])
+        for event in events
+        if event.get("realizedEdgeAfterCostPct") is not None
+    ]
+    edge_hit_values = [bool(event["edgeHit"]) for event in events if event.get("edgeHit") is not None]
     confidence_values = [float(event["averageConfidence"]) for event in events if event["averageConfidence"] is not None]
     cost_values = [event.get("estimatedCostPct") for event in events]
     spread_values = compute_decision_event_edge_after_cost_values(events)
+    edge_hit_count = sum(1 for value in edge_hit_values if value)
+    edge_hit_sample_count = len(edge_hit_values)
     return {
         "decisionCount": len(events),
         "rebalanceCount": sum(1 for event in events if event["action"] == "rebalance"),
@@ -1371,10 +1452,20 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
         "averageTurnoverPct": round(float(np.mean([event["turnoverPct"] for event in events])), 2),
         "averageEstimatedCostPct": round(float(np.mean([event["estimatedCostPct"] for event in events])), 4),
         "averageEstimatedEdgePct": None if not edge_values else round(float(np.mean(edge_values)), 4),
+        "averageRealizedEdgePct": None if not realized_edge_values else round(float(np.mean(realized_edge_values)), 4),
+        "averageRealizedEdgeAfterCostPct": (
+            None if not realized_edge_after_cost_values else round(float(np.mean(realized_edge_after_cost_values)), 4)
+        ),
         "averageConfidence": None if not confidence_values else round(float(np.mean(confidence_values)), 4),
+        "edgeHitCount": edge_hit_count,
+        "edgeHitSampleCount": edge_hit_sample_count,
+        "edgeHitRate": None if edge_hit_sample_count == 0 else round(edge_hit_count / edge_hit_sample_count, 4),
+        "estimatedVsRealizedEdgeCorrelation": compute_estimated_realized_edge_correlation(events),
         "estimatedEdgePctDistribution": summarize_optional_number_distribution(edge_values),
         "estimatedCostPctDistribution": summarize_optional_number_distribution(cost_values),
         "estimatedEdgeAfterCostPctDistribution": summarize_optional_number_distribution(spread_values),
+        "realizedEdgePctDistribution": summarize_optional_number_distribution(realized_edge_values),
+        "realizedEdgeAfterCostPctDistribution": summarize_optional_number_distribution(realized_edge_after_cost_values),
         "confidenceDistribution": summarize_optional_number_distribution(confidence_values),
     }
 
@@ -3076,7 +3167,16 @@ def run_portfolio_backtest(
                 predictor_context=predictor_context,
                 availability_policy=availability_policy,
             )
-            decision_events.append(serialize_portfolio_decision_event(str(date), split_decision))
+            decision_events.append(
+                serialize_portfolio_decision_event(
+                    str(date),
+                    split_decision,
+                    universe_columns=returns.columns,
+                    current_weights=current_weights,
+                    target_weights=initial_weights,
+                    realized_returns=row,
+                )
+            )
             next_rebalance_weights = split_decision.weights.copy()
             next_rebalance_selected_assets = list(split_decision.selected_assets)
 
@@ -3176,7 +3276,16 @@ def run_portfolio_backtest(
                 predictor_context=predictor_context,
                 availability_policy=availability_policy,
             )
-            decision_events.append(serialize_portfolio_decision_event(str(date), portfolio_decision))
+            decision_events.append(
+                serialize_portfolio_decision_event(
+                    str(date),
+                    portfolio_decision,
+                    universe_columns=returns.columns,
+                    current_weights=current_weights,
+                    target_weights=target_weights,
+                    realized_returns=returns.iloc[index + 1] if index + 1 < len(returns) else None,
+                )
+            )
             pending_decision_selected_assets = list(portfolio_decision.selected_assets)
             pending_decision_weights = portfolio_decision.weights.copy()
         if should_rebalance(

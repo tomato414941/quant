@@ -407,7 +407,13 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
                     "averageTurnoverPct": 12.0,
                     "averageEstimatedCostPct": 0.2,
                     "averageEstimatedEdgePct": 0.5,
+                    "averageRealizedEdgePct": 0.4,
+                    "averageRealizedEdgeAfterCostPct": 0.1,
                     "averageConfidence": 0.7,
+                    "edgeHitCount": 1,
+                    "edgeHitSampleCount": 2,
+                    "edgeHitRate": 0.5,
+                    "estimatedVsRealizedEdgeCorrelation": 1.0,
                     "estimatedEdgePctDistribution": {
                         "count": 2,
                         "minimum": 0.1,
@@ -424,6 +430,18 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
                         "count": 2,
                         "minimum": -0.1,
                         "median": 0.2,
+                        "maximum": 0.5,
+                    },
+                    "realizedEdgePctDistribution": {
+                        "count": 2,
+                        "minimum": -0.1,
+                        "median": 0.4,
+                        "maximum": 0.9,
+                    },
+                    "realizedEdgeAfterCostPctDistribution": {
+                        "count": 2,
+                        "minimum": -0.3,
+                        "median": 0.1,
                         "maximum": 0.5,
                     },
                     "confidenceDistribution": {
@@ -447,7 +465,13 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
             "averageTurnoverPct": 12.0,
             "averageEstimatedCostPct": 0.2,
             "averageEstimatedEdgePct": 0.5,
+            "averageRealizedEdgePct": 0.4,
+            "averageRealizedEdgeAfterCostPct": 0.1,
             "averageConfidence": 0.7,
+            "edgeHitCount": 1,
+            "edgeHitSampleCount": 2,
+            "edgeHitRate": 0.5,
+            "estimatedVsRealizedEdgeCorrelation": 1.0,
             "estimatedEdgePctDistribution": {
                 "count": 2,
                 "minimum": 0.1,
@@ -464,6 +488,18 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
                 "count": 2,
                 "minimum": -0.1,
                 "median": 0.2,
+                "maximum": 0.5,
+            },
+            "realizedEdgePctDistribution": {
+                "count": 2,
+                "minimum": -0.1,
+                "median": 0.4,
+                "maximum": 0.9,
+            },
+            "realizedEdgeAfterCostPctDistribution": {
+                "count": 2,
+                "minimum": -0.3,
+                "median": 0.1,
                 "maximum": 0.5,
             },
             "confidenceDistribution": {
@@ -488,10 +524,14 @@ def test_build_scenario_strategy_result_summarizes_weights() -> None:
     assert projected["executionDecisionSummary"]["reasonCounts"]["edge_below_cost"] == 1
     assert projected["executionDecisionSummary"]["edgeSourceCounts"] == {"signal_return_proxy": 2}
     assert projected["executionDecisionSummary"]["estimatedEdgeAfterCostPctDistribution"]["median"] == 0.2
+    assert projected["executionDecisionSummary"]["realizedEdgePctDistribution"]["median"] == 0.4
+    assert projected["executionDecisionSummary"]["edgeHitRate"] == 0.5
+    assert projected["executionDecisionSummary"]["estimatedVsRealizedEdgeCorrelation"] == 1.0
     assert projected["windows"][0]["weights"][0] == {"asset": "SPY", "weightPct": 30.0}
     assert projected["windows"][0]["executionDecisionSummary"]["decisionCount"] == 2
     assert projected["windows"][0]["executionDecisionSummary"]["confidenceDistribution"]["count"] == 2
     assert projected["windows"][0]["executionDecisionSummary"]["edgeSourceCounts"] == {"signal_return_proxy": 2}
+    assert projected["windows"][0]["executionDecisionSummary"]["realizedEdgeAfterCostPctDistribution"]["median"] == 0.1
 
 
 def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
@@ -528,7 +568,13 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                     "averageTurnoverPct": 10.0,
                     "averageEstimatedCostPct": 0.2,
                     "averageEstimatedEdgePct": 0.6,
+                    "averageRealizedEdgePct": 0.4,
+                    "averageRealizedEdgeAfterCostPct": 0.1,
                     "averageConfidence": 0.8,
+                    "edgeHitCount": 1,
+                    "edgeHitSampleCount": 2,
+                    "edgeHitRate": 0.5,
+                    "estimatedVsRealizedEdgeCorrelation": 1.0,
                     "estimatedEdgePctDistribution": {
                         "count": 2,
                         "minimum": 0.1,
@@ -545,6 +591,18 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                         "count": 2,
                         "minimum": -0.1,
                         "median": 0.2,
+                        "maximum": 0.5,
+                    },
+                    "realizedEdgePctDistribution": {
+                        "count": 2,
+                        "minimum": -0.1,
+                        "median": 0.4,
+                        "maximum": 0.9,
+                    },
+                    "realizedEdgeAfterCostPctDistribution": {
+                        "count": 2,
+                        "minimum": -0.3,
+                        "median": 0.1,
                         "maximum": 0.5,
                     },
                     "confidenceDistribution": {
@@ -594,7 +652,13 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                     "averageTurnoverPct": 4.0,
                     "averageEstimatedCostPct": 0.1,
                     "averageEstimatedEdgePct": 0.3,
+                    "averageRealizedEdgePct": -0.1,
+                    "averageRealizedEdgeAfterCostPct": -0.2,
                     "averageConfidence": 0.5,
+                    "edgeHitCount": 0,
+                    "edgeHitSampleCount": 1,
+                    "edgeHitRate": 0.0,
+                    "estimatedVsRealizedEdgeCorrelation": None,
                     "estimatedEdgePctDistribution": {
                         "count": 1,
                         "minimum": 0.3,
@@ -612,6 +676,18 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
                         "minimum": 0.2,
                         "median": 0.2,
                         "maximum": 0.2,
+                    },
+                    "realizedEdgePctDistribution": {
+                        "count": 1,
+                        "minimum": -0.1,
+                        "median": -0.1,
+                        "maximum": -0.1,
+                    },
+                    "realizedEdgeAfterCostPctDistribution": {
+                        "count": 1,
+                        "minimum": -0.2,
+                        "median": -0.2,
+                        "maximum": -0.2,
                     },
                     "confidenceDistribution": {
                         "count": 1,
@@ -642,6 +718,11 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
     assert execution_summary["reasonCounts"] == {"edge_below_cost": 2, "edge_after_cost": 1}
     assert execution_summary["edgeSourceCounts"] == {"signal_return_proxy": 3}
     assert execution_summary["averageEstimatedEdgePct"] == 0.5
+    assert execution_summary["averageRealizedEdgePct"] == 0.233333
+    assert execution_summary["edgeHitCount"] == 1
+    assert execution_summary["edgeHitSampleCount"] == 3
+    assert execution_summary["edgeHitRate"] == 0.333333
+    assert execution_summary["estimatedVsRealizedEdgeCorrelation"] == 1.0
     assert execution_summary["estimatedEdgePctDistribution"] == {
         "count": 3,
         "minimum": 0.1,
@@ -652,6 +733,18 @@ def test_summarize_strategy_robustness_aggregates_execution_decisions() -> None:
         "count": 3,
         "minimum": -0.1,
         "median": 0.2,
+        "maximum": 0.5,
+    }
+    assert execution_summary["realizedEdgePctDistribution"] == {
+        "count": 3,
+        "minimum": -0.1,
+        "median": 0.233333,
+        "maximum": 0.9,
+    }
+    assert execution_summary["realizedEdgeAfterCostPctDistribution"] == {
+        "count": 3,
+        "minimum": -0.3,
+        "median": 0.0,
         "maximum": 0.5,
     }
 

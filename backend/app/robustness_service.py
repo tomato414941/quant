@@ -641,7 +641,13 @@ def project_execution_decision_summary(summary: dict) -> dict:
         "averageTurnoverPct": optional_float(summary.get("averageTurnoverPct")),
         "averageEstimatedCostPct": optional_float(summary.get("averageEstimatedCostPct")),
         "averageEstimatedEdgePct": optional_float(summary.get("averageEstimatedEdgePct")),
+        "averageRealizedEdgePct": optional_float(summary.get("averageRealizedEdgePct")),
+        "averageRealizedEdgeAfterCostPct": optional_float(summary.get("averageRealizedEdgeAfterCostPct")),
         "averageConfidence": optional_float(summary.get("averageConfidence")),
+        "edgeHitCount": int(summary.get("edgeHitCount", 0)),
+        "edgeHitSampleCount": int(summary.get("edgeHitSampleCount", 0)),
+        "edgeHitRate": optional_float(summary.get("edgeHitRate")),
+        "estimatedVsRealizedEdgeCorrelation": optional_float(summary.get("estimatedVsRealizedEdgeCorrelation")),
         "estimatedEdgePctDistribution": project_number_distribution(
             summary.get("estimatedEdgePctDistribution")
         ),
@@ -650,6 +656,12 @@ def project_execution_decision_summary(summary: dict) -> dict:
         ),
         "estimatedEdgeAfterCostPctDistribution": project_number_distribution(
             summary.get("estimatedEdgeAfterCostPctDistribution")
+        ),
+        "realizedEdgePctDistribution": project_number_distribution(
+            summary.get("realizedEdgePctDistribution")
+        ),
+        "realizedEdgeAfterCostPctDistribution": project_number_distribution(
+            summary.get("realizedEdgeAfterCostPctDistribution")
         ),
         "confidenceDistribution": project_number_distribution(
             summary.get("confidenceDistribution")

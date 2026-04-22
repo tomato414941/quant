@@ -2204,6 +2204,9 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
             "estimatedCostPct": 0.2,
             "estimatedEdgePct": 0.1,
             "edgeSource": SIGNAL_RETURN_PROXY_EDGE_SOURCE,
+            "realizedEdgePct": -0.2,
+            "realizedEdgeAfterCostPct": -0.4,
+            "edgeHit": False,
             "averageConfidence": 0.5,
         },
         {
@@ -2214,6 +2217,9 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
             "estimatedCostPct": 0.3,
             "estimatedEdgePct": 0.7,
             "edgeSource": SIGNAL_RETURN_PROXY_EDGE_SOURCE,
+            "realizedEdgePct": 0.5,
+            "realizedEdgeAfterCostPct": 0.2,
+            "edgeHit": True,
             "averageConfidence": 0.9,
         },
         {
@@ -2223,6 +2229,9 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
             "turnoverPct": 30.0,
             "estimatedCostPct": 0.1,
             "estimatedEdgePct": None,
+            "realizedEdgePct": None,
+            "realizedEdgeAfterCostPct": None,
+            "edgeHit": None,
             "averageConfidence": None,
         },
     ])
@@ -2245,6 +2254,18 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
         "median": 0.15,
         "maximum": 0.4,
     }
+    assert summary["realizedEdgePctDistribution"] == {
+        "count": 2,
+        "minimum": -0.2,
+        "median": 0.15,
+        "maximum": 0.5,
+    }
+    assert summary["realizedEdgeAfterCostPctDistribution"] == {
+        "count": 2,
+        "minimum": -0.4,
+        "median": -0.1,
+        "maximum": 0.2,
+    }
     assert summary["confidenceDistribution"] == {
         "count": 2,
         "minimum": 0.5,
@@ -2252,6 +2273,10 @@ def test_summarize_portfolio_decision_events_reports_decision_distributions() ->
         "maximum": 0.9,
     }
     assert summary["edgeSourceCounts"] == {SIGNAL_RETURN_PROXY_EDGE_SOURCE: 2}
+    assert summary["edgeHitCount"] == 1
+    assert summary["edgeHitSampleCount"] == 2
+    assert summary["edgeHitRate"] == 0.5
+    assert summary["estimatedVsRealizedEdgeCorrelation"] == 1.0
 
 
 def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost() -> None:
@@ -2301,6 +2326,8 @@ def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost()
     assert decision_summary["noTradeCount"] >= 1
     assert "edge_below_cost" in decision_summary["reasonCounts"]
     assert decision_summary["edgeSourceCounts"][SIGNAL_RETURN_PROXY_EDGE_SOURCE] >= 1
+    assert "realizedEdgePctDistribution" in decision_summary
+    assert "edgeHitRate" in decision_summary
     assert run["strategy"]["components"]["optional"]["decisionPolicy"]["key"] == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 

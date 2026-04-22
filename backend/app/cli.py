@@ -875,6 +875,41 @@ def render_edge_attribution(payload: dict) -> str:
                 f"CAGR {format_percent(delta['averageCagrPct'])} | "
                 f"Turnover {format_percent(delta['averageTurnoverPct'])}"
             )
+        allocation = component.get("allocationSummary") or {}
+        decisions = component.get("executionDecisionSummary") or {}
+        if allocation:
+            lines.append(
+                "   "
+                f"Holdings avg {allocation['averageHoldingCount']:.1f} | "
+                f"Top5 weight {format_percent(allocation['averageTop5WeightPct'])} | "
+                f"Max asset {format_percent(allocation['maximumSingleAssetWeightPct'])} | "
+                f"Cash {format_percent(allocation['averageCashWeightPct'])}"
+            )
+        if decisions.get("decisionCount"):
+            lines.append(
+                "   "
+                f"Decisions {decisions['decisionCount']} | "
+                f"avg decision cost {format_optional_percent(decisions.get('averageEstimatedCostPct'))}"
+            )
+    diagnosis = payload.get("diagnosis") or {}
+    if diagnosis:
+        lines.extend([
+            "",
+            f"Diagnosis: {diagnosis['primaryFinding']}",
+            (
+                "Selection effect: "
+                f"Return {format_percent(diagnosis['selectionEffectReturnPct'])} | "
+                f"Sharpe {diagnosis['selectionEffectSharpe']:+.3f}"
+            ),
+            (
+                "Portfolio/execution effect: "
+                f"Return {format_percent(diagnosis['portfolioAndExecutionEffectReturnPct'])} | "
+                f"Sharpe {diagnosis['portfolioAndExecutionEffectSharpe']:+.3f} | "
+                f"Turnover {format_percent(diagnosis['turnoverIncreasePct'])} | "
+                f"Cost {format_optional_percent(diagnosis.get('estimatedCostIncreasePct'))}"
+            ),
+            f"Likely causes: {', '.join(diagnosis.get('likelyCauses') or [])}",
+        ])
     effect = payload.get("effectSummary") or {}
     full_vs_universe = effect.get("fullEffectVsUniverse")
     full_vs_cash = effect.get("fullEffectVsCash")

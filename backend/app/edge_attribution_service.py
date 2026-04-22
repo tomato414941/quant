@@ -85,6 +85,7 @@ def build_edge_attribution_payload(
         "runStoreSummary": walk_forward_payload["runStoreSummary"],
         "components": component_results,
         "effectSummary": build_effect_summary(component_results),
+        "diagnosis": build_edge_attribution_diagnosis(component_results),
     }
 
 
@@ -224,6 +225,8 @@ def build_cash_component(walk_forward_payload: dict) -> dict:
             "positiveReturnWindowCount": 0,
             "windowCount": window_count,
         },
+        "allocationSummary": empty_allocation_summary(),
+        "executionDecisionSummary": empty_execution_summary(),
         "windows": windows,
     }
 
@@ -245,8 +248,9 @@ def build_strategy_component(component_key: str, result: dict) -> dict:
         "label": component_label(component_key),
         "strategyLabel": result["strategyLabel"],
         "summary": build_component_summary(result),
-        "windows": result.get("windows", []),
+        "allocationSummary": build_component_allocation_summary(result.get("windows", [])),
         "executionDecisionSummary": result.get("executionDecisionSummary", {}),
+        "windows": result.get("windows", []),
     }
 
 
@@ -307,3 +311,167 @@ def build_effect_summary(components: list[dict]) -> dict:
         "fullEffectVsUniverse": build_metric_delta(full, universe),
         "fullEffectVsCash": build_metric_delta(full, cash),
     }
+
+
+
+def empty_allocation_summary() -> dict:
+    return {
+        "averageHoldingCount": 0.0,
+        "minimumHoldingCount": 0,
+        "averageSelectedAssetCount": 0.0,
+        "averageTop5WeightPct": 0.0,
+        "maximumTop5WeightPct": 0.0,
+        "maximumSingleAssetWeightPct": 0.0,
+        "averageInvestedWeightPct": 0.0,
+        "averageCashWeightPct": 100.0,
+    }
+
+
+def empty_execution_summary() -> dict:
+    return {
+        "decisionCount": 0,
+        "rebalanceCount": 0,
+        "noTradeCount": 0,
+        "averageTurnoverPct": None,
+        "averageEstimatedCostPct": None,
+        "edgeHitRate": None,
+    }
+
+
+def build_component_allocation_summary(windows: list[dict]) -> dict:
+    summaries = [
+        build_window_allocation_summary(window)
+        for window in windows
+        if window.get("weights") is not None
+    ]
+    if not summaries:
+        return empty_allocation_summary()
+    return {
+        "averageHoldingCount": round(average([summary["holdingCount"] for summary in summaries]), 6),
+        "minimumHoldingCount": int(min(summary["holdingCount"] for summary in summaries)),
+        "averageSelectedAssetCount": round(average([summary["selectedAssetCount"] for summary in summaries]), 6),
+        "averageTop5WeightPct": round(average([summary["top5WeightPct"] for summary in summaries]), 6),
+        "maximumTop5WeightPct": round(max(summary["top5WeightPct"] for summary in summaries), 6),
+        "maximumSingleAssetWeightPct": round(max(summary["maxAssetWeightPct"] for summary in summaries), 6),
+        "averageInvestedWeightPct": round(average([summary["investedWeightPct"] for summary in summaries]), 6),
+        "averageCashWeightPct": round(average([summary["cashWeightPct"] for summary in summaries]), 6),
+    }
+
+
+def build_window_allocation_summary(window: dict) -> dict:
+    weights = list(window.get("weights") or [])
+    selected_assets = list(window.get("selectedAssets") or [])
+    asset_weights = sorted(
+        (
+            float(row["weightPct"])
+            for row in weights
+            if row.get("asset") != "CASH" and float(row.get("weightPct", 0.0)) > 0.0
+        ),
+        reverse=True,
+    )
+    invested_weight = min(100.0, sum(asset_weights))
+    cash_weight = sum(
+        float(row["weightPct"])
+        for row in weights
+        if row.get("asset") == "CASH"
+    )
+    if cash_weight <= 0:
+        cash_weight = max(0.0, 100.0 - invested_weight)
+    return {
+        "holdingCount": len(asset_weights),
+        "selectedAssetCount": len(selected_assets),
+        "top5WeightPct": round(sum(asset_weights[:5]), 6),
+        "maxAssetWeightPct": round(max(asset_weights), 6) if asset_weights else 0.0,
+        "investedWeightPct": round(invested_weight, 6),
+        "cashWeightPct": round(cash_weight, 6),
+    }
+
+
+def average(values: list[float]) -> float:
+    return sum(float(value) for value in values) / len(values)
+
+
+def build_edge_attribution_diagnosis(components: list[dict]) -> dict:
+    components_by_key = {
+        component["componentKey"]: component
+        for component in components
+    }
+    universe = components_by_key["universe_equal_weight"]
+    selection = components_by_key["strategy_selection_only"]
+    full = components_by_key["strategy_full"]
+    selection_effect = build_metric_delta(selection, universe)
+    portfolio_effect = build_metric_delta(full, selection)
+    cost_increase = optional_delta(
+        full.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
+        selection.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
+    )
+    turnover_increase = portfolio_effect["averageTurnoverPct"]
+    holding_count_change = round(
+        float(full["allocationSummary"]["averageHoldingCount"])
+        - float(selection["allocationSummary"]["averageHoldingCount"]),
+        6,
+    )
+    max_weight_change = round(
+        float(full["allocationSummary"]["maximumSingleAssetWeightPct"])
+        - float(selection["allocationSummary"]["maximumSingleAssetWeightPct"]),
+        6,
+    )
+    likely_causes = build_likely_causes(
+        selection_effect=selection_effect,
+        portfolio_effect=portfolio_effect,
+        turnover_increase=turnover_increase,
+        cost_increase=cost_increase,
+        holding_count_change=holding_count_change,
+        max_weight_change=max_weight_change,
+    )
+    return {
+        "primaryFinding": build_primary_finding(selection_effect, portfolio_effect),
+        "selectionEffectReturnPct": selection_effect["averageTotalReturnPct"],
+        "selectionEffectSharpe": selection_effect["averageSharpeRatio"],
+        "portfolioAndExecutionEffectReturnPct": portfolio_effect["averageTotalReturnPct"],
+        "portfolioAndExecutionEffectSharpe": portfolio_effect["averageSharpeRatio"],
+        "turnoverIncreasePct": turnover_increase,
+        "estimatedCostIncreasePct": cost_increase,
+        "holdingCountChange": holding_count_change,
+        "maxAssetWeightChangePct": max_weight_change,
+        "likelyCauses": likely_causes,
+    }
+
+
+def optional_delta(left: object, right: object) -> float | None:
+    if left is None or right is None:
+        return None
+    return round(float(left) - float(right), 6)
+
+
+def build_primary_finding(selection_effect: dict, portfolio_effect: dict) -> str:
+    if selection_effect["averageTotalReturnPct"] > 0 and portfolio_effect["averageTotalReturnPct"] < 0:
+        return "selection_helped_but_full_portfolio_dragged"
+    if portfolio_effect["averageTotalReturnPct"] < 0:
+        return "full_portfolio_dragged"
+    if selection_effect["averageTotalReturnPct"] <= 0:
+        return "selection_did_not_add_return"
+    return "selection_and_full_portfolio_helped"
+
+
+def build_likely_causes(
+    *,
+    selection_effect: dict,
+    portfolio_effect: dict,
+    turnover_increase: float,
+    cost_increase: float | None,
+    holding_count_change: float,
+    max_weight_change: float,
+) -> list[str]:
+    causes = []
+    if selection_effect["averageTotalReturnPct"] > 0 and portfolio_effect["averageTotalReturnPct"] < 0:
+        causes.append("portfolio_model_or_weighting_drag")
+    if turnover_increase > 25.0:
+        causes.append("turnover_drag")
+    if cost_increase is not None and cost_increase > 0.005:
+        causes.append("estimated_cost_drag")
+    if holding_count_change < -2.0 or max_weight_change > 10.0:
+        causes.append("concentration_change")
+    if not causes:
+        causes.append("no_single_obvious_drag")
+    return causes

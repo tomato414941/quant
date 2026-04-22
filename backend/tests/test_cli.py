@@ -335,8 +335,13 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert components_by_key["cash"]["summary"]["averageFinalValueIndex"] == 100.0
     assert components_by_key["universe_equal_weight"]["deltaVsBaseline"]["averageSharpeRatio"] == 0.0
     assert "averageCagrPct" in components_by_key["strategy_full"]["summary"]
+    assert "allocationSummary" in components_by_key["strategy_full"]
+    assert "averageHoldingCount" in components_by_key["strategy_full"]["allocationSummary"]
     assert "selectionEffectVsUniverse" in payload["effectSummary"]
     assert "fullEffectVsCash" in payload["effectSummary"]
+    assert "primaryFinding" in payload["diagnosis"]
+    assert "likelyCauses" in payload["diagnosis"]
+    assert "turnoverIncreasePct" in payload["diagnosis"]
 
 
 def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
@@ -359,6 +364,8 @@ def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
     assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
     assert "Components:" in captured.out
     assert "Strategy full" in captured.out
+    assert "Diagnosis:" in captured.out
+    assert "Likely causes:" in captured.out
     assert "Full effect vs universe" in captured.out
 
 

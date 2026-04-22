@@ -302,6 +302,66 @@ def test_benchmark_decomposition_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Delta vs ref-fu-eq-cash-15" in captured.out
 
 
+def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+    strategy_key = config.candidate_strategies[0].key
+
+    exit_code = cli_module.main([
+        "edge-attribution",
+        "--strategy-key",
+        strategy_key,
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    components_by_key = {component["componentKey"]: component for component in payload["components"]}
+    assert exit_code == 0
+    assert payload["kind"] == "edge_attribution"
+    assert payload["schemaVersion"] == "v1"
+    assert payload["strategyKey"] == strategy_key
+    assert payload["baselineKey"] == "universe_equal_weight"
+    assert payload["walkForward"]["startYear"] == 2020
+    assert payload["walkForward"]["endYear"] == 2021
+    assert list(components_by_key) == [
+        "cash",
+        "universe_equal_weight",
+        "strategy_selection_only",
+        "strategy_full",
+    ]
+    assert components_by_key["cash"]["summary"]["averageFinalValueIndex"] == 100.0
+    assert components_by_key["universe_equal_weight"]["deltaVsBaseline"]["averageSharpeRatio"] == 0.0
+    assert "averageCagrPct" in components_by_key["strategy_full"]["summary"]
+    assert "selectionEffectVsUniverse" in payload["effectSummary"]
+    assert "fullEffectVsCash" in payload["effectSummary"]
+
+
+def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+    strategy_key = config.candidate_strategies[0].key
+
+    exit_code = cli_module.main([
+        "edge-attribution",
+        "--strategy-key",
+        strategy_key,
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+    ])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Edge attribution:" in captured.out
+    assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
+    assert "Components:" in captured.out
+    assert "Strategy full" in captured.out
+    assert "Full effect vs universe" in captured.out
+
+
 def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_multiyear(monkeypatch, tmp_path)
 

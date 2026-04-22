@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from app import edge_attribution_service
 from app import robustness_service
 from app import signal_diagnostics_service
 from app.diagnostics_service import summarize_diagnostic_events
@@ -142,6 +143,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Forward horizon such as 1d, 5d, or 21d. Can be repeated.",
     )
     signal_diagnostics_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    edge_attribution_parser = subparsers.add_parser(
+        "edge-attribution",
+        help="Decompose one strategy into cash, universe, selection, and full components.",
+    )
+    edge_attribution_parser.add_argument(
+        "--strategy-key",
+        required=True,
+        help="Strategy key to decompose.",
+    )
+    edge_attribution_parser.add_argument(
+        "--period",
+        default=DEFAULT_COMPARISON_SPEC.run_spec.market_slice.period,
+        help="Market data period to evaluate.",
+    )
+    edge_attribution_parser.add_argument(
+        "--universe",
+        choices=UNIVERSE_VARIANT_KEYS,
+        default="crypto_included",
+        help="Run attribution against a fixed universe variant.",
+    )
+    edge_attribution_parser.add_argument("--walk-forward-start-year", type=int, default=2020)
+    edge_attribution_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
+    edge_attribution_parser.add_argument("--json", action="store_true", dest="as_json")
 
     comparison_run_spec_parser = subparsers.add_parser(
         "comparison-run-spec",
@@ -809,6 +834,69 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+def render_edge_attribution(payload: dict) -> str:
+    walk_forward = payload["walkForward"]
+    lines = [
+        f"Edge attribution: {payload['strategyLabel']} [{payload['strategyKey']}]",
+        f"Period: {payload['period']} | universe {payload['universe']}",
+        (
+            "Walk-forward: "
+            f"{walk_forward['startYear']}-{walk_forward['endYear']} "
+            f"({walk_forward['windowCount']} windows)"
+        ),
+        f"Baseline: {payload['baselineKey']}",
+        (
+            "Run store: "
+            f"cached={payload['runStoreSummary']['cachedRunCount']} "
+            f"computed={payload['runStoreSummary']['computedRunCount']}"
+        ),
+        "",
+        "Components:",
+    ]
+    for component in payload.get("components") or []:
+        summary = component["summary"]
+        delta = component.get("deltaVsBaseline") or {}
+        lines.append(f"- {component['label']} [{component['componentKey']}]")
+        lines.append(
+            "   "
+            f"Avg Sharpe {summary['averageSharpeRatio']:.3f} | "
+            f"Min Sharpe {summary['minimumSharpeRatio']:.3f} | "
+            f"Avg Return {format_percent(summary['averageTotalReturnPct'])} | "
+            f"Avg CAGR {format_percent(summary['averageCagrPct'])} | "
+            f"Avg MDD {format_percent(summary['averageMaxDrawdownPct'])} | "
+            f"Avg Turnover {format_percent(summary['averageTurnoverPct'])}"
+        )
+        if delta:
+            lines.append(
+                "   "
+                "Delta vs universe: "
+                f"Sharpe {delta['averageSharpeRatio']:+.3f} | "
+                f"Return {format_percent(delta['averageTotalReturnPct'])} | "
+                f"CAGR {format_percent(delta['averageCagrPct'])} | "
+                f"Turnover {format_percent(delta['averageTurnoverPct'])}"
+            )
+    effect = payload.get("effectSummary") or {}
+    full_vs_universe = effect.get("fullEffectVsUniverse")
+    full_vs_cash = effect.get("fullEffectVsCash")
+    if full_vs_universe and full_vs_cash:
+        lines.extend([
+            "",
+            (
+                "Full effect vs universe: "
+                f"Sharpe {full_vs_universe['averageSharpeRatio']:+.3f} | "
+                f"Return {format_percent(full_vs_universe['averageTotalReturnPct'])} | "
+                f"CAGR {format_percent(full_vs_universe['averageCagrPct'])}"
+            ),
+            (
+                "Full effect vs cash: "
+                f"Sharpe {full_vs_cash['averageSharpeRatio']:+.3f} | "
+                f"Return {format_percent(full_vs_cash['averageTotalReturnPct'])} | "
+                f"CAGR {format_percent(full_vs_cash['averageCagrPct'])}"
+            ),
+        ])
+    return "\n".join(lines)
+
+
 def render_signal_diagnostics(payload: dict) -> str:
     lines = [
         (
@@ -1115,6 +1203,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_comparison_summary(payload, top=max(args.top, 1)))
+        return 0
+
+    if args.command == "edge-attribution":
+        comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
+        payload = edge_attribution_service.build_edge_attribution_payload(
+            comparison_spec,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+            strategy_key=args.strategy_key,
+            period=args.period,
+            universe=args.universe,
+            start_year=args.walk_forward_start_year,
+            end_year=args.walk_forward_end_year,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_edge_attribution(payload))
         return 0
 
     if args.command == "signal-diagnostics":

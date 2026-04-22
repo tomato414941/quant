@@ -249,6 +249,176 @@ def test_build_robustness_decision_does_not_invalidate_lifecycle_events() -> Non
     }
 
 
+def test_build_scenario_strategy_result_preserves_compact_window_drilldown() -> None:
+    result = {
+        "strategyKey": "stg-test",
+        "strategyLabel": "Test Strategy",
+        "averageSharpeRatio": 0.3,
+        "minimumSharpeRatio": -0.4,
+        "averageTotalReturnPct": 4.0,
+        "averageMaxDrawdownPct": -8.0,
+        "averageTurnoverPct": 12.0,
+        "positiveReturnWindowCount": 1,
+        "windowCount": 2,
+        "windows": [
+            {
+                "year": 2020,
+                "testStartDate": "2020-01-01",
+                "testEndDate": "2020-12-31",
+                "test": {
+                    "sharpeRatio": 0.2,
+                    "totalReturnPct": 5.0,
+                    "maxDrawdownPct": -6.0,
+                    "turnoverPct": 10.0,
+                    "cagrPct": 5.0,
+                },
+                "train": {
+                    "sharpeRatio": 0.8,
+                    "totalReturnPct": 15.0,
+                    "maxDrawdownPct": -4.0,
+                    "turnoverPct": 9.0,
+                },
+                "testAvailability": {
+                    "barCount": 252,
+                    "minAvailableAssetCount": 4,
+                    "maxAvailableAssetCount": 6,
+                    "minEligibleAssetCount": 3,
+                    "maxEligibleAssetCount": 5,
+                    "newlyEligibleAssetCount": 1,
+                    "removedAssetCount": 0,
+                    "newlyEligibleAssets": ["ETH-USD"],
+                    "removedAssets": [],
+                },
+                "trainAvailability": {
+                    "barCount": 500,
+                    "minAvailableAssetCount": 4,
+                    "maxAvailableAssetCount": 4,
+                    "minEligibleAssetCount": 3,
+                    "maxEligibleAssetCount": 3,
+                    "newlyEligibleAssetCount": 0,
+                    "removedAssetCount": 0,
+                    "newlyEligibleAssets": [],
+                    "removedAssets": [],
+                },
+            },
+            {
+                "year": 2021,
+                "testStartDate": "2021-01-01",
+                "testEndDate": "2021-12-31",
+                "test": {
+                    "sharpeRatio": -0.4,
+                    "totalReturnPct": -7.0,
+                    "maxDrawdownPct": -12.0,
+                    "turnoverPct": 14.0,
+                    "cagrPct": -7.0,
+                },
+                "train": {
+                    "sharpeRatio": 0.1,
+                    "totalReturnPct": 2.0,
+                    "maxDrawdownPct": -8.0,
+                    "turnoverPct": 11.0,
+                },
+                "testAvailability": {
+                    "barCount": 252,
+                    "minAvailableAssetCount": 5,
+                    "maxAvailableAssetCount": 5,
+                    "minEligibleAssetCount": 2,
+                    "maxEligibleAssetCount": 4,
+                    "newlyEligibleAssetCount": 0,
+                    "removedAssetCount": 1,
+                    "newlyEligibleAssets": [],
+                    "removedAssets": ["AAA"],
+                },
+                "trainAvailability": {
+                    "barCount": 500,
+                    "minAvailableAssetCount": 4,
+                    "maxAvailableAssetCount": 5,
+                    "minEligibleAssetCount": 3,
+                    "maxEligibleAssetCount": 4,
+                    "newlyEligibleAssetCount": 1,
+                    "removedAssetCount": 0,
+                    "newlyEligibleAssets": ["BBB"],
+                    "removedAssets": [],
+                },
+            },
+        ],
+    }
+
+    projected = robustness_service.build_scenario_strategy_result(
+        result,
+        rank=3,
+        diagnostics={"flags": []},
+    )
+
+    assert len(projected["windows"]) == 2
+    assert projected["windows"][0]["test"] == {
+        "sharpeRatio": 0.2,
+        "totalReturnPct": 5.0,
+        "maxDrawdownPct": -6.0,
+        "turnoverPct": 10.0,
+    }
+    assert "cagrPct" not in projected["windows"][0]["test"]
+    assert projected["worstWindow"]["year"] == 2021
+    assert projected["worstWindow"]["testAvailability"]["minEligibleAssetCount"] == 2
+
+
+def test_build_strategy_worst_window_summary_crosses_scenarios() -> None:
+    scenario_a = {
+        "key": "scenario-a",
+        "period": "2020-2021",
+        "universe": "crypto_included",
+        "costMultiplier": 1.0,
+        "maxWeightPct": 35.0,
+    }
+    scenario_b = {
+        "key": "scenario-b",
+        "period": "2020-2021",
+        "universe": "no_crypto",
+        "costMultiplier": 3.0,
+        "maxWeightPct": 25.0,
+    }
+    results = [
+        {
+            "rank": 1,
+            "scenario": scenario_a,
+            "windows": [
+                {
+                    "year": 2020,
+                    "testStartDate": "2020-01-01",
+                    "testEndDate": "2020-12-31",
+                    "test": {
+                        "sharpeRatio": -0.5,
+                        "totalReturnPct": -4.0,
+                        "maxDrawdownPct": -9.0,
+                    },
+                }
+            ],
+        },
+        {
+            "rank": 2,
+            "scenario": scenario_b,
+            "windows": [
+                {
+                    "year": 2021,
+                    "testStartDate": "2021-01-01",
+                    "testEndDate": "2021-12-31",
+                    "test": {
+                        "sharpeRatio": -0.5,
+                        "totalReturnPct": -6.0,
+                        "maxDrawdownPct": -8.0,
+                    },
+                }
+            ],
+        },
+    ]
+
+    worst = robustness_service.build_strategy_worst_window_summary(results)
+
+    assert worst["scenarioKey"] == "scenario-b"
+    assert worst["rank"] == 2
+    assert worst["window"]["year"] == 2021
+
+
 def test_build_scenario_comparison_applies_period_cost_and_risk_controls() -> None:
     comparison = copy.deepcopy(DEFAULT_COMPARISON_SPEC)
     scenario = {

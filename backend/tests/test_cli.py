@@ -305,6 +305,7 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Worst Sharpe" in captured.out
     assert "Risks:" in captured.out
     assert "Worst scenario" in captured.out
+    assert "Worst window" in captured.out
 
 
 def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -330,6 +331,9 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "worstSharpeRatio" in payload["strategyResults"][0]
     assert "top5ScenarioCount" in payload["strategyResults"][0]
     assert "worstScenario" in payload["strategyResults"][0]
+    assert "worstWindow" in payload["strategyResults"][0]
+    assert "windows" in payload["scenarioResults"][0]["results"][0]
+    assert "worstWindow" in payload["scenarioResults"][0]["results"][0]
 
 
 def test_robustness_summary_command_filters_strategy_keys(monkeypatch, tmp_path, capsys) -> None:

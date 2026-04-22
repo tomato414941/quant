@@ -544,6 +544,22 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
             f"Min Sharpe {worst['minimumSharpeRatio']:.3f} | "
             f"Rank {worst['rank']}"
         )
+        worst_window = result.get("worstWindow") or {}
+        window = worst_window.get("window") or {}
+        test_metrics = window.get("test") or {}
+        test_availability = window.get("testAvailability") or {}
+        if window:
+            eligible_min = test_availability.get("minEligibleAssetCount", "?")
+            eligible_max = test_availability.get("maxEligibleAssetCount", "?")
+            lines.append(
+                "   "
+                f"Worst window {worst_window['scenarioKey']} / {window['year']} "
+                f"{window['testStartDate']}..{window['testEndDate']} | "
+                f"Sharpe {test_metrics['sharpeRatio']:.3f} | "
+                f"Return {format_percent(test_metrics['totalReturnPct'])} | "
+                f"MDD {format_percent(test_metrics['maxDrawdownPct'])} | "
+                f"Eligible {eligible_min}-{eligible_max}"
+            )
     return "\n".join(lines)
 
 

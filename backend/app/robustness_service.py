@@ -373,7 +373,105 @@ def collect_scenario_diagnostics(payload: dict) -> dict:
     }
 
 
+PORTFOLIO_DRILLDOWN_METRIC_KEYS = (
+    "sharpeRatio",
+    "totalReturnPct",
+    "maxDrawdownPct",
+    "turnoverPct",
+)
+AVAILABILITY_DRILLDOWN_KEYS = (
+    "barCount",
+    "minAvailableAssetCount",
+    "maxAvailableAssetCount",
+    "minEligibleAssetCount",
+    "maxEligibleAssetCount",
+    "newlyEligibleAssetCount",
+    "removedAssetCount",
+    "newlyEligibleAssets",
+    "removedAssets",
+)
+
+
+def build_window_drilldowns(result: dict) -> list[dict]:
+    return [
+        build_window_drilldown(window)
+        for window in result.get("windows", [])
+    ]
+
+
+def build_window_drilldown(window: dict) -> dict:
+    return {
+        "year": int(window["year"]),
+        "testStartDate": window["testStartDate"],
+        "testEndDate": window["testEndDate"],
+        "test": project_portfolio_drilldown_metrics(window.get("test", {})),
+        "train": project_portfolio_drilldown_metrics(window.get("train", {})),
+        "testAvailability": project_availability_drilldown(window.get("testAvailability", {})),
+        "trainAvailability": project_availability_drilldown(window.get("trainAvailability", {})),
+    }
+
+
+def project_portfolio_drilldown_metrics(summary: dict) -> dict:
+    return {
+        key: float(summary[key])
+        for key in PORTFOLIO_DRILLDOWN_METRIC_KEYS
+        if key in summary
+    }
+
+
+def project_availability_drilldown(summary: dict) -> dict:
+    return {
+        key: summary[key]
+        for key in AVAILABILITY_DRILLDOWN_KEYS
+        if key in summary
+    }
+
+
+def build_worst_window_summary(windows: list[dict]) -> dict:
+    if not windows:
+        return {}
+    return min(windows, key=window_sort_key)
+
+
+def build_strategy_worst_window_summary(results: list[dict]) -> dict:
+    candidates = [
+        (result, window)
+        for result in results
+        for window in result.get("windows", [])
+    ]
+    if not candidates:
+        return {}
+    worst_result, worst_window = min(
+        candidates,
+        key=lambda candidate: (
+            *window_sort_key(candidate[1]),
+            candidate[0]["scenario"]["key"],
+        ),
+    )
+    scenario = worst_result["scenario"]
+    return {
+        "scenarioKey": scenario["key"],
+        "period": scenario["period"],
+        "universe": scenario["universe"],
+        "costMultiplier": float(scenario["costMultiplier"]),
+        "maxWeightPct": float(scenario["maxWeightPct"]),
+        "rank": int(worst_result["rank"]),
+        "window": worst_window,
+    }
+
+
+def window_sort_key(window: dict) -> tuple[float, float, float, int]:
+    test_metrics = window.get("test", {})
+    return (
+        float(test_metrics["sharpeRatio"]),
+        float(test_metrics["totalReturnPct"]),
+        float(test_metrics["maxDrawdownPct"]),
+        int(window["year"]),
+    )
+
+
 def build_scenario_strategy_result(result: dict, *, rank: int, diagnostics: dict) -> dict:
+    windows = build_window_drilldowns(result)
     return {
         "strategyKey": result["strategyKey"],
         "strategyLabel": result["strategyLabel"],
@@ -386,6 +484,8 @@ def build_scenario_strategy_result(result: dict, *, rank: int, diagnostics: dict
         "positiveReturnWindowCount": int(result["positiveReturnWindowCount"]),
         "windowCount": int(result["windowCount"]),
         "diagnostics": diagnostics,
+        "windows": windows,
+        "worstWindow": build_worst_window_summary(windows),
     }
 
 
@@ -446,6 +546,7 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         "diagnosticSummary": diagnostic_summary,
         "representativeDiagnostic": representative_event,
         "worstScenario": build_worst_scenario_summary(results),
+        "worstWindow": build_strategy_worst_window_summary(results),
         "scenarioResults": results,
     }
 

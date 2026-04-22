@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from app import robustness_service
+from app import signal_diagnostics_service
 from app.diagnostics_service import summarize_diagnostic_events
 from app.comparison_service import (
     build_comparison_payload,
@@ -111,6 +112,36 @@ def build_parser() -> argparse.ArgumentParser:
     robustness_parser.add_argument("--progress", action="store_true")
     robustness_parser.add_argument("--output", help="Write the full robustness JSON payload to this path.")
     robustness_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    signal_diagnostics_parser = subparsers.add_parser(
+        "signal-diagnostics",
+        help="Print signal score versus forward return diagnostics.",
+    )
+    signal_diagnostics_parser.add_argument(
+        "--strategy-key",
+        action="append",
+        dest="strategy_keys",
+        help="Restrict diagnostics to a strategy key. Can be repeated.",
+    )
+    signal_diagnostics_parser.add_argument(
+        "--period",
+        default=DEFAULT_COMPARISON_SPEC.run_spec.market_slice.period,
+        help="Market data period to evaluate.",
+    )
+    signal_diagnostics_parser.add_argument(
+        "--universe",
+        choices=UNIVERSE_VARIANT_KEYS,
+        default="crypto_included",
+        help="Run diagnostics against a fixed universe variant.",
+    )
+    signal_diagnostics_parser.add_argument(
+        "--horizon",
+        action="append",
+        dest="horizons",
+        default=None,
+        help="Forward horizon such as 1d, 5d, or 21d. Can be repeated.",
+    )
+    signal_diagnostics_parser.add_argument("--json", action="store_true", dest="as_json")
 
     comparison_run_spec_parser = subparsers.add_parser(
         "comparison-run-spec",
@@ -778,6 +809,30 @@ def render_walk_forward_summary(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+def render_signal_diagnostics(payload: dict) -> str:
+    lines = [
+        (
+            f"Signal diagnostics: {payload['strategyCount']} strategies | "
+            f"period {payload['period']} | universe {payload['universe']} | "
+            f"horizons {', '.join(payload.get('horizons') or [])}"
+        )
+    ]
+    for result in payload.get("strategyResults") or []:
+        lines.append(f"{result['strategyLabel']} [{result['strategyKey']}]")
+        for horizon_result in result.get("horizonResults") or []:
+            lines.append(
+                "   "
+                f"{horizon_result['horizon']} | "
+                f"samples {horizon_result['sampleCount']} | "
+                f"rank IC {format_optional_decimal(horizon_result.get('rankIc'))} | "
+                f"spread {format_optional_percent(horizon_result.get('topMinusBottomForwardReturnPct'))} | "
+                f"top {format_optional_percent(horizon_result.get('topBucketForwardReturnPct'))} | "
+                f"bottom {format_optional_percent(horizon_result.get('bottomBucketForwardReturnPct'))} | "
+                f"hit {format_optional_ratio_percent(horizon_result.get('hitRate'))}"
+            )
+    return "\n".join(lines)
+
+
 def render_robustness_summary(payload: dict, *, top: int) -> str:
     matrix = payload["matrix"]
     strategy_results = payload["strategyResults"]
@@ -1060,6 +1115,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_comparison_summary(payload, top=max(args.top, 1)))
+        return 0
+
+    if args.command == "signal-diagnostics":
+        horizons = (
+            tuple(signal_diagnostics_service.parse_signal_horizon_label(horizon) for horizon in args.horizons)
+            if args.horizons
+            else signal_diagnostics_service.DEFAULT_SIGNAL_DIAGNOSTIC_HORIZONS
+        )
+        comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
+        comparison_spec = filter_comparison_strategies(
+            comparison_spec,
+            tuple(args.strategy_keys) if args.strategy_keys else None,
+        )
+        payload = signal_diagnostics_service.build_signal_diagnostics_payload(
+            comparison_spec,
+            fetch_market_universe_bundle=fetch_market_universe_bundle,
+            period=args.period,
+            universe=args.universe,
+            horizons=horizons,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_signal_diagnostics(payload))
         return 0
 
     if args.command == "robustness-summary":

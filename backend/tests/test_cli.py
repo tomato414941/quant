@@ -481,6 +481,50 @@ def test_robustness_summary_command_progress_and_output_json(monkeypatch, tmp_pa
     assert "elapsed=" in captured.err
 
 
+def test_signal_diagnostics_command_text(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+    strategy_key = config.candidate_strategies[0].key
+
+    exit_code = cli_module.main([
+        "signal-diagnostics",
+        "--strategy-key",
+        strategy_key,
+        "--horizon",
+        "1d",
+    ])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Signal diagnostics:" in captured.out
+    assert strategy_key in captured.out
+    assert "1d" in captured.out
+    assert "rank IC" in captured.out
+    assert "spread" in captured.out
+
+
+def test_signal_diagnostics_command_json(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+    strategy_key = config.candidate_strategies[0].key
+
+    exit_code = cli_module.main([
+        "signal-diagnostics",
+        "--json",
+        "--strategy-key",
+        strategy_key,
+        "--horizon",
+        "1d",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kind"] == "signal_diagnostics"
+    assert payload["horizons"] == ["1d"]
+    assert payload["strategyCount"] == 1
+    assert payload["strategyResults"][0]["strategyKey"] == strategy_key
+    assert payload["strategyResults"][0]["horizonResults"][0]["horizon"] == "1d"
+    assert "rankIc" in payload["strategyResults"][0]["horizonResults"][0]
+
+
 def test_render_availability_diagnostics_shows_calendar_boundary_classification() -> None:
     lines = []
 
@@ -507,7 +551,6 @@ def test_render_availability_diagnostics_shows_calendar_boundary_classification(
     assert "Calendar boundary differences:" in output
     assert "classified as non-actionable" in output
     assert "1d data ends" not in output
-
 
 def test_render_availability_diagnostics_keeps_actionable_risks() -> None:
     lines = []

@@ -6,8 +6,12 @@ import statistics
 
 import numpy as np
 import pandas as pd
-from skfolio.optimization import HierarchicalRiskParity, MeanRisk, RiskBudgeting
 from app.instrument_registry import get_instrument
+from app.portfolio_allocation import (
+    build_equal_weight_fallback,
+    expand_weights,
+    fit_portfolio_model,
+)
 from app.portfolio_domain import *
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME
 
@@ -2751,15 +2755,6 @@ def standardize_prediction_series(series: pd.Series) -> pd.Series:
     return standardized.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
-def expand_weights(
-    universe_columns: pd.Index,
-    selected_columns: pd.Index,
-    selected_weights: np.ndarray,
-) -> np.ndarray:
-    weight_map = {str(asset): float(weight) for asset, weight in zip(selected_columns, selected_weights, strict=True)}
-    return np.asarray([weight_map.get(str(asset), 0.0) for asset in universe_columns], dtype="float64")
-
-
 def compute_portfolio_allocation(
     history_returns: pd.DataFrame,
     volume_history: pd.DataFrame | None,
@@ -2928,92 +2923,6 @@ def compute_expected_return_proxy(
     if forecast is None or forecast.expected_return_proxy is None:
         return None
     return forecast.expected_return_proxy.reindex(returns.columns).to_numpy(dtype="float64")
-
-
-def fit_portfolio_model(
-    returns: pd.DataFrame,
-    portfolio_model: PortfolioModelSpec,
-    *,
-    max_investment_ratio: float,
-    max_weight: float | None,
-    previous_weights: np.ndarray | None,
-    transaction_cost: float,
-    expected_return_proxy: np.ndarray | None,
-) -> np.ndarray:
-    asset_count = len(returns.columns)
-    if asset_count == 0:
-        raise ValueError("At least one asset is required.")
-
-    raw_max_weight = None
-    if max_weight is not None:
-        raw_max_weight = min(1.0, max_weight / max_investment_ratio)
-
-    if portfolio_model.model_type == "equal_weight":
-        weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif portfolio_model.model_type == "risk_budgeting":
-        try:
-            estimator = RiskBudgeting(
-                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                transaction_costs=transaction_cost,
-                previous_weights=previous_weights,
-            )
-            estimator.fit(returns)
-            weights = estimator.weights_
-        except Exception:
-            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif portfolio_model.model_type == "minimum_variance":
-        try:
-            estimator = MeanRisk(
-                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                transaction_costs=transaction_cost,
-                previous_weights=previous_weights,
-            )
-            estimator.fit(returns)
-            weights = estimator.weights_
-        except Exception:
-            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif portfolio_model.model_type == "hierarchical_risk_parity":
-        if asset_count <= 2:
-            try:
-                estimator = RiskBudgeting(
-                    max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                    transaction_costs=transaction_cost,
-                    previous_weights=previous_weights,
-                )
-                estimator.fit(returns)
-                weights = estimator.weights_
-            except Exception:
-                weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-        else:
-            try:
-                estimator = HierarchicalRiskParity(
-                    max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                    transaction_costs=transaction_cost,
-                    previous_weights=previous_weights,
-                )
-                estimator.fit(returns)
-                weights = estimator.weights_
-            except Exception:
-                weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    elif portfolio_model.model_type in {"mean_risk_utility", "mean_risk_utility_conservative"}:
-        weights = build_equal_weight_fallback(asset_count, raw_max_weight)
-    else:
-        raise ValueError("Unsupported portfolio model.")
-
-    weights = np.asarray(weights, dtype="float64")
-    weight_sum = weights.sum()
-    if weight_sum <= 0:
-        raise ValueError("Portfolio model returned invalid weights.")
-    if raw_max_weight is not None and weight_sum < 0.999999:
-        return weights
-    return weights / weight_sum
-
-
-def build_equal_weight_fallback(asset_count: int, raw_max_weight: float | None) -> np.ndarray:
-    weights = np.repeat(1 / asset_count, asset_count)
-    if raw_max_weight is not None:
-        weights = np.minimum(weights, raw_max_weight)
-    return weights
 
 
 def run_portfolio_backtest(

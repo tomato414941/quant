@@ -362,6 +362,85 @@ def test_build_scenario_strategy_result_preserves_compact_window_drilldown() -> 
     assert projected["worstWindow"]["testAvailability"]["minEligibleAssetCount"] == 2
 
 
+def test_build_scenario_strategy_result_summarizes_weights() -> None:
+    result = {
+        "strategyKey": "stg-test",
+        "strategyLabel": "Test Strategy",
+        "averageSharpeRatio": 1.0,
+        "minimumSharpeRatio": 0.5,
+        "averageTotalReturnPct": 8.0,
+        "averageMaxDrawdownPct": 3.0,
+        "averageTurnoverPct": 12.0,
+        "positiveReturnWindowCount": 1,
+        "windowCount": 1,
+        "windows": [
+            {
+                "year": 2020,
+                "testStartDate": "2020-01-01",
+                "testEndDate": "2020-12-31",
+                "test": {
+                    "sharpeRatio": 1.0,
+                    "totalReturnPct": 8.0,
+                    "maxDrawdownPct": 3.0,
+                    "turnoverPct": 12.0,
+                },
+                "train": {
+                    "sharpeRatio": 0.8,
+                    "totalReturnPct": 6.0,
+                    "maxDrawdownPct": 2.0,
+                    "turnoverPct": 10.0,
+                },
+                "weights": [
+                    {"asset": "SPY", "weightPct": 30.0},
+                    {"asset": "QQQ", "weightPct": 25.0},
+                    {"asset": "TLT", "weightPct": 20.0},
+                    {"asset": "CASH", "weightPct": 25.0},
+                ],
+                "selectedAssets": ["SPY", "QQQ", "TLT"],
+                "testAvailability": {},
+                "trainAvailability": {},
+            }
+        ],
+    }
+
+    projected = robustness_service.build_scenario_strategy_result(
+        result,
+        rank=1,
+        diagnostics={"flags": []},
+    )
+
+    assert projected["diversificationSummary"]["averageHoldingCount"] == 3.0
+    assert projected["diversificationSummary"]["averageTop5WeightPct"] == 75.0
+    assert projected["exposureSummary"]["averageCashWeightPct"] == 25.0
+    assert projected["windows"][0]["weights"][0] == {"asset": "SPY", "weightPct": 30.0}
+
+
+def test_attach_delta_vs_baseline_reports_zero_for_baseline() -> None:
+    baseline = {
+        "strategyKey": "ref-fu-eq-cash",
+        "averageSharpeRatio": 1.2,
+        "worstSharpeRatio": 0.8,
+        "averageTotalReturnPct": 10.0,
+        "worstMaxDrawdownPct": 5.0,
+        "averageTurnoverPct": 50.0,
+        "maxTurnoverPct": 90.0,
+        "cryptoSensitivity": 0.1,
+        "costSensitivity": -0.05,
+    }
+
+    attached = robustness_service.attach_delta_vs_baseline([baseline], baseline)
+
+    assert attached[0]["deltaVsBaseline"] == {
+        "averageSharpeRatio": 0.0,
+        "worstSharpeRatio": 0.0,
+        "averageTotalReturnPct": 0.0,
+        "worstMaxDrawdownPct": 0.0,
+        "averageTurnoverPct": 0.0,
+        "maxTurnoverPct": 0.0,
+        "cryptoSensitivity": 0.0,
+        "costSensitivity": 0.0,
+    }
+
 def test_build_strategy_worst_window_summary_crosses_scenarios() -> None:
     scenario_a = {
         "key": "scenario-a",

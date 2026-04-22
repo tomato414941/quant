@@ -8,6 +8,7 @@ from app.strategy_definition_builder import (
 )
 from app.strategy_presets import (
     DEFAULT_ANNUAL_EXECUTION_POLICY,
+    DEFAULT_MONTH_END_EXECUTION_POLICY,
     DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_INVESTMENT_UNIVERSE,
     DEFAULT_RISK_CONTROLS,
@@ -156,6 +157,43 @@ FULL_UNIVERSE_CANDIDATE_DEFINITIONS = [
                 key="annual",
                 timeframe=DEFAULT_DAILY_TIMEFRAME,
                 execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
+            ),
+        ],
+        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        risk_controls=DEFAULT_RISK_CONTROLS,
+    ),
+    *build_selection_strategy_definition_product(
+        strategy_id_pattern="{selection}",
+        selection_variants=[
+            SelectionVariantDefinition(
+                key="stg-fu-momolv8515-top025-hrp-month",
+                selection=FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP,
+                hypothesis="月次で全資産を残した低ボラ弱め傾斜は、分散を保ちながら回転を抑えて改善しやすい",
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momomac8515-top025-hrp-month",
+                selection=FULL_UNIVERSE_MOMENTUM_MACRO_TILT_LIGHT_TOP,
+                hypothesis="月次で全資産を残したマクロ弱め傾斜は、分散を保ちながら環境変化を取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momo12-soft025-hrp-month",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_SOFTMAX,
+                hypothesis="月次で全資産を残した弱いsoftmax傾斜は、集中を避けながらモメンタムを取り込みやすい",
+            ),
+            SelectionVariantDefinition(
+                key="stg-fu-momo12-lin050-hrp-month",
+                selection=FULL_UNIVERSE_MOMENTUM_TILT,
+                hypothesis="月次で全資産を残した線形モメンタム傾斜は、分散を保ちながらトレンドを取り込みやすい",
+            ),
+        ],
+        portfolio_model_variants=[
+            PortfolioModelVariantDefinition(key="hrp", portfolio_model=HIERARCHICAL_RISK_PARITY),
+        ],
+        execution_variants=[
+            ExecutionVariantDefinition(
+                key="month",
+                timeframe=DEFAULT_DAILY_TIMEFRAME,
+                execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
             ),
         ],
         investment_universe=DEFAULT_INVESTMENT_UNIVERSE,

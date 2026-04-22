@@ -47,6 +47,8 @@ ROBUSTNESS_UNIVERSES = ("crypto_included", "no_crypto", "btc_only")
 ROBUSTNESS_COST_MULTIPLIERS = (1.0, 2.0, 3.0)
 ROBUSTNESS_MAX_WEIGHTS = (0.25, 0.35, 0.45)
 ROBUSTNESS_MAX_INVESTMENT_RATIO = 1.0
+ROBUSTNESS_BASELINE_KEY = "ref-fu-eq-cash"
+WEIGHT_EPSILON_PCT = 1e-9
 ROBUSTNESS_PROFILE_KEYS = ("smoke", "quick", "standard")
 ROBUSTNESS_SMOKE_PERIOD_KEYS = ("2020_2025",)
 ROBUSTNESS_SMOKE_UNIVERSES = ("crypto_included",)
@@ -154,12 +156,17 @@ def build_robustness_summary_payload(
         for group in strategy_groups.values()
     ]
     strategy_results = sort_robustness_results(strategy_results)
+    baseline_result = find_strategy_result(strategy_results, ROBUSTNESS_BASELINE_KEY)
+    if baseline_result is not None:
+        strategy_results = attach_delta_vs_baseline(strategy_results, baseline_result)
     matrix = build_robustness_matrix(scenarios)
 
     return {
         "kind": "robustness_summary",
         "schemaVersion": "v1",
         "profile": profile,
+        "baselineKey": ROBUSTNESS_BASELINE_KEY,
+        "baselineAvailable": baseline_result is not None,
         "scenarioCount": len(scenarios),
         "elapsedSeconds": round(time.perf_counter() - started_at, 3),
         "runStoreSummary": {
@@ -285,6 +292,40 @@ def build_decision_summary(strategy_results: list[dict]) -> dict:
     }
 
 
+def find_strategy_result(results: list[dict], strategy_key: str) -> dict | None:
+    return next(
+        (result for result in results if result["strategyKey"] == strategy_key),
+        None,
+    )
+
+
+def attach_delta_vs_baseline(results: list[dict], baseline: dict) -> list[dict]:
+    return [
+        {
+            **result,
+            "deltaVsBaseline": build_delta_vs_baseline(result, baseline),
+        }
+        for result in results
+    ]
+
+
+def build_delta_vs_baseline(result: dict, baseline: dict) -> dict:
+    return {
+        "averageSharpeRatio": metric_delta(result, baseline, "averageSharpeRatio"),
+        "worstSharpeRatio": metric_delta(result, baseline, "worstSharpeRatio"),
+        "averageTotalReturnPct": metric_delta(result, baseline, "averageTotalReturnPct"),
+        "worstMaxDrawdownPct": metric_delta(result, baseline, "worstMaxDrawdownPct"),
+        "averageTurnoverPct": metric_delta(result, baseline, "averageTurnoverPct"),
+        "maxTurnoverPct": metric_delta(result, baseline, "maxTurnoverPct"),
+        "cryptoSensitivity": metric_delta(result, baseline, "cryptoSensitivity"),
+        "costSensitivity": metric_delta(result, baseline, "costSensitivity"),
+    }
+
+
+def metric_delta(result: dict, baseline: dict, key: str) -> float:
+    return round(float(result[key]) - float(baseline[key]), 6)
+
+
 def format_key_number(value: float) -> str:
     return str(value).replace(".", "_")
 
@@ -392,6 +433,145 @@ AVAILABILITY_DRILLDOWN_KEYS = (
 )
 
 
+def project_weight_rows(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "asset": str(row["asset"]),
+            "weightPct": float(row["weightPct"]),
+        }
+        for row in rows
+        if "asset" in row and "weightPct" in row
+    ]
+
+
+def summarize_weight_diversification(weights: list[dict], selected_assets: list[str]) -> dict:
+    asset_weights = sorted(
+        (
+            float(row["weightPct"])
+            for row in weights
+            if row["asset"] != "CASH" and float(row["weightPct"]) > WEIGHT_EPSILON_PCT
+        ),
+        reverse=True,
+    )
+    top5_weight = sum(asset_weights[:5])
+    return {
+        "holdingCount": len(asset_weights),
+        "selectedAssetCount": len(selected_assets),
+        "top5WeightPct": round(top5_weight, 6),
+        "maxAssetWeightPct": round(max(asset_weights), 6) if asset_weights else 0.0,
+    }
+
+
+def summarize_weight_exposure(weights: list[dict]) -> dict:
+    raw_cash_weight = sum(
+        float(row["weightPct"])
+        for row in weights
+        if row["asset"] == "CASH"
+    )
+    raw_invested_weight = sum(
+        float(row["weightPct"])
+        for row in weights
+        if row["asset"] != "CASH" and float(row["weightPct"]) > WEIGHT_EPSILON_PCT
+    )
+    invested_weight = min(100.0, raw_invested_weight)
+    cash_weight = (
+        raw_cash_weight
+        if raw_cash_weight > 0
+        else max(0.0, 100.0 - invested_weight)
+    )
+    return {
+        "investedWeightPct": round(invested_weight, 6),
+        "cashWeightPct": round(cash_weight, 6),
+    }
+
+
+def summarize_window_diversification(windows: list[dict]) -> dict:
+    summaries = [
+        window.get("diversificationSummary", {})
+        for window in windows
+        if window.get("diversificationSummary")
+    ]
+    if not summaries:
+        return empty_diversification_summary()
+    return {
+        "averageHoldingCount": round(average([float(summary["holdingCount"]) for summary in summaries]), 6),
+        "minimumHoldingCount": int(min(int(summary["holdingCount"]) for summary in summaries)),
+        "averageSelectedAssetCount": round(average([float(summary["selectedAssetCount"]) for summary in summaries]), 6),
+        "averageTop5WeightPct": round(average([float(summary["top5WeightPct"]) for summary in summaries]), 6),
+        "maximumTop5WeightPct": round(max(float(summary["top5WeightPct"]) for summary in summaries), 6),
+        "maximumSingleAssetWeightPct": round(max(float(summary["maxAssetWeightPct"]) for summary in summaries), 6),
+    }
+
+
+def summarize_window_exposure(windows: list[dict]) -> dict:
+    summaries = [
+        window.get("exposureSummary", {})
+        for window in windows
+        if window.get("exposureSummary")
+    ]
+    if not summaries:
+        return empty_exposure_summary()
+    return {
+        "averageInvestedWeightPct": round(average([float(summary["investedWeightPct"]) for summary in summaries]), 6),
+        "averageCashWeightPct": round(average([float(summary["cashWeightPct"]) for summary in summaries]), 6),
+        "minimumCashWeightPct": round(min(float(summary["cashWeightPct"]) for summary in summaries), 6),
+        "maximumCashWeightPct": round(max(float(summary["cashWeightPct"]) for summary in summaries), 6),
+    }
+
+
+def summarize_strategy_diversification(scenario_results: list[dict]) -> dict:
+    summaries = [
+        result.get("diversificationSummary", {})
+        for result in scenario_results
+        if result.get("diversificationSummary")
+    ]
+    if not summaries:
+        return empty_diversification_summary()
+    return {
+        "averageHoldingCount": round(average([float(summary["averageHoldingCount"]) for summary in summaries]), 6),
+        "minimumHoldingCount": int(min(int(summary["minimumHoldingCount"]) for summary in summaries)),
+        "averageSelectedAssetCount": round(average([float(summary["averageSelectedAssetCount"]) for summary in summaries]), 6),
+        "averageTop5WeightPct": round(average([float(summary["averageTop5WeightPct"]) for summary in summaries]), 6),
+        "maximumTop5WeightPct": round(max(float(summary["maximumTop5WeightPct"]) for summary in summaries), 6),
+        "maximumSingleAssetWeightPct": round(max(float(summary["maximumSingleAssetWeightPct"]) for summary in summaries), 6),
+    }
+
+
+def summarize_strategy_exposure(scenario_results: list[dict]) -> dict:
+    summaries = [
+        result.get("exposureSummary", {})
+        for result in scenario_results
+        if result.get("exposureSummary")
+    ]
+    if not summaries:
+        return empty_exposure_summary()
+    return {
+        "averageInvestedWeightPct": round(average([float(summary["averageInvestedWeightPct"]) for summary in summaries]), 6),
+        "averageCashWeightPct": round(average([float(summary["averageCashWeightPct"]) for summary in summaries]), 6),
+        "minimumCashWeightPct": round(min(float(summary["minimumCashWeightPct"]) for summary in summaries), 6),
+        "maximumCashWeightPct": round(max(float(summary["maximumCashWeightPct"]) for summary in summaries), 6),
+    }
+
+
+def empty_diversification_summary() -> dict:
+    return {
+        "averageHoldingCount": 0.0,
+        "minimumHoldingCount": 0,
+        "averageSelectedAssetCount": 0.0,
+        "averageTop5WeightPct": 0.0,
+        "maximumTop5WeightPct": 0.0,
+        "maximumSingleAssetWeightPct": 0.0,
+    }
+
+
+def empty_exposure_summary() -> dict:
+    return {
+        "averageInvestedWeightPct": 0.0,
+        "averageCashWeightPct": 0.0,
+        "minimumCashWeightPct": 0.0,
+        "maximumCashWeightPct": 0.0,
+    }
+
 def build_window_drilldowns(result: dict) -> list[dict]:
     return [
         build_window_drilldown(window)
@@ -400,12 +580,18 @@ def build_window_drilldowns(result: dict) -> list[dict]:
 
 
 def build_window_drilldown(window: dict) -> dict:
+    weights = project_weight_rows(window.get("weights", []))
+    selected_assets = [str(asset) for asset in window.get("selectedAssets", [])]
     return {
         "year": int(window["year"]),
         "testStartDate": window["testStartDate"],
         "testEndDate": window["testEndDate"],
         "test": project_portfolio_drilldown_metrics(window.get("test", {})),
         "train": project_portfolio_drilldown_metrics(window.get("train", {})),
+        "weights": weights,
+        "selectedAssets": selected_assets,
+        "diversificationSummary": summarize_weight_diversification(weights, selected_assets),
+        "exposureSummary": summarize_weight_exposure(weights),
         "testAvailability": project_availability_drilldown(window.get("testAvailability", {})),
         "trainAvailability": project_availability_drilldown(window.get("trainAvailability", {})),
     }
@@ -484,6 +670,8 @@ def build_scenario_strategy_result(result: dict, *, rank: int, diagnostics: dict
         "positiveReturnWindowCount": int(result["positiveReturnWindowCount"]),
         "windowCount": int(result["windowCount"]),
         "diagnostics": diagnostics,
+        "diversificationSummary": summarize_window_diversification(windows),
+        "exposureSummary": summarize_window_exposure(windows),
         "windows": windows,
         "worstWindow": build_worst_window_summary(windows),
     }
@@ -545,6 +733,8 @@ def summarize_strategy_robustness(group: dict, *, scenario_count: int) -> dict:
         "diagnosticFlags": diagnostic_flags,
         "diagnosticSummary": diagnostic_summary,
         "representativeDiagnostic": representative_event,
+        "diversificationSummary": summarize_strategy_diversification(results),
+        "exposureSummary": summarize_strategy_exposure(results),
         "worstScenario": build_worst_scenario_summary(results),
         "worstWindow": build_strategy_worst_window_summary(results),
         "scenarioResults": results,

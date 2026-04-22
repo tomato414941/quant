@@ -782,6 +782,33 @@ def render_robustness_summary(payload: dict, *, top: int) -> str:
             f"Avg Turnover {format_percent(result['averageTurnoverPct'])} | "
             f"Max Turnover {format_percent(result['maxTurnoverPct'])}"
         )
+        diversification = result.get("diversificationSummary") or {}
+        exposure = result.get("exposureSummary") or {}
+        if diversification:
+            lines.append(
+                "   "
+                f"Holdings avg {diversification['averageHoldingCount']:.1f} | "
+                f"min {diversification['minimumHoldingCount']} | "
+                f"Top5 weight {format_percent(diversification['averageTop5WeightPct'])} | "
+                f"Max asset {format_percent(diversification['maximumSingleAssetWeightPct'])}"
+            )
+        if exposure:
+            lines.append(
+                "   "
+                f"Invested {format_percent(exposure['averageInvestedWeightPct'])} | "
+                f"Cash {format_percent(exposure['averageCashWeightPct'])}"
+            )
+        delta = result.get("deltaVsBaseline")
+        if delta:
+            lines.append(
+                "   "
+                f"Delta vs {payload['baselineKey']}: "
+                f"Sharpe {delta['averageSharpeRatio']:+.3f} | "
+                f"Worst Sharpe {delta['worstSharpeRatio']:+.3f} | "
+                f"Return {format_percent(delta['averageTotalReturnPct'])} | "
+                f"MDD {format_percent(delta['worstMaxDrawdownPct'])} | "
+                f"Turnover {format_percent(delta['averageTurnoverPct'])}"
+            )
         worst = result["worstScenario"]
         lines.append(
             "   "

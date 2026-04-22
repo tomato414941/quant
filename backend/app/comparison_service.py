@@ -1199,6 +1199,8 @@ def aggregate_walk_forward_runs(runs_by_window: list[dict]) -> list[dict]:
                     "testEndDate": window["testEndDate"],
                     "test": test_summary,
                     "train": train_summary,
+                    "weights": run.get("weights", []),
+                    "selectedAssets": run.get("selectedAssets", []),
                     "testAvailability": summarize_run_series_availability(
                         run.get("series", []),
                         start_date=test_split.get("startDate"),

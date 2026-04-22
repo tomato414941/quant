@@ -637,6 +637,24 @@ def test_full_universe_candidates_are_strategy_definitions() -> None:
     assert core_candidate.signals[0].source_kind == "selection_signal"
     assert core_candidate.signals[0].data_timeframe.key == "1d"
 
+    monthly_keys = {
+        "stg-fu-momolv8515-top025-hrp-month",
+        "stg-fu-momomac8515-top025-hrp-month",
+        "stg-fu-momo12-soft025-hrp-month",
+        "stg-fu-momo12-lin050-hrp-month",
+    }
+    monthly_candidates = {
+        definition.strategy_id: definition
+        for definition in FULL_UNIVERSE_CANDIDATE_DEFINITIONS
+        if definition.strategy_id in monthly_keys
+    }
+    assert set(monthly_candidates) == monthly_keys
+    for definition in monthly_candidates.values():
+        assert definition.execution_plan.decision_schedule == "month_end"
+        assert definition.execution_plan.rebalance_schedule == "month_end"
+        assert definition.signals[0].source_kind == "selection_signal"
+        assert definition.signals[0].data_timeframe.key == "1d"
+
 
 
 def test_strategy_signal_builder_infers_data_source_and_feature_definition() -> None:

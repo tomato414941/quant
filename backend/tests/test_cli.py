@@ -370,6 +370,8 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Risks:" in captured.out
     assert "Worst scenario" in captured.out
     assert "Worst window" in captured.out
+    assert "Holdings avg" in captured.out
+    assert "Delta vs ref-fu-eq-cash" in captured.out
 
 
 def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -382,6 +384,8 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert payload["kind"] == "robustness_summary"
     assert payload["schemaVersion"] == "v1"
     assert payload["profile"] == "quick"
+    assert payload["baselineKey"] == "ref-fu-eq-cash"
+    assert payload["baselineAvailable"] is True
     assert payload["scenarioCount"] == 1
     assert "elapsedSeconds" in payload
     assert "elapsedSeconds" in payload["scenarioResults"][0]
@@ -396,8 +400,20 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "top5ScenarioCount" in payload["strategyResults"][0]
     assert "worstScenario" in payload["strategyResults"][0]
     assert "worstWindow" in payload["strategyResults"][0]
+    assert "diversificationSummary" in payload["strategyResults"][0]
+    assert "exposureSummary" in payload["strategyResults"][0]
+    baseline = next(
+        result for result in payload["strategyResults"]
+        if result["strategyKey"] == "ref-fu-eq-cash"
+    )
+    assert baseline["deltaVsBaseline"]["averageSharpeRatio"] == 0.0
+    assert baseline["deltaVsBaseline"]["averageTotalReturnPct"] == 0.0
     assert "windows" in payload["scenarioResults"][0]["results"][0]
     assert "worstWindow" in payload["scenarioResults"][0]["results"][0]
+    first_window = payload["scenarioResults"][0]["results"][0]["windows"][0]
+    assert "weights" in first_window
+    assert "diversificationSummary" in first_window
+    assert "exposureSummary" in first_window
 
 
 def test_robustness_summary_command_filters_strategy_keys(monkeypatch, tmp_path, capsys) -> None:

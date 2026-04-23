@@ -61,6 +61,7 @@ from app.portfolio import (
     prepare_signal_component_data,
     resample_market_frame_to_timeframe,
     resample_returns_frame_to_timeframe,
+    resolve_decision_policy_kind,
     resolve_decision_schedule,
     resolve_strategy_market_data_timeframe_key,
     serialize_strategy_definition,
@@ -129,6 +130,7 @@ def make_strategy(
     max_weight: float | None = None,
     score_parameters: dict[str, float | str | bool] | None = None,
     predictor_use=None,
+    decision_policy: str = "direct_score_to_weight",
 ):
     return build_evaluator_strategy_spec(
         investment_universe=build_investment_universe_spec(
@@ -159,6 +161,7 @@ def make_strategy(
             max_weight=max_weight,
         ),
         predictor_use=predictor_use,
+        extensions={"decision_policy": decision_policy},
     )
 
 
@@ -2394,6 +2397,32 @@ def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost()
     assert no_trade_events[0]["decisionReason"] == "edge_below_cost"
     assert no_trade_events[0]["estimatedEdgePct"] is not None
     assert run["strategy"]["components"]["optional"]["decisionPolicy"]["key"] == COST_AWARE_NO_TRADE_DECISION_POLICY
+
+
+def test_default_decision_policy_is_cost_aware_no_trade() -> None:
+    strategy = build_evaluator_strategy_spec(
+        strategy_id="default_decision_policy_test",
+        investment_universe=build_investment_universe_spec(
+            tickers=["AAA", "BBB", "CCC"],
+            key="default_decision_policy_universe",
+            label="Default decision policy universe",
+        ),
+        selection=build_selection_spec(
+            "momentum_top3",
+            score_parameters={"windowSpec": {"unit": "bars", "value": 3}},
+        ),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        decision_schedule="every_bar",
+    )
+
+    assert resolve_decision_policy_kind(strategy) == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 
 def test_prepare_strategy_market_data_resamples_daily_source_to_weekly_signal_timeframe() -> None:

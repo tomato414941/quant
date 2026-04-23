@@ -1949,7 +1949,7 @@ def serialize_evaluator_strategy_spec(strategy: EvaluatorStrategySpec) -> dict:
                 "riskControls": serialize_risk_controls_spec(strategy.risk_controls),
                 "tiltRule": serialize_tilt_rule(strategy),
                 "decisionPolicy": {
-                    "key": dict(strategy.extensions).get("decision_policy", "direct_score_to_weight"),
+                    "key": dict(strategy.extensions).get("decision_policy", "cost_aware_no_trade"),
                 },
                 "signalExecutionContexts": {
                     "selectionSignals": [

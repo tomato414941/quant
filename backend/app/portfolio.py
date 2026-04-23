@@ -1104,7 +1104,7 @@ def compute_dynamic_portfolio_allocation(
 
 
 def resolve_decision_policy_kind(strategy: EvaluatorStrategySpec) -> str:
-    policy = dict(strategy.extensions).get(DECISION_POLICY_EXTENSION_KEY, DIRECT_SCORE_DECISION_POLICY)
+    policy = dict(strategy.extensions).get(DECISION_POLICY_EXTENSION_KEY, COST_AWARE_NO_TRADE_DECISION_POLICY)
     if policy not in SUPPORTED_DECISION_POLICIES:
         raise ValueError(f"Unsupported decision policy: {policy}")
     return policy

@@ -340,6 +340,12 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "averageCagrPct" in components_by_key["strategy_full"]["summary"]
     assert "allocationSummary" in components_by_key["strategy_full"]
     assert "averageHoldingCount" in components_by_key["strategy_full"]["allocationSummary"]
+    assert "executionTraceSummary" in components_by_key["strategy_full"]
+    trace_summary = components_by_key["strategy_full"]["executionTraceSummary"]
+    assert "eventCount" in trace_summary
+    assert "decisionEventCount" in trace_summary
+    assert "rebalanceEventCount" in trace_summary
+    assert "executionTraceSummary" in components_by_key["strategy_full"]["windows"][0]
     assert "pureSelectionEffectVsUniverse" in payload["effectSummary"]
     assert "tiltEffectVsPureSelection" in payload["effectSummary"]
     assert "portfolioModelEffectVsPureSelection" in payload["effectSummary"]
@@ -347,6 +353,10 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "primaryFinding" in payload["diagnosis"]
     assert "likelyCauses" in payload["diagnosis"]
     assert "turnoverIncreasePct" in payload["diagnosis"]
+    assert "fullTraceNoTradeCount" in payload["diagnosis"]
+    assert "fullTraceForcedUniverseChangeCount" in payload["diagnosis"]
+    assert "fullTraceAverageTurnoverPct" in payload["diagnosis"]
+    assert "fullTraceAverageEstimatedCostPct" in payload["diagnosis"]
     assert "tiltEffectReturnPct" in payload["diagnosis"]
     assert "portfolioModelEffectReturnPct" in payload["diagnosis"]
 
@@ -368,6 +378,7 @@ def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Edge attribution:" in captured.out
+    assert "Trace events" in captured.out
     assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
     assert "Components:" in captured.out
     assert "Pure selection effect:" in captured.out

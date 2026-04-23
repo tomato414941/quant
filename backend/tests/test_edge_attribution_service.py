@@ -1,4 +1,7 @@
-from app.edge_attribution_service import build_edge_attribution_strategy_variants
+from app.edge_attribution_service import (
+    build_edge_attribution_strategy_variants,
+    build_execution_trace_summary,
+)
 from app.main import DEFAULT_COMPARISON_SPEC
 from app.portfolio import get_strategy_signal_execution_contexts
 from app.portfolio_domain import (
@@ -86,3 +89,88 @@ def test_edge_attribution_no_tilt_variants_keep_zero_tilt_at_runtime() -> None:
     assert model_params["tilt_strength"] == 0.0
     assert model_params["tilt_shape"] == 0.0
     assert full_params == get_runtime_score_parameters(base_strategy)
+
+
+def test_build_execution_trace_summary_counts_runtime_events() -> None:
+    summary = build_execution_trace_summary([
+        {
+            "eventType": "decision",
+            "decisionAction": "rebalance",
+            "decisionReason": "scheduled_rebalance",
+            "edgeSource": "signal_return_proxy",
+            "turnoverPct": 10.0,
+            "estimatedCostPct": 0.2,
+            "estimatedEdgePct": 1.2,
+            "averageConfidence": 0.6,
+            "selectedAssets": ["AAA", "BBB"],
+            "availableAssetCount": 4,
+            "eligibleAssetCount": 3,
+        },
+        {
+            "eventType": "rebalance",
+            "decisionAction": "rebalance",
+            "decisionReason": "scheduled_rebalance",
+            "turnoverPct": 8.0,
+            "estimatedCostPct": 0.1,
+            "selectedAssets": ["AAA"],
+            "availableAssetCount": 4,
+            "eligibleAssetCount": 3,
+        },
+        {
+            "eventType": "decision",
+            "decisionAction": "no_trade",
+            "decisionReason": "edge_below_cost",
+            "edgeSource": "signal_return_proxy",
+            "turnoverPct": 0.0,
+            "estimatedCostPct": 0.0,
+            "estimatedEdgePct": -0.5,
+            "averageConfidence": 0.4,
+            "selectedAssets": [],
+            "availableAssetCount": 3,
+            "eligibleAssetCount": 2,
+        },
+        {
+            "eventType": "forced_universe_change",
+            "decisionAction": "forced_rebalance",
+            "decisionReason": "asset_unavailable",
+            "turnoverPct": 5.0,
+            "estimatedCostPct": 0.05,
+            "selectedAssets": ["BBB"],
+            "availableAssetCount": 2,
+            "eligibleAssetCount": 1,
+        },
+    ])
+
+    assert summary["eventCount"] == 4
+    assert summary["decisionEventCount"] == 2
+    assert summary["rebalanceEventCount"] == 1
+    assert summary["forcedUniverseChangeEventCount"] == 1
+    assert summary["tradeCount"] == 3
+    assert summary["noTradeCount"] == 1
+    assert summary["eventTypeCounts"] == {
+        "decision": 2,
+        "forced_universe_change": 1,
+        "rebalance": 1,
+    }
+    assert summary["decisionActionCounts"] == {
+        "forced_rebalance": 1,
+        "no_trade": 1,
+        "rebalance": 2,
+    }
+    assert summary["decisionReasonCounts"]["edge_below_cost"] == 1
+    assert summary["edgeSourceCounts"] == {"signal_return_proxy": 2}
+    assert summary["averageTurnoverPct"] == 5.75
+    assert summary["averageEstimatedCostPct"] == 0.0875
+    assert summary["averageEstimatedEdgePct"] == 0.35
+    assert summary["averageConfidence"] == 0.5
+    assert summary["averageSelectedAssetCount"] == 1.0
+    assert summary["averageAvailableAssetCount"] == 3.25
+    assert summary["averageEligibleAssetCount"] == 2.25
+
+
+def test_build_execution_trace_summary_handles_empty_trace() -> None:
+    summary = build_execution_trace_summary([])
+
+    assert summary["eventCount"] == 0
+    assert summary["eventTypeCounts"] == {}
+    assert summary["averageTurnoverPct"] is None

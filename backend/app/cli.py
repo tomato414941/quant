@@ -883,6 +883,7 @@ def render_edge_attribution(payload: dict) -> str:
             )
         allocation = component.get("allocationSummary") or {}
         decisions = component.get("executionDecisionSummary") or {}
+        trace = component.get("executionTraceSummary") or {}
         if allocation:
             lines.append(
                 "   "
@@ -896,6 +897,16 @@ def render_edge_attribution(payload: dict) -> str:
                 "   "
                 f"Decisions {decisions['decisionCount']} | "
                 f"avg decision cost {format_optional_percent(decisions.get('averageEstimatedCostPct'))}"
+            )
+        if trace.get("eventCount"):
+            lines.append(
+                "   "
+                f"Trace events {trace['eventCount']} | "
+                f"decisions {trace['decisionEventCount']} | "
+                f"rebalances {trace['rebalanceEventCount']} | "
+                f"forced changes {trace['forcedUniverseChangeEventCount']} | "
+                f"no-trade {trace['noTradeCount']} | "
+                f"avg trace cost {format_optional_percent(trace.get('averageEstimatedCostPct'))}"
             )
     diagnosis = payload.get("diagnosis") or {}
     if diagnosis:

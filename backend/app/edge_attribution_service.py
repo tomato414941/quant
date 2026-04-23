@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import replace
 
 from app.comparison_models import ComparisonSpec
@@ -262,6 +263,7 @@ def build_cash_component(walk_forward_payload: dict) -> dict:
             "testStartDate": window["testStartDate"],
             "testEndDate": window["testEndDate"],
             "test": build_zero_metrics(),
+            "executionTraceSummary": empty_execution_trace_summary(),
         }
         for window in walk_forward_payload["walkForward"]["windows"]
     ]
@@ -283,6 +285,7 @@ def build_cash_component(walk_forward_payload: dict) -> dict:
         },
         "allocationSummary": empty_allocation_summary(),
         "executionDecisionSummary": empty_execution_summary(),
+        "executionTraceSummary": empty_execution_trace_summary(),
         "windows": windows,
     }
 
@@ -298,16 +301,34 @@ def build_zero_metrics() -> dict:
 
 
 def build_strategy_component(component_key: str, result: dict) -> dict:
+    windows = build_component_windows(result.get("windows", []))
     return {
         "componentKey": component_key,
         "strategyKey": result["strategyKey"],
         "label": component_label(component_key),
         "strategyLabel": result["strategyLabel"],
         "summary": build_component_summary(result),
-        "allocationSummary": build_component_allocation_summary(result.get("windows", [])),
+        "allocationSummary": build_component_allocation_summary(windows),
         "executionDecisionSummary": result.get("executionDecisionSummary", {}),
-        "windows": result.get("windows", []),
+        "executionTraceSummary": build_execution_trace_summary(
+            [
+                event
+                for window in windows
+                for event in window.get("executionTrace", [])
+            ]
+        ),
+        "windows": windows,
     }
+
+
+def build_component_windows(windows: list[dict]) -> list[dict]:
+    return [
+        {
+            **window,
+            "executionTraceSummary": build_execution_trace_summary(window.get("executionTrace", [])),
+        }
+        for window in windows
+    ]
 
 
 def component_label(component_key: str) -> str:
@@ -401,6 +422,88 @@ def empty_execution_summary() -> dict:
     }
 
 
+def empty_execution_trace_summary() -> dict:
+    return {
+        "eventCount": 0,
+        "decisionEventCount": 0,
+        "rebalanceEventCount": 0,
+        "forcedUniverseChangeEventCount": 0,
+        "tradeCount": 0,
+        "noTradeCount": 0,
+        "eventTypeCounts": {},
+        "decisionActionCounts": {},
+        "decisionReasonCounts": {},
+        "edgeSourceCounts": {},
+        "averageTurnoverPct": None,
+        "averageEstimatedCostPct": None,
+        "averageEstimatedEdgePct": None,
+        "averageConfidence": None,
+        "averageSelectedAssetCount": None,
+        "averageAvailableAssetCount": None,
+        "averageEligibleAssetCount": None,
+    }
+
+
+def build_execution_trace_summary(events: list[dict]) -> dict:
+    if not events:
+        return empty_execution_trace_summary()
+
+    event_types = [event.get("eventType") for event in events]
+    decision_actions = [event.get("decisionAction") for event in events]
+    return {
+        "eventCount": len(events),
+        "decisionEventCount": sum(1 for event_type in event_types if event_type == "decision"),
+        "rebalanceEventCount": sum(1 for event_type in event_types if event_type == "rebalance"),
+        "forcedUniverseChangeEventCount": sum(
+            1 for event_type in event_types if event_type == "forced_universe_change"
+        ),
+        "tradeCount": sum(
+            1 for action in decision_actions if action in {"rebalance", "forced_rebalance"}
+        ),
+        "noTradeCount": sum(1 for action in decision_actions if action == "no_trade"),
+        "eventTypeCounts": build_count_map(event_types),
+        "decisionActionCounts": build_count_map(decision_actions),
+        "decisionReasonCounts": build_count_map(event.get("decisionReason") for event in events),
+        "edgeSourceCounts": build_count_map(event.get("edgeSource") for event in events),
+        "averageTurnoverPct": average_optional_number(event.get("turnoverPct") for event in events),
+        "averageEstimatedCostPct": average_optional_number(event.get("estimatedCostPct") for event in events),
+        "averageEstimatedEdgePct": average_optional_number(event.get("estimatedEdgePct") for event in events),
+        "averageConfidence": average_optional_number(event.get("averageConfidence") for event in events),
+        "averageSelectedAssetCount": average_optional_number(
+            len(event.get("selectedAssets") or []) for event in events
+        ),
+        "averageAvailableAssetCount": average_optional_number(
+            event.get("availableAssetCount") for event in events
+        ),
+        "averageEligibleAssetCount": average_optional_number(
+            event.get("eligibleAssetCount") for event in events
+        ),
+    }
+
+
+def build_count_map(values) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if value is None:
+            continue
+        key = str(value)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def average_optional_number(values) -> float | None:
+    numeric_values = []
+    for value in values:
+        if value is None:
+            continue
+        numeric_value = float(value)
+        if math.isfinite(numeric_value):
+            numeric_values.append(numeric_value)
+    if not numeric_values:
+        return None
+    return round(sum(numeric_values) / len(numeric_values), 6)
+
+
 def build_component_allocation_summary(windows: list[dict]) -> dict:
     summaries = [
         build_window_allocation_summary(window)
@@ -470,6 +573,7 @@ def build_edge_attribution_diagnosis(components: list[dict]) -> dict:
     full_vs_tilt_effect = build_metric_delta(full, tilt_selection)
     full_vs_model_effect = build_metric_delta(full, model_no_tilt)
     full_vs_pure_effect = build_metric_delta(full, pure_selection)
+    full_trace_summary = full.get("executionTraceSummary") or empty_execution_trace_summary()
     cost_increase = optional_delta(
         full.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
         pure_selection.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
@@ -495,6 +599,7 @@ def build_edge_attribution_diagnosis(components: list[dict]) -> dict:
         cost_increase=cost_increase,
         holding_count_change=holding_count_change,
         max_weight_change=max_weight_change,
+        full_trace_summary=full_trace_summary,
     )
     return {
         "primaryFinding": build_primary_finding(
@@ -519,6 +624,12 @@ def build_edge_attribution_diagnosis(components: list[dict]) -> dict:
         "portfolioAndExecutionEffectSharpe": full_vs_pure_effect["averageSharpeRatio"],
         "turnoverIncreasePct": turnover_increase,
         "estimatedCostIncreasePct": cost_increase,
+        "fullTraceNoTradeCount": int(full_trace_summary.get("noTradeCount", 0)),
+        "fullTraceForcedUniverseChangeCount": int(
+            full_trace_summary.get("forcedUniverseChangeEventCount", 0)
+        ),
+        "fullTraceAverageTurnoverPct": full_trace_summary.get("averageTurnoverPct"),
+        "fullTraceAverageEstimatedCostPct": full_trace_summary.get("averageEstimatedCostPct"),
         "holdingCountChange": holding_count_change,
         "maxAssetWeightChangePct": max_weight_change,
         "likelyCauses": likely_causes,
@@ -562,6 +673,7 @@ def build_likely_causes(
     cost_increase: float | None,
     holding_count_change: float,
     max_weight_change: float,
+    full_trace_summary: dict,
 ) -> list[str]:
     causes = []
     if pure_selection_effect["averageTotalReturnPct"] <= 0:
@@ -578,6 +690,13 @@ def build_likely_causes(
         causes.append("estimated_cost_drag")
     if holding_count_change < -2.0 or max_weight_change > 10.0:
         causes.append("concentration_change")
+    if int(full_trace_summary.get("noTradeCount", 0)) > 0:
+        causes.append("execution_skipped_trades")
+    if int(full_trace_summary.get("forcedUniverseChangeEventCount", 0)) > 0:
+        causes.append("forced_universe_changes")
+    trace_cost = full_trace_summary.get("averageEstimatedCostPct")
+    if trace_cost is not None and float(trace_cost) > 0.0:
+        causes.append("execution_cost_visible_in_trace")
     if not causes:
         causes.append("no_single_obvious_drag")
     return causes

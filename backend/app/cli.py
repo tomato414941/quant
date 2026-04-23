@@ -380,6 +380,12 @@ def format_optional_decimal(value: object) -> str:
     return f"{float(value):.3f}"
 
 
+def format_optional_signed_decimal(value: object) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):+.3f}"
+
+
 def format_optional_ratio_percent(value: object) -> str:
     if value is None:
         return "n/a"
@@ -857,6 +863,7 @@ def render_edge_attribution(payload: dict) -> str:
             f"({walk_forward['windowCount']} windows)"
         ),
         f"Baseline: {payload['baselineKey']}",
+        f"Decision policy: {payload.get('decisionPolicyKey')}",
         (
             "Run store: "
             f"cached={payload['runStoreSummary']['cachedRunCount']} "
@@ -914,31 +921,49 @@ def render_edge_attribution(payload: dict) -> str:
                 f"no-trade {trace['noTradeCount']} | "
                 f"avg trace cost {format_optional_percent(trace.get('averageEstimatedCostPct'))}"
             )
+    omitted_components = [
+        entry
+        for entry in payload.get("componentApplicability") or []
+        if not entry.get("applicable", True)
+    ]
+    if omitted_components:
+        lines.extend(["", "Omitted components:"])
+        for entry in omitted_components:
+            lines.append(
+                f"- {entry['label']} [{entry['componentKey']}] | reason {entry.get('omittedReason')}"
+            )
     diagnosis = payload.get("diagnosis") or {}
     if diagnosis:
+        selection_baseline_label = diagnosis.get("selectionBaselineLabel") or "Selection baseline"
         lines.extend([
             "",
             f"Diagnosis: {diagnosis['primaryFinding']}",
             (
+                "Stage presence: "
+                f"pure selection={'yes' if diagnosis.get('hasPureSelectionStage') else 'no'} | "
+                f"tilt={'yes' if diagnosis.get('hasTiltStage') else 'no'} | "
+                f"no-trade path={'yes' if diagnosis.get('hasDecisionNoTradePath') else 'no'}"
+            ),
+            (
                 "Pure selection effect: "
-                f"Return {format_percent(diagnosis['pureSelectionEffectReturnPct'])} | "
-                f"Sharpe {diagnosis['pureSelectionEffectSharpe']:+.3f}"
+                f"Return {format_optional_percent(diagnosis.get('pureSelectionEffectReturnPct'))} | "
+                f"Sharpe {format_optional_signed_decimal(diagnosis.get('pureSelectionEffectSharpe'))}"
             ),
             (
                 "Tilt effect: "
-                f"Return {format_percent(diagnosis['tiltEffectReturnPct'])} | "
-                f"Sharpe {diagnosis['tiltEffectSharpe']:+.3f}"
+                f"Return {format_optional_percent(diagnosis.get('tiltEffectReturnPct'))} | "
+                f"Sharpe {format_optional_signed_decimal(diagnosis.get('tiltEffectSharpe'))}"
             ),
             (
                 "Portfolio model effect: "
-                f"Return {format_percent(diagnosis['portfolioModelEffectReturnPct'])} | "
-                f"Sharpe {diagnosis['portfolioModelEffectSharpe']:+.3f}"
+                f"Return {format_optional_percent(diagnosis.get('portfolioModelEffectReturnPct'))} | "
+                f"Sharpe {format_optional_signed_decimal(diagnosis.get('portfolioModelEffectSharpe'))}"
             ),
             (
-                "Full vs pure selection: "
-                f"Return {format_percent(diagnosis['fullVsPureSelectionEffectReturnPct'])} | "
-                f"Sharpe {diagnosis['fullVsPureSelectionEffectSharpe']:+.3f} | "
-                f"Turnover {format_percent(diagnosis['turnoverIncreasePct'])} | "
+                f"Full vs {selection_baseline_label}: "
+                f"Return {format_optional_percent(diagnosis.get('fullVsSelectionBaselineEffectReturnPct'))} | "
+                f"Sharpe {format_optional_signed_decimal(diagnosis.get('fullVsSelectionBaselineEffectSharpe'))} | "
+                f"Turnover {format_optional_percent(diagnosis.get('turnoverIncreasePct'))} | "
                 f"Cost {format_optional_percent(diagnosis.get('estimatedCostIncreasePct'))}"
             ),
             f"Likely causes: {', '.join(diagnosis.get('likelyCauses') or [])}",

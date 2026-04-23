@@ -10,15 +10,29 @@ from app.portfolio_domain import (
 )
 
 
-def find_tilted_hrp_strategy():
+def get_selection_strategy_type(strategy) -> str:
+    selection_signal = next(
+        signal for signal in strategy.signals
+        if signal.source_kind == "selection_signal"
+    )
+    return str(dict(selection_signal.signal_parameters).get("strategyType"))
+
+
+def find_full_universe_tilt_strategy():
     for strategy in DEFAULT_COMPARISON_SPEC.candidate_strategies:
-        for signal in strategy.signals:
-            score_parameters = thaw_strategy_parameter_value(
-                dict(signal.signal_parameters).get("scoreParameters")
-            )
-            if isinstance(score_parameters, dict) and "tilt_strength" in score_parameters:
-                return strategy
-    raise AssertionError("No tilted strategy found.")
+        strategy_type = get_selection_strategy_type(strategy)
+        score_parameters = get_score_parameters(strategy)
+        if strategy_type.startswith("full_universe") and float(score_parameters.get("tilt_strength", 0.0)) > 0.0:
+            return strategy
+    raise AssertionError("No full-universe tilted strategy found.")
+
+
+def find_filtered_strategy():
+    for strategy in DEFAULT_COMPARISON_SPEC.candidate_strategies:
+        strategy_type = get_selection_strategy_type(strategy)
+        if not strategy_type.startswith("full_universe"):
+            return strategy
+    raise AssertionError("No filtered strategy found.")
 
 
 def get_score_parameters(strategy) -> dict:
@@ -40,31 +54,27 @@ def get_runtime_score_parameters(strategy) -> dict:
     return dict(selection.ranking_signal.score_parameters)
 
 
-def test_edge_attribution_variants_split_selection_tilt_and_model() -> None:
-    base_strategy = find_tilted_hrp_strategy()
+def test_edge_attribution_variants_omit_pure_selection_for_full_universe_tilt() -> None:
+    base_strategy = find_full_universe_tilt_strategy()
 
     variants = build_edge_attribution_strategy_variants(base_strategy)
     variants_by_key = {variant.strategy_id.split("__")[-1]: variant for variant in variants}
 
     assert list(variants_by_key) == [
         "universe_equal_weight",
-        "selection_pure_equal_weight",
         "selection_tilt_equal_weight",
         "selection_model_no_tilt",
         "strategy_full",
     ]
-    assert variants_by_key["selection_pure_equal_weight"].portfolio_model.model_type == "equal_weight"
+    assert "selection_pure_equal_weight" not in variants_by_key
     assert variants_by_key["selection_tilt_equal_weight"].portfolio_model.model_type == "equal_weight"
     assert variants_by_key["selection_model_no_tilt"].portfolio_model == base_strategy.portfolio_model
     assert variants_by_key["strategy_full"].portfolio_model == base_strategy.portfolio_model
 
-    pure_params = get_score_parameters(variants_by_key["selection_pure_equal_weight"])
     tilt_params = get_score_parameters(variants_by_key["selection_tilt_equal_weight"])
     model_params = get_score_parameters(variants_by_key["selection_model_no_tilt"])
     full_params = get_score_parameters(variants_by_key["strategy_full"])
 
-    assert pure_params["tilt_strength"] == 0.0
-    assert pure_params["tilt_shape"] == 0.0
     assert tilt_params["tilt_strength"] > 0.0
     assert "tilt_shape" in tilt_params
     assert model_params["tilt_strength"] == 0.0
@@ -72,22 +82,28 @@ def test_edge_attribution_variants_split_selection_tilt_and_model() -> None:
     assert full_params == get_score_parameters(base_strategy)
 
 
-def test_edge_attribution_no_tilt_variants_keep_zero_tilt_at_runtime() -> None:
-    base_strategy = find_tilted_hrp_strategy()
+def test_edge_attribution_filtered_variants_keep_pure_selection_stage() -> None:
+    base_strategy = find_filtered_strategy()
 
     variants = build_edge_attribution_strategy_variants(base_strategy)
     variants_by_key = {variant.strategy_id.split("__")[-1]: variant for variant in variants}
 
+    assert list(variants_by_key) == [
+        "universe_equal_weight",
+        "selection_pure_equal_weight",
+        "selection_model_no_tilt",
+        "strategy_full",
+    ]
+    assert "selection_tilt_equal_weight" not in variants_by_key
+    assert variants_by_key["selection_pure_equal_weight"].portfolio_model.model_type == "equal_weight"
+    assert variants_by_key["selection_model_no_tilt"].portfolio_model == base_strategy.portfolio_model
+
     pure_params = get_runtime_score_parameters(variants_by_key["selection_pure_equal_weight"])
-    tilt_params = get_runtime_score_parameters(variants_by_key["selection_tilt_equal_weight"])
     model_params = get_runtime_score_parameters(variants_by_key["selection_model_no_tilt"])
     full_params = get_runtime_score_parameters(variants_by_key["strategy_full"])
 
-    assert pure_params["tilt_strength"] == 0.0
-    assert pure_params["tilt_shape"] == 0.0
-    assert tilt_params["tilt_strength"] > 0.0
-    assert model_params["tilt_strength"] == 0.0
-    assert model_params["tilt_shape"] == 0.0
+    assert pure_params == get_runtime_score_parameters(base_strategy)
+    assert model_params == get_runtime_score_parameters(base_strategy)
     assert full_params == get_runtime_score_parameters(base_strategy)
 
 

@@ -365,21 +365,23 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
 
     payload = json.loads(capsys.readouterr().out)
     components_by_key = {component["componentKey"]: component for component in payload["components"]}
+    applicability = {entry["componentKey"]: entry for entry in payload["componentApplicability"]}
     assert exit_code == 0
     assert payload["kind"] == "edge_attribution"
     assert payload["schemaVersion"] == "v2"
     assert payload["strategyKey"] == strategy_key
     assert payload["baselineKey"] == "universe_equal_weight"
+    assert payload["decisionPolicyKey"] == "cost_aware_no_trade"
     assert payload["walkForward"]["startYear"] == 2020
     assert payload["walkForward"]["endYear"] == 2021
     assert list(components_by_key) == [
         "cash",
         "universe_equal_weight",
-        "selection_pure_equal_weight",
-        "selection_tilt_equal_weight",
         "selection_model_no_tilt",
         "strategy_full",
     ]
+    assert applicability["selection_pure_equal_weight"]["applicable"] is False
+    assert applicability["selection_tilt_equal_weight"]["applicable"] is False
     assert components_by_key["cash"]["summary"]["averageFinalValueIndex"] == 100.0
     assert components_by_key["universe_equal_weight"]["deltaVsBaseline"]["averageSharpeRatio"] == 0.0
     assert "averageCagrPct" in components_by_key["strategy_full"]["summary"]
@@ -391,10 +393,14 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "decisionEventCount" in trace_summary
     assert "rebalanceEventCount" in trace_summary
     assert "executionTraceSummary" in components_by_key["strategy_full"]["windows"][0]
-    assert "pureSelectionEffectVsUniverse" in payload["effectSummary"]
-    assert "tiltEffectVsPureSelection" in payload["effectSummary"]
-    assert "portfolioModelEffectVsPureSelection" in payload["effectSummary"]
+    assert payload["effectSummary"]["pureSelectionEffectVsUniverse"] is None
+    assert payload["effectSummary"]["tiltEffectVsPureSelection"] is None
+    assert payload["effectSummary"]["portfolioModelEffectVsUniverse"] is not None
     assert "fullEffectVsCash" in payload["effectSummary"]
+    assert payload["diagnosis"]["hasPureSelectionStage"] is False
+    assert payload["diagnosis"]["hasTiltStage"] is False
+    assert payload["diagnosis"]["hasDecisionNoTradePath"] is True
+    assert payload["diagnosis"]["pureSelectionEffectReturnPct"] is None
     assert "primaryFinding" in payload["diagnosis"]
     assert "likelyCauses" in payload["diagnosis"]
     assert "turnoverIncreasePct" in payload["diagnosis"]
@@ -402,7 +408,6 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "fullTraceForcedUniverseChangeCount" in payload["diagnosis"]
     assert "fullTraceAverageTurnoverPct" in payload["diagnosis"]
     assert "fullTraceAverageEstimatedCostPct" in payload["diagnosis"]
-    assert "tiltEffectReturnPct" in payload["diagnosis"]
     assert "portfolioModelEffectReturnPct" in payload["diagnosis"]
 
 
@@ -423,13 +428,16 @@ def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Edge attribution:" in captured.out
+    assert "Decision policy: cost_aware_no_trade" in captured.out
     assert "Trace events" in captured.out
     assert "Walk-forward: 2020-2021 (2 windows)" in captured.out
     assert "Components:" in captured.out
-    assert "Pure selection effect:" in captured.out
+    assert "Omitted components:" in captured.out
+    assert "Pure selection effect: Return n/a | Sharpe n/a" in captured.out
     assert "Portfolio model effect:" in captured.out
     assert "Strategy full" in captured.out
     assert "Diagnosis:" in captured.out
+    assert "Stage presence: pure selection=no | tilt=no | no-trade path=yes" in captured.out
     assert "Likely causes:" in captured.out
     assert "Full effect vs universe" in captured.out
 

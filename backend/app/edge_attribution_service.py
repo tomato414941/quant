@@ -37,6 +37,12 @@ EDGE_ATTRIBUTION_DELTA_METRICS = (
     "averageTurnoverPct",
     "averageFinalValueIndex",
 )
+FULL_UNIVERSE_SELECTION_STRATEGY_TYPES = {
+    "full_universe",
+    "full_universe_momentum_tilt",
+    "full_universe_momentum_low_vol_tilt",
+    "full_universe_momentum_macro_tilt",
+}
 
 
 def build_edge_attribution_payload(
@@ -88,6 +94,8 @@ def build_edge_attribution_payload(
         "period": period,
         "universe": universe,
         "baselineKey": EDGE_ATTRIBUTION_BASELINE_KEY,
+        "decisionPolicyKey": resolve_strategy_decision_policy_key(base_strategy),
+        "componentApplicability": build_component_applicability(base_strategy),
         "walkForward": walk_forward_payload["walkForward"],
         "runStoreSummary": walk_forward_payload["runStoreSummary"],
         "components": component_results,
@@ -120,13 +128,14 @@ def build_edge_attribution_comparison(
 
 
 def build_edge_attribution_strategy_variants(base_strategy: StrategyDefinition) -> list[StrategyDefinition]:
-    return [
-        build_universe_equal_weight_variant(base_strategy),
-        build_selection_pure_equal_weight_variant(base_strategy),
-        build_selection_tilt_equal_weight_variant(base_strategy),
-        build_selection_model_no_tilt_variant(base_strategy),
-        build_strategy_full_variant(base_strategy),
-    ]
+    variants = [build_universe_equal_weight_variant(base_strategy)]
+    if strategy_has_pure_selection_stage(base_strategy):
+        variants.append(build_selection_pure_equal_weight_variant(base_strategy))
+    if strategy_has_tilt_stage(base_strategy):
+        variants.append(build_selection_tilt_equal_weight_variant(base_strategy))
+    variants.append(build_selection_model_no_tilt_variant(base_strategy))
+    variants.append(build_strategy_full_variant(base_strategy))
+    return variants
 
 
 def build_universe_equal_weight_variant(base_strategy: StrategyDefinition) -> StrategyDefinition:
@@ -211,6 +220,71 @@ def get_selection_signals(strategy: StrategyDefinition) -> tuple:
     return selection_signals
 
 
+def resolve_strategy_decision_policy_key(strategy: StrategyDefinition) -> str:
+    return str(dict(strategy.extensions).get("decision_policy", "cost_aware_no_trade"))
+
+
+def get_selection_signal_parameters(signal) -> dict[str, object]:
+    return {
+        str(key): thaw_strategy_parameter_value(value)
+        for key, value in signal.signal_parameters
+    }
+
+
+def strategy_has_pure_selection_stage(strategy: StrategyDefinition) -> bool:
+    strategy_type = str(
+        get_selection_signal_parameters(get_primary_selection_signal(strategy)).get("strategyType")
+    )
+    return strategy_type not in FULL_UNIVERSE_SELECTION_STRATEGY_TYPES
+
+
+def strategy_has_tilt_stage(strategy: StrategyDefinition) -> bool:
+    for signal in get_selection_signals(strategy):
+        score_parameters = get_selection_signal_parameters(signal).get("scoreParameters")
+        if not isinstance(score_parameters, dict):
+            continue
+        tilt_strength = float(score_parameters.get("tilt_strength", 0.0) or 0.0)
+        tilt_shape = float(score_parameters.get("tilt_shape", 0.0) or 0.0)
+        if abs(tilt_strength) > 1e-9 or abs(tilt_shape) > 1e-9:
+            return True
+    return False
+
+
+def build_component_applicability(base_strategy: StrategyDefinition) -> list[dict[str, object]]:
+    pure_selection_applicable = strategy_has_pure_selection_stage(base_strategy)
+    tilt_applicable = strategy_has_tilt_stage(base_strategy)
+    return [
+        build_component_applicability_entry("cash", applicable=True),
+        build_component_applicability_entry("universe_equal_weight", applicable=True),
+        build_component_applicability_entry(
+            "selection_pure_equal_weight",
+            applicable=pure_selection_applicable,
+            omitted_reason=None if pure_selection_applicable else "full_universe_selection_has_no_filter_stage",
+        ),
+        build_component_applicability_entry(
+            "selection_tilt_equal_weight",
+            applicable=tilt_applicable,
+            omitted_reason=None if tilt_applicable else "selection_signal_has_no_tilt_stage",
+        ),
+        build_component_applicability_entry("selection_model_no_tilt", applicable=True),
+        build_component_applicability_entry("strategy_full", applicable=True),
+    ]
+
+
+def build_component_applicability_entry(
+    component_key: str,
+    *,
+    applicable: bool,
+    omitted_reason: str | None = None,
+) -> dict[str, object]:
+    return {
+        "componentKey": component_key,
+        "label": "Cash" if component_key == "cash" else component_label(component_key),
+        "applicable": applicable,
+        "omittedReason": omitted_reason,
+    }
+
+
 def strip_tilt_from_selection_signals(signals: tuple) -> tuple:
     return tuple(strip_tilt_from_selection_signal(signal) for signal in signals)
 
@@ -222,6 +296,8 @@ def strip_tilt_from_selection_signal(signal):
     }
     score_parameters = signal_parameters.get("scoreParameters")
     if not isinstance(score_parameters, dict):
+        return signal
+    if "tilt_strength" not in score_parameters and "tilt_shape" not in score_parameters:
         return signal
     score_parameters = dict(score_parameters)
     score_parameters["tilt_strength"] = 0.0
@@ -251,7 +327,9 @@ def build_component_results(
         if component_key == "cash":
             continue
         strategy_key = build_component_strategy_key(base_strategy, component_key)
-        result = results_by_key[strategy_key]
+        result = results_by_key.get(strategy_key)
+        if result is None:
+            continue
         components.append(build_strategy_component(component_key, result))
     return components
 
@@ -307,6 +385,7 @@ def build_strategy_component(component_key: str, result: dict) -> dict:
         "strategyKey": result["strategyKey"],
         "label": component_label(component_key),
         "strategyLabel": result["strategyLabel"],
+        "applicable": True,
         "summary": build_component_summary(result),
         "allocationSummary": build_component_allocation_summary(windows),
         "executionDecisionSummary": result.get("executionDecisionSummary", {}),
@@ -375,6 +454,18 @@ def build_metric_delta(component: dict, baseline: dict) -> dict:
     }
 
 
+def build_optional_metric_delta(component: dict | None, baseline: dict | None) -> dict | None:
+    if component is None or baseline is None:
+        return None
+    return build_metric_delta(component, baseline)
+
+
+def optional_metric_value(delta: dict | None, metric: str) -> float | None:
+    if delta is None:
+        return None
+    return delta.get(metric)
+
+
 def build_effect_summary(components: list[dict]) -> dict:
     components_by_key = {
         component["componentKey"]: component
@@ -382,16 +473,22 @@ def build_effect_summary(components: list[dict]) -> dict:
     }
     cash = components_by_key["cash"]
     universe = components_by_key["universe_equal_weight"]
-    pure_selection = components_by_key["selection_pure_equal_weight"]
-    tilt_selection = components_by_key["selection_tilt_equal_weight"]
+    pure_selection = components_by_key.get("selection_pure_equal_weight")
+    tilt_selection = components_by_key.get("selection_tilt_equal_weight")
     model_no_tilt = components_by_key["selection_model_no_tilt"]
     full = components_by_key["strategy_full"]
+    selection_baseline = pure_selection or universe
     return {
-        "pureSelectionEffectVsUniverse": build_metric_delta(pure_selection, universe),
-        "tiltEffectVsPureSelection": build_metric_delta(tilt_selection, pure_selection),
-        "portfolioModelEffectVsPureSelection": build_metric_delta(model_no_tilt, pure_selection),
-        "fullEffectVsTiltSelection": build_metric_delta(full, tilt_selection),
+        "selectionBaselineKey": selection_baseline["componentKey"],
+        "selectionBaselineLabel": component_label(selection_baseline["componentKey"]),
+        "pureSelectionEffectVsUniverse": build_optional_metric_delta(pure_selection, universe),
+        "tiltEffectVsPureSelection": build_optional_metric_delta(tilt_selection, pure_selection),
+        "tiltEffectVsUniverse": build_optional_metric_delta(tilt_selection, universe),
+        "portfolioModelEffectVsPureSelection": build_optional_metric_delta(model_no_tilt, pure_selection),
+        "portfolioModelEffectVsUniverse": build_metric_delta(model_no_tilt, universe),
+        "fullEffectVsTiltSelection": build_optional_metric_delta(full, tilt_selection),
         "fullEffectVsModelNoTilt": build_metric_delta(full, model_no_tilt),
+        "fullEffectVsSelectionBaseline": build_metric_delta(full, selection_baseline),
         "fullEffectVsUniverse": build_metric_delta(full, universe),
         "fullEffectVsCash": build_metric_delta(full, cash),
     }
@@ -563,33 +660,42 @@ def build_edge_attribution_diagnosis(components: list[dict]) -> dict:
         for component in components
     }
     universe = components_by_key["universe_equal_weight"]
-    pure_selection = components_by_key["selection_pure_equal_weight"]
-    tilt_selection = components_by_key["selection_tilt_equal_weight"]
+    pure_selection = components_by_key.get("selection_pure_equal_weight")
+    tilt_selection = components_by_key.get("selection_tilt_equal_weight")
     model_no_tilt = components_by_key["selection_model_no_tilt"]
     full = components_by_key["strategy_full"]
-    pure_selection_effect = build_metric_delta(pure_selection, universe)
-    tilt_effect = build_metric_delta(tilt_selection, pure_selection)
-    model_effect = build_metric_delta(model_no_tilt, pure_selection)
-    full_vs_tilt_effect = build_metric_delta(full, tilt_selection)
+    has_pure_selection_stage = pure_selection is not None
+    has_tilt_stage = tilt_selection is not None
+    selection_baseline = pure_selection or universe
+    pure_selection_effect = build_optional_metric_delta(pure_selection, universe)
+    tilt_effect = build_optional_metric_delta(tilt_selection, pure_selection or universe)
+    model_effect = build_metric_delta(model_no_tilt, selection_baseline)
+    full_vs_tilt_effect = build_optional_metric_delta(full, tilt_selection)
     full_vs_model_effect = build_metric_delta(full, model_no_tilt)
-    full_vs_pure_effect = build_metric_delta(full, pure_selection)
+    full_vs_pure_effect = build_optional_metric_delta(full, pure_selection)
+    full_vs_selection_baseline_effect = build_metric_delta(full, selection_baseline)
     full_trace_summary = full.get("executionTraceSummary") or empty_execution_trace_summary()
+    policy_counts = full.get("executionDecisionSummary", {}).get("policyCounts", {}) or {}
+    has_decision_no_trade_path = "cost_aware_no_trade" in policy_counts or int(
+        full_trace_summary.get("noTradeCount", 0)
+    ) > 0
     cost_increase = optional_delta(
         full.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
-        pure_selection.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
+        selection_baseline.get("executionDecisionSummary", {}).get("averageEstimatedCostPct"),
     )
-    turnover_increase = full_vs_pure_effect["averageTurnoverPct"]
+    turnover_increase = full_vs_selection_baseline_effect["averageTurnoverPct"]
     holding_count_change = round(
         float(full["allocationSummary"]["averageHoldingCount"])
-        - float(pure_selection["allocationSummary"]["averageHoldingCount"]),
+        - float(selection_baseline["allocationSummary"]["averageHoldingCount"]),
         6,
     )
     max_weight_change = round(
         float(full["allocationSummary"]["maximumSingleAssetWeightPct"])
-        - float(pure_selection["allocationSummary"]["maximumSingleAssetWeightPct"]),
+        - float(selection_baseline["allocationSummary"]["maximumSingleAssetWeightPct"]),
         6,
     )
     likely_causes = build_likely_causes(
+        has_pure_selection_stage=has_pure_selection_stage,
         pure_selection_effect=pure_selection_effect,
         tilt_effect=tilt_effect,
         model_effect=model_effect,
@@ -603,25 +709,34 @@ def build_edge_attribution_diagnosis(components: list[dict]) -> dict:
     )
     return {
         "primaryFinding": build_primary_finding(
+            has_pure_selection_stage=has_pure_selection_stage,
+            has_tilt_stage=has_tilt_stage,
             pure_selection_effect=pure_selection_effect,
             tilt_effect=tilt_effect,
             model_effect=model_effect,
-            full_vs_pure_effect=full_vs_pure_effect,
+            full_vs_selection_baseline_effect=full_vs_selection_baseline_effect,
         ),
-        "pureSelectionEffectReturnPct": pure_selection_effect["averageTotalReturnPct"],
-        "pureSelectionEffectSharpe": pure_selection_effect["averageSharpeRatio"],
-        "tiltEffectReturnPct": tilt_effect["averageTotalReturnPct"],
-        "tiltEffectSharpe": tilt_effect["averageSharpeRatio"],
+        "hasPureSelectionStage": has_pure_selection_stage,
+        "hasTiltStage": has_tilt_stage,
+        "hasDecisionNoTradePath": has_decision_no_trade_path,
+        "selectionBaselineComponentKey": selection_baseline["componentKey"],
+        "selectionBaselineLabel": component_label(selection_baseline["componentKey"]),
+        "pureSelectionEffectReturnPct": optional_metric_value(pure_selection_effect, "averageTotalReturnPct"),
+        "pureSelectionEffectSharpe": optional_metric_value(pure_selection_effect, "averageSharpeRatio"),
+        "tiltEffectReturnPct": optional_metric_value(tilt_effect, "averageTotalReturnPct"),
+        "tiltEffectSharpe": optional_metric_value(tilt_effect, "averageSharpeRatio"),
         "portfolioModelEffectReturnPct": model_effect["averageTotalReturnPct"],
         "portfolioModelEffectSharpe": model_effect["averageSharpeRatio"],
-        "fullVsPureSelectionEffectReturnPct": full_vs_pure_effect["averageTotalReturnPct"],
-        "fullVsPureSelectionEffectSharpe": full_vs_pure_effect["averageSharpeRatio"],
-        "fullVsTiltSelectionEffectReturnPct": full_vs_tilt_effect["averageTotalReturnPct"],
+        "fullVsPureSelectionEffectReturnPct": optional_metric_value(full_vs_pure_effect, "averageTotalReturnPct"),
+        "fullVsPureSelectionEffectSharpe": optional_metric_value(full_vs_pure_effect, "averageSharpeRatio"),
+        "fullVsSelectionBaselineEffectReturnPct": full_vs_selection_baseline_effect["averageTotalReturnPct"],
+        "fullVsSelectionBaselineEffectSharpe": full_vs_selection_baseline_effect["averageSharpeRatio"],
+        "fullVsTiltSelectionEffectReturnPct": optional_metric_value(full_vs_tilt_effect, "averageTotalReturnPct"),
         "fullVsModelNoTiltEffectReturnPct": full_vs_model_effect["averageTotalReturnPct"],
-        "selectionEffectReturnPct": pure_selection_effect["averageTotalReturnPct"],
-        "selectionEffectSharpe": pure_selection_effect["averageSharpeRatio"],
-        "portfolioAndExecutionEffectReturnPct": full_vs_pure_effect["averageTotalReturnPct"],
-        "portfolioAndExecutionEffectSharpe": full_vs_pure_effect["averageSharpeRatio"],
+        "selectionEffectReturnPct": optional_metric_value(pure_selection_effect, "averageTotalReturnPct"),
+        "selectionEffectSharpe": optional_metric_value(pure_selection_effect, "averageSharpeRatio"),
+        "portfolioAndExecutionEffectReturnPct": full_vs_selection_baseline_effect["averageTotalReturnPct"],
+        "portfolioAndExecutionEffectSharpe": full_vs_selection_baseline_effect["averageSharpeRatio"],
         "turnoverIncreasePct": turnover_increase,
         "estimatedCostIncreasePct": cost_increase,
         "fullTraceNoTradeCount": int(full_trace_summary.get("noTradeCount", 0)),
@@ -644,30 +759,37 @@ def optional_delta(left: object, right: object) -> float | None:
 
 def build_primary_finding(
     *,
-    pure_selection_effect: dict,
-    tilt_effect: dict,
+    has_pure_selection_stage: bool,
+    has_tilt_stage: bool,
+    pure_selection_effect: dict | None,
+    tilt_effect: dict | None,
     model_effect: dict,
-    full_vs_pure_effect: dict,
+    full_vs_selection_baseline_effect: dict,
 ) -> str:
-    if pure_selection_effect["averageTotalReturnPct"] <= 0:
+    if not has_pure_selection_stage:
+        return "strategy_has_no_pure_selection_stage"
+    if pure_selection_effect is not None and pure_selection_effect["averageTotalReturnPct"] <= 0:
         return "pure_selection_did_not_add_return"
-    if tilt_effect["averageTotalReturnPct"] < 0 and model_effect["averageTotalReturnPct"] < 0:
+    if has_tilt_stage and tilt_effect is not None and tilt_effect["averageTotalReturnPct"] < 0 and model_effect["averageTotalReturnPct"] < 0:
         return "selection_helped_but_tilt_and_portfolio_model_dragged"
-    if tilt_effect["averageTotalReturnPct"] < 0:
+    if has_tilt_stage and tilt_effect is not None and tilt_effect["averageTotalReturnPct"] < 0:
         return "selection_helped_but_tilt_dragged"
     if model_effect["averageTotalReturnPct"] < 0:
         return "selection_helped_but_portfolio_model_dragged"
-    if full_vs_pure_effect["averageTotalReturnPct"] < 0:
+    if full_vs_selection_baseline_effect["averageTotalReturnPct"] < 0:
         return "selection_helped_but_full_execution_dragged"
-    return "selection_tilt_and_portfolio_helped"
+    if has_tilt_stage:
+        return "selection_tilt_and_portfolio_helped"
+    return "selection_and_portfolio_helped"
 
 
 def build_likely_causes(
     *,
-    pure_selection_effect: dict,
-    tilt_effect: dict,
+    has_pure_selection_stage: bool,
+    pure_selection_effect: dict | None,
+    tilt_effect: dict | None,
     model_effect: dict,
-    full_vs_tilt_effect: dict,
+    full_vs_tilt_effect: dict | None,
     full_vs_model_effect: dict,
     turnover_increase: float,
     cost_increase: float | None,
@@ -676,13 +798,17 @@ def build_likely_causes(
     full_trace_summary: dict,
 ) -> list[str]:
     causes = []
-    if pure_selection_effect["averageTotalReturnPct"] <= 0:
+    if not has_pure_selection_stage:
+        causes.append("selection_stage_absent")
+    elif pure_selection_effect is not None and pure_selection_effect["averageTotalReturnPct"] <= 0:
         causes.append("selection_signal_drag")
-    if tilt_effect["averageTotalReturnPct"] < 0:
+    if tilt_effect is not None and tilt_effect["averageTotalReturnPct"] < 0:
         causes.append("tilt_drag")
     if model_effect["averageTotalReturnPct"] < 0:
         causes.append("portfolio_model_drag")
-    if full_vs_tilt_effect["averageTotalReturnPct"] < 0 and full_vs_model_effect["averageTotalReturnPct"] < 0:
+    if full_vs_model_effect["averageTotalReturnPct"] < 0 and (
+        full_vs_tilt_effect is None or full_vs_tilt_effect["averageTotalReturnPct"] < 0
+    ):
         causes.append("combined_full_strategy_drag")
     if turnover_increase > 25.0:
         causes.append("turnover_drag")

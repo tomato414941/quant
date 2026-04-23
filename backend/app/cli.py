@@ -62,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
     comparison_parser.add_argument("--walk-forward", action="store_true")
     comparison_parser.add_argument("--walk-forward-start-year", type=int, default=2020)
     comparison_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
+    comparison_parser.add_argument(
+        "--strategy-key",
+        action="append",
+        dest="strategy_keys",
+        help="Restrict comparison summary to a strategy key. Can be repeated.",
+    )
 
     robustness_parser = subparsers.add_parser(
         "robustness-summary",
@@ -1293,6 +1299,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "comparison-summary":
         comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
+        comparison_spec = filter_comparison_strategies(
+            comparison_spec,
+            tuple(args.strategy_keys) if args.strategy_keys else None,
+        )
         if args.walk_forward:
             payload = build_walk_forward_comparison_payload(
                 comparison_spec,

@@ -172,6 +172,27 @@ def test_comparison_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Test Sharpe" in captured.out
 
 
+def test_comparison_summary_command_strategy_key_filter(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli(monkeypatch, tmp_path)
+    selected_strategy = config.candidate_strategies[0]
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--top",
+        "2",
+        "--strategy-key",
+        selected_strategy.key,
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [strategy["strategyId"] for strategy in payload["comparison"]["candidateStrategies"]] == [selected_strategy.strategy_id]
+    assert [run["strategy"]["strategyId"] for run in payload["candidateRuns"]] == [selected_strategy.strategy_id]
+    assert payload["comparison"]["referenceStrategies"] == []
+    assert payload["referenceRuns"] == []
+
+
 
 def configure_cli_multiyear(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fake_fetch_market_universe_bundle_multiyear)
@@ -237,6 +258,30 @@ def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, cap
     assert "minTestEligibleAssetCount" in payload["candidateResults"][0]
     assert "testAvailability" in payload["candidateResults"][0]["windows"][0]
     assert "executionTrace" in payload["candidateResults"][0]["windows"][0]
+
+
+def test_comparison_summary_walk_forward_command_strategy_key_filter(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    config = configure_cli_multiyear(monkeypatch, tmp_path)
+    selected_strategy_key = config.candidate_strategies[1].key
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--walk-forward",
+        "--walk-forward-start-year",
+        "2020",
+        "--walk-forward-end-year",
+        "2021",
+        "--strategy-key",
+        selected_strategy_key,
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [result["strategyKey"] for result in payload["candidateResults"]] == [selected_strategy_key]
+    assert payload["referenceResults"] == []
 
 
 def test_benchmark_decomposition_command_json(monkeypatch, tmp_path, capsys) -> None:

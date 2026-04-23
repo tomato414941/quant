@@ -26,7 +26,6 @@ from app.portfolio import (
     deserialize_predictor_panel,
     evaluate_asset_ranking_spec,
     evaluate_predictor_spec,
-    evaluate_strategy_definition_run,
     get_strategy_definition_signal_execution_contexts,
     serialize_asset_ranking_spec,
     serialize_predictor_spec,
@@ -34,6 +33,9 @@ from app.portfolio import (
     serialize_portfolio_state,
     serialize_strategy_definition as serialize_canonical_strategy_definition,
 )
+from app.domain import RunContext
+from app.engine import run_strategy_backtest
+from app.spec import build_strategy_blueprint_from_definition
 from app.predictor_registry import REGISTERED_PREDICTOR_SPECS_BY_KEY
 from app.comparison_models import (
     ComparisonSpec,
@@ -56,6 +58,44 @@ from app.timeframe_models import (
     DEFAULT_WEEKLY_TIMEFRAME,
     TimeframeSpec,
 )
+
+
+def evaluate_strategy_definition_run_with_blueprint(
+    *,
+    closes: pd.DataFrame,
+    volumes: pd.DataFrame | None,
+    strategy_definition: StrategyDefinition,
+    initial_capital: float,
+    split_ratio: float,
+    bars_per_year: float = 252.0,
+    execution_assumptions: dict | None = None,
+    portfolio_state=None,
+    predictor_panel=None,
+    availability_policy: dict[str, object] | None = None,
+) -> dict:
+    resolved_execution_assumptions = execution_assumptions or {
+        "kind": "close_execution_assumptions",
+        "label": "終値約定",
+        "parameters": {"fillPrice": "close"},
+        "costModel": None,
+    }
+    resolved_availability_policy = availability_policy or build_default_availability_policy()
+    artifact = run_strategy_backtest(
+        build_strategy_blueprint_from_definition(strategy_definition),
+        {"closes": closes, "volumes": volumes},
+        RunContext(
+            initial_capital=initial_capital,
+            split_ratio=split_ratio,
+            bars_per_year=bars_per_year,
+            execution_assumptions=resolved_execution_assumptions,
+            availability_policy=resolved_availability_policy,
+            portfolio_state=(
+                None if portfolio_state is None else serialize_portfolio_state(portfolio_state)
+            ),
+        ),
+        predictor_panel=predictor_panel,
+    )
+    return artifact.run_result
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -1151,7 +1191,7 @@ def build_walk_forward_strategy_runs(
             runs.append(cached_run)
             continue
 
-        run = evaluate_strategy_definition_run(
+        run = evaluate_strategy_definition_run_with_blueprint(
             closes=market_bundle["closes"],
             volumes=market_bundle["volumes"],
             strategy_definition=strategy_definition,
@@ -3114,7 +3154,7 @@ def build_strategy_runs(
             runs.append(cached_run)
             continue
 
-        run = evaluate_strategy_definition_run(
+        run = evaluate_strategy_definition_run_with_blueprint(
             closes=market_bundle["closes"],
             volumes=market_bundle["volumes"],
             strategy_definition=strategy_definition,
@@ -3309,7 +3349,7 @@ def build_condition_sweep_runs(
                 results.append(cached_run)
                 continue
 
-            run = evaluate_strategy_definition_run(
+            run = evaluate_strategy_definition_run_with_blueprint(
                 closes=market_bundle["closes"],
                 volumes=market_bundle["volumes"],
                 strategy_definition=effective_strategy_definition,
@@ -3542,7 +3582,7 @@ def build_parameter_sweep_runs(
                         results.append(cached_run)
                         continue
 
-                    run = evaluate_strategy_definition_run(
+                    run = evaluate_strategy_definition_run_with_blueprint(
                         closes=market_bundle["closes"],
                         volumes=market_bundle["volumes"],
                         strategy_definition=effective_strategy_definition,

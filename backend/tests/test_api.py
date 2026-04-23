@@ -97,6 +97,7 @@ def test_comparison_service_does_not_import_evaluator_strategy_spec_dto_bridge()
     forbidden_tokens = (
         "build_evaluator_strategy_spec(",
         "build_strategy_definition_from_evaluator_strategy_spec",
+        "evaluate_strategy_definition_run(",
     )
     for token in forbidden_tokens:
         assert token not in source

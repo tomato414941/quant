@@ -8,39 +8,33 @@ import pandas as pd
 
 from app.comparison_models import ComparisonSpec
 from app.comparison_service import collect_comparison_tickers, resolve_strategy_market_data_timeframe
+from app.instrument_registry import get_normalized_asset_class
 from app.portfolio import (
     build_executable_evaluator_strategy_spec_from_definition,
     compute_strategy_score_series,
     get_strategy_signal_execution_contexts,
     prepare_strategy_signal_data,
+    should_rebalance,
 )
 
 DEFAULT_SIGNAL_DIAGNOSTIC_HORIZONS = (1, 5, 21)
 DEFAULT_SIGNAL_DIAGNOSTIC_BUCKET_COUNT = 5
 MIN_SIGNAL_DIAGNOSTIC_ASSET_COUNT = 2
 MIN_SIGNAL_DIAGNOSTIC_HISTORY_BARS = 3
-ASSET_CLASS_BY_TICKER = {
-    "SPY": "equity",
-    "QQQ": "equity",
-    "IWM": "equity",
-    "EFA": "equity",
-    "EEM": "equity",
-    "EWJ": "equity",
-    "EWZ": "equity",
-    "VNQ": "real_estate",
-    "TLT": "bond",
-    "IEF": "bond",
-    "LQD": "bond",
-    "HYG": "bond",
-    "TIP": "bond",
-    "GLD": "commodity",
-    "SLV": "commodity",
-    "DBC": "commodity",
-    "USO": "commodity",
-    "UUP": "currency",
-    "BTC-USD": "crypto",
-    "ETH-USD": "crypto",
-}
+SIGNAL_DIAGNOSTIC_OBSERVATION_SCHEDULES = (
+    "strategy",
+    "daily",
+    "month_end",
+    "quarter_end",
+    "year_end",
+)
+RESOLVED_SIGNAL_DIAGNOSTIC_OBSERVATION_SCHEDULES = (
+    "daily",
+    "month_end",
+    "quarter_end",
+    "year_end",
+    "hold",
+)
 
 
 def parse_signal_horizon_label(label: str) -> int:
@@ -55,6 +49,55 @@ def parse_signal_horizon_label(label: str) -> int:
 
 def format_signal_horizon_label(horizon_bars: int) -> str:
     return f"{int(horizon_bars)}d"
+
+def normalize_signal_diagnostic_observation_schedule(observation_schedule: str) -> str:
+    normalized = observation_schedule.strip().lower()
+    if normalized == "every_bar":
+        return "daily"
+    if normalized not in SIGNAL_DIAGNOSTIC_OBSERVATION_SCHEDULES:
+        raise ValueError("Unsupported signal diagnostic observation schedule.")
+    return normalized
+
+
+def resolve_signal_diagnostic_observation_schedule(*, strategy, observation_schedule: str) -> str:
+    normalized = normalize_signal_diagnostic_observation_schedule(observation_schedule)
+    if normalized != "strategy":
+        return normalized
+
+    strategy_schedule = str(strategy.decision_schedule or strategy.execution_policy.rebalance_schedule)
+    if strategy_schedule == "every_bar":
+        return "daily"
+    if strategy_schedule not in RESOLVED_SIGNAL_DIAGNOSTIC_OBSERVATION_SCHEDULES:
+        raise ValueError("Unsupported strategy decision schedule for signal diagnostics.")
+    return strategy_schedule
+
+
+def describe_observation_count_semantics(*, observation_schedule: str, resolved_observation_schedule: str) -> str:
+    if resolved_observation_schedule == "daily":
+        return "daily overlapping forward-return windows"
+    if observation_schedule == "strategy":
+        return "strategy decision dates only"
+    if resolved_observation_schedule == "hold":
+        return "single initial observation after minimum history"
+    return f"{resolved_observation_schedule} observations only"
+
+
+def should_include_signal_observation(
+    *,
+    index: int,
+    index_values: pd.Index,
+    resolved_observation_schedule: str,
+) -> bool:
+    if resolved_observation_schedule == "daily":
+        return True
+    if resolved_observation_schedule == "hold":
+        return index == MIN_SIGNAL_DIAGNOSTIC_HISTORY_BARS
+    return should_rebalance(
+        index_values[index - 1],
+        index_values[index],
+        resolved_observation_schedule,
+    )
+
 
 
 def optional_round(value: float | None, digits: int = 4) -> float | None:
@@ -127,7 +170,7 @@ def build_signal_horizon_observation(
 
 
 def get_asset_class(ticker: str) -> str:
-    return ASSET_CLASS_BY_TICKER.get(str(ticker), "other")
+    return get_normalized_asset_class(str(ticker))
 
 
 def group_assets_by_class(columns: pd.Index) -> dict[str, list[str]]:
@@ -256,6 +299,9 @@ def build_empty_strategy_signal_diagnostics(
     strategy_definition,
     horizons: Sequence[int],
     bucket_count: int,
+    observation_schedule: str,
+    resolved_observation_schedule: str,
+    observation_count_semantics: str,
 ) -> dict[str, object]:
     horizon_results = [
         summarize_signal_horizon_observations([], horizon_bars=int(horizon), bucket_count=bucket_count)
@@ -264,6 +310,9 @@ def build_empty_strategy_signal_diagnostics(
     return {
         "strategyKey": strategy_definition.key,
         "strategyLabel": strategy_definition.label,
+        "observationSchedule": observation_schedule,
+        "resolvedObservationSchedule": resolved_observation_schedule,
+        "observationCountSemantics": observation_count_semantics,
         "horizonResults": horizon_results,
         "yearlyResults": [],
         "assetClassResults": [],
@@ -282,8 +331,17 @@ def build_strategy_signal_diagnostics(
     volumes: pd.DataFrame | None,
     horizons: Sequence[int] = DEFAULT_SIGNAL_DIAGNOSTIC_HORIZONS,
     bucket_count: int = DEFAULT_SIGNAL_DIAGNOSTIC_BUCKET_COUNT,
+    observation_schedule: str = "strategy",
 ) -> dict[str, object]:
     strategy = build_executable_evaluator_strategy_spec_from_definition(strategy_definition)
+    resolved_observation_schedule = resolve_signal_diagnostic_observation_schedule(
+        strategy=strategy,
+        observation_schedule=observation_schedule,
+    )
+    observation_count_semantics = describe_observation_count_semantics(
+        observation_schedule=observation_schedule,
+        resolved_observation_schedule=resolved_observation_schedule,
+    )
     selection_contexts, predictor_context = get_strategy_signal_execution_contexts(strategy)
     available_assets = [asset for asset in strategy.investment_universe.tickers if asset in closes.columns]
     if len(available_assets) < MIN_SIGNAL_DIAGNOSTIC_ASSET_COUNT:
@@ -291,6 +349,9 @@ def build_strategy_signal_diagnostics(
             strategy_definition=strategy_definition,
             horizons=horizons,
             bucket_count=bucket_count,
+            observation_schedule=observation_schedule,
+            resolved_observation_schedule=resolved_observation_schedule,
+            observation_count_semantics=observation_count_semantics,
         )
 
     scoped_closes = closes[available_assets].replace([np.inf, -np.inf], np.nan).ffill().dropna(how="all")
@@ -329,6 +390,9 @@ def build_strategy_signal_diagnostics(
         return {
             "strategyKey": strategy_definition.key,
             "strategyLabel": strategy_definition.label,
+            "observationSchedule": observation_schedule,
+            "resolvedObservationSchedule": resolved_observation_schedule,
+            "observationCountSemantics": observation_count_semantics,
             "horizonResults": horizon_results,
             "yearlyResults": [],
             "assetClassResults": [],
@@ -340,6 +404,12 @@ def build_strategy_signal_diagnostics(
         }
 
     for index in range(MIN_SIGNAL_DIAGNOSTIC_HISTORY_BARS, len(signal_returns) - max_horizon):
+        if not should_include_signal_observation(
+            index=index,
+            index_values=signal_returns.index,
+            resolved_observation_schedule=resolved_observation_schedule,
+        ):
+            continue
         history_returns = signal_returns.iloc[: index + 1]
         history_volumes = None if signal_volumes is None else signal_volumes.iloc[: index + 1]
         current_date = str(signal_returns.index[index])
@@ -419,6 +489,9 @@ def build_strategy_signal_diagnostics(
     return {
         "strategyKey": strategy_definition.key,
         "strategyLabel": strategy_definition.label,
+        "observationSchedule": observation_schedule,
+        "resolvedObservationSchedule": resolved_observation_schedule,
+        "observationCountSemantics": observation_count_semantics,
         "horizonResults": horizon_results,
         "yearlyResults": yearly_results,
         "assetClassResults": asset_class_results,
@@ -438,6 +511,7 @@ def build_signal_diagnostics_payload(
     universe: str = "crypto_included",
     horizons: Sequence[int] = DEFAULT_SIGNAL_DIAGNOSTIC_HORIZONS,
     bucket_count: int = DEFAULT_SIGNAL_DIAGNOSTIC_BUCKET_COUNT,
+    observation_schedule: str = "strategy",
 ) -> dict[str, object]:
     market_period = period or comparison.run_spec.market_slice.period
     strategy_definitions = comparison.candidate_strategies + comparison.reference_strategies
@@ -475,6 +549,7 @@ def build_signal_diagnostics_payload(
                 volumes=market_bundle.get("volumes"),
                 horizons=horizons,
                 bucket_count=bucket_count,
+                observation_schedule=observation_schedule,
             )
         )
 
@@ -485,6 +560,7 @@ def build_signal_diagnostics_payload(
         "universe": universe,
         "horizons": [format_signal_horizon_label(int(horizon)) for horizon in horizons],
         "bucketCount": int(bucket_count),
+        "observationSchedule": normalize_signal_diagnostic_observation_schedule(observation_schedule),
         "strategyCount": len(strategy_results),
         "marketData": metadata_by_timeframe,
         "strategyResults": strategy_results,

@@ -566,6 +566,8 @@ def test_signal_diagnostics_command_text(monkeypatch, tmp_path, capsys) -> None:
         strategy_key,
         "--horizon",
         "1d",
+        "--observation-schedule",
+        "daily",
     ])
 
     captured = capsys.readouterr()
@@ -573,6 +575,7 @@ def test_signal_diagnostics_command_text(monkeypatch, tmp_path, capsys) -> None:
     assert "Signal diagnostics:" in captured.out
     assert strategy_key in captured.out
     assert "1d" in captured.out
+    assert "observations daily" in captured.out
     assert "rank IC" in captured.out
     assert "spread" in captured.out
     assert "diagnosis" in captured.out
@@ -589,16 +592,20 @@ def test_signal_diagnostics_command_json(monkeypatch, tmp_path, capsys) -> None:
         strategy_key,
         "--horizon",
         "1d",
+        "--observation-schedule",
+        "daily",
     ])
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["kind"] == "signal_diagnostics"
     assert payload["horizons"] == ["1d"]
+    assert payload["observationSchedule"] == "daily"
     assert payload["strategyCount"] == 1
     assert payload["strategyResults"][0]["strategyKey"] == strategy_key
     result = payload["strategyResults"][0]
     assert result["horizonResults"][0]["horizon"] == "1d"
+    assert result["resolvedObservationSchedule"] == "daily"
     assert "rankIc" in result["horizonResults"][0]
     assert "diagnosis" in result
     assert "yearlyResults" in result

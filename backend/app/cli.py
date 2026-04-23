@@ -142,6 +142,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Forward horizon such as 1d, 5d, or 21d. Can be repeated.",
     )
+    signal_diagnostics_parser.add_argument(
+        "--observation-schedule",
+        choices=signal_diagnostics_service.SIGNAL_DIAGNOSTIC_OBSERVATION_SCHEDULES,
+        default="strategy",
+        help="Observation cadence for score/forward-return diagnostics.",
+    )
     signal_diagnostics_parser.add_argument("--json", action="store_true", dest="as_json")
 
     edge_attribution_parser = subparsers.add_parser(
@@ -947,7 +953,8 @@ def render_signal_diagnostics(payload: dict) -> str:
         (
             f"Signal diagnostics: {payload['strategyCount']} strategies | "
             f"period {payload['period']} | universe {payload['universe']} | "
-            f"horizons {', '.join(payload.get('horizons') or [])}"
+            f"horizons {', '.join(payload.get('horizons') or [])} | "
+            f"observations {payload.get('observationSchedule')}"
         )
     ]
     for result in payload.get("strategyResults") or []:
@@ -1332,6 +1339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             period=args.period,
             universe=args.universe,
             horizons=horizons,
+            observation_schedule=args.observation_schedule,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))

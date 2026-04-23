@@ -53,6 +53,14 @@ INSTRUMENTS: tuple[InstrumentSpec, ...] = (
 )
 
 INSTRUMENTS_BY_SYMBOL = {instrument.symbol: instrument for instrument in INSTRUMENTS}
+NORMALIZED_ASSET_CLASS_BY_INSTRUMENT_CLASS = {
+    "equity_etf": "equity",
+    "real_estate_etf": "real_estate",
+    "bond_etf": "bond",
+    "commodity_etf": "commodity",
+    "currency_etf": "currency",
+    "crypto": "crypto",
+}
 
 GLOBAL_MULTI_ASSET_TICKERS = tuple(instrument.symbol for instrument in INSTRUMENTS)
 ETF_ONLY_TICKERS = tuple(
@@ -109,6 +117,13 @@ UNIVERSE_VARIANT_KEYS = tuple(UNIVERSE_VARIANTS)
 
 def get_instrument(symbol: str) -> InstrumentSpec | None:
     return INSTRUMENTS_BY_SYMBOL.get(symbol)
+
+
+def get_normalized_asset_class(symbol: str) -> str:
+    instrument = get_instrument(symbol)
+    if instrument is None:
+        return "other"
+    return NORMALIZED_ASSET_CLASS_BY_INSTRUMENT_CLASS.get(instrument.asset_class, instrument.asset_class)
 
 
 def build_cost_overrides_for_profile(

@@ -13,7 +13,11 @@ from app.portfolio import (
 )
 
 
-def build_test_strategy_definition():
+def build_test_strategy_definition(
+    *,
+    rebalance_schedule: str = "every_bar",
+    decision_schedule: str | None = None,
+):
     strategy = build_evaluator_strategy_spec(
         strategy_id="signal_diagnostics_test_strategy",
         investment_universe=build_investment_universe_spec(
@@ -27,12 +31,13 @@ def build_test_strategy_definition():
         ),
         portfolio_model=build_portfolio_model_spec("equal_weight"),
         execution_policy=build_execution_policy_spec(
-            key="every_bar",
-            label="Every bar",
+            key=rebalance_schedule,
+            label=rebalance_schedule,
             entry="train_once_then_periodic_rebalance",
-            rebalance_schedule="every_bar",
+            rebalance_schedule=rebalance_schedule,
         ),
         risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        decision_schedule=decision_schedule,
     )
     return build_strategy_definition_from_evaluator_strategy_spec(strategy)
 
@@ -59,6 +64,9 @@ def test_build_strategy_signal_diagnostics_reports_positive_signal_relationship(
 
     one_day = result["horizonResults"][0]
     five_day = result["horizonResults"][1]
+    assert result["observationSchedule"] == "strategy"
+    assert result["resolvedObservationSchedule"] == "daily"
+    assert result["observationCountSemantics"] == "daily overlapping forward-return windows"
     assert one_day["horizon"] == "1d"
     assert one_day["sampleCount"] > 0
     assert one_day["rankIc"] > 0.9
@@ -80,6 +88,45 @@ def test_group_assets_by_class_uses_fixed_multi_asset_mapping() -> None:
     assert grouped["bond"] == ["TLT", "IEF"]
     assert grouped["crypto"] == ["BTC-USD"]
     assert grouped["other"] == ["AAA"]
+
+
+def test_strategy_observation_schedule_uses_strategy_decision_dates() -> None:
+    index = pd.date_range("2025-01-01", periods=90, freq="D")
+    closes = pd.DataFrame(
+        {
+            "AAA": [100 * (1.020 ** row) for row in range(len(index))],
+            "BBB": [100 * (1.010 ** row) for row in range(len(index))],
+            "CCC": [100 * (0.995 ** row) for row in range(len(index))],
+            "DDD": [100 * (0.990 ** row) for row in range(len(index))],
+        },
+        index=index,
+    )
+    strategy_definition = build_test_strategy_definition(
+        rebalance_schedule="month_end",
+        decision_schedule="month_end",
+    )
+
+    strategy_result = signal_diagnostics_service.build_strategy_signal_diagnostics(
+        strategy_definition=strategy_definition,
+        closes=closes,
+        volumes=None,
+        horizons=(1,),
+        bucket_count=2,
+    )
+    daily_result = signal_diagnostics_service.build_strategy_signal_diagnostics(
+        strategy_definition=strategy_definition,
+        closes=closes,
+        volumes=None,
+        horizons=(1,),
+        bucket_count=2,
+        observation_schedule="daily",
+    )
+
+    strategy_horizon = strategy_result["horizonResults"][0]
+    daily_horizon = daily_result["horizonResults"][0]
+    assert strategy_result["resolvedObservationSchedule"] == "month_end"
+    assert strategy_result["observationCountSemantics"] == "strategy decision dates only"
+    assert 0 < strategy_horizon["observationCount"] < daily_horizon["observationCount"]
 
 
 def test_build_signal_diagnostics_diagnosis_flags_unstable_weak_signal() -> None:

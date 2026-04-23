@@ -952,6 +952,15 @@ def render_signal_diagnostics(payload: dict) -> str:
     ]
     for result in payload.get("strategyResults") or []:
         lines.append(f"{result['strategyLabel']} [{result['strategyKey']}]")
+        diagnosis = result.get("diagnosis") or {}
+        if diagnosis:
+            lines.append(
+                "   "
+                f"diagnosis {diagnosis.get('primaryFinding')} | "
+                f"flags {', '.join(diagnosis.get('flags') or [])} | "
+                f"positive horizons {diagnosis.get('positiveHorizonCount')}/{diagnosis.get('validHorizonCount')} | "
+                f"positive years {diagnosis.get('positiveYearCount')}/{diagnosis.get('validYearCount')}"
+            )
         for horizon_result in result.get("horizonResults") or []:
             lines.append(
                 "   "
@@ -963,6 +972,45 @@ def render_signal_diagnostics(payload: dict) -> str:
                 f"bottom {format_optional_percent(horizon_result.get('bottomBucketForwardReturnPct'))} | "
                 f"hit {format_optional_ratio_percent(horizon_result.get('hitRate'))}"
             )
+        for horizon in payload.get("horizons") or []:
+            yearly_results = [
+                item for item in result.get("yearlyResults") or []
+                if item.get("horizon") == horizon and item.get("rankIc") is not None
+            ]
+            if yearly_results:
+                positive_year_count = sum(
+                    1
+                    for item in yearly_results
+                    if (
+                        item.get("topMinusBottomForwardReturnPct") is not None
+                        and float(item["topMinusBottomForwardReturnPct"]) > 0
+                    )
+                )
+                worst_year = min(
+                    yearly_results,
+                    key=lambda item: float(item.get("topMinusBottomForwardReturnPct") or 0.0),
+                )
+                lines.append(
+                    "   "
+                    f"yearly {horizon} | "
+                    f"positive spread years {positive_year_count}/{len(yearly_results)} | "
+                    f"worst {worst_year['year']} "
+                    f"spread {format_optional_percent(worst_year.get('topMinusBottomForwardReturnPct'))}"
+                )
+            asset_class_results = [
+                item for item in result.get("assetClassResults") or []
+                if item.get("horizon") == horizon and item.get("rankIc") is not None
+            ]
+            if asset_class_results:
+                parts = [
+                    (
+                        f"{item['assetClass']} "
+                        f"IC {format_optional_decimal(item.get('rankIc'))} "
+                        f"spread {format_optional_percent(item.get('topMinusBottomForwardReturnPct'))}"
+                    )
+                    for item in asset_class_results
+                ]
+                lines.append(f"   asset classes {horizon} | " + "; ".join(parts))
     return "\n".join(lines)
 
 

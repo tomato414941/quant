@@ -66,6 +66,49 @@ def test_build_strategy_signal_diagnostics_reports_positive_signal_relationship(
     assert one_day["hitRate"] == 1.0
     assert five_day["horizon"] == "5d"
     assert five_day["topMinusBottomForwardReturnPct"] > one_day["topMinusBottomForwardReturnPct"]
+    assert result["diagnosis"]["primaryFinding"] == "usable_signal"
+    assert result["yearlyResults"][0]["year"] == 2025
+    assert result["yearlyResults"][0]["topMinusBottomForwardReturnPct"] > 0
+    assert result["assetClassResults"][0]["assetClass"] == "other"
+    assert result["assetClassResults"][0]["topMinusBottomForwardReturnPct"] > 0
+
+
+def test_group_assets_by_class_uses_fixed_multi_asset_mapping() -> None:
+    grouped = signal_diagnostics_service.group_assets_by_class(pd.Index(["SPY", "QQQ", "TLT", "IEF", "BTC-USD", "AAA"]))
+
+    assert grouped["equity"] == ["SPY", "QQQ"]
+    assert grouped["bond"] == ["TLT", "IEF"]
+    assert grouped["crypto"] == ["BTC-USD"]
+    assert grouped["other"] == ["AAA"]
+
+
+def test_build_signal_diagnostics_diagnosis_flags_unstable_weak_signal() -> None:
+    diagnosis = signal_diagnostics_service.build_signal_diagnostics_diagnosis(
+        horizon_results=[
+            {
+                "rankIc": 0.01,
+                "topMinusBottomForwardReturnPct": 0.2,
+                "hitRate": 0.51,
+            }
+        ],
+        yearly_results=[
+            {
+                "rankIc": 0.03,
+                "topMinusBottomForwardReturnPct": 1.0,
+                "hitRate": 0.55,
+            },
+            {
+                "rankIc": -0.02,
+                "topMinusBottomForwardReturnPct": -1.0,
+                "hitRate": 0.45,
+            },
+        ],
+        asset_class_results=[],
+    )
+
+    assert diagnosis["primaryFinding"] == "usable_but_weak_signal"
+    assert "weak_signal" in diagnosis["flags"]
+    assert "unstable_signal" in diagnosis["flags"]
 
 
 def test_build_strategy_signal_diagnostics_handles_constant_scores() -> None:

@@ -575,6 +575,7 @@ def test_signal_diagnostics_command_text(monkeypatch, tmp_path, capsys) -> None:
     assert "1d" in captured.out
     assert "rank IC" in captured.out
     assert "spread" in captured.out
+    assert "diagnosis" in captured.out
 
 
 def test_signal_diagnostics_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -596,8 +597,12 @@ def test_signal_diagnostics_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert payload["horizons"] == ["1d"]
     assert payload["strategyCount"] == 1
     assert payload["strategyResults"][0]["strategyKey"] == strategy_key
-    assert payload["strategyResults"][0]["horizonResults"][0]["horizon"] == "1d"
-    assert "rankIc" in payload["strategyResults"][0]["horizonResults"][0]
+    result = payload["strategyResults"][0]
+    assert result["horizonResults"][0]["horizon"] == "1d"
+    assert "rankIc" in result["horizonResults"][0]
+    assert "diagnosis" in result
+    assert "yearlyResults" in result
+    assert "assetClassResults" in result
 
 
 def test_render_availability_diagnostics_shows_calendar_boundary_classification() -> None:

@@ -19,6 +19,28 @@ DEFAULT_SIGNAL_DIAGNOSTIC_HORIZONS = (1, 5, 21)
 DEFAULT_SIGNAL_DIAGNOSTIC_BUCKET_COUNT = 5
 MIN_SIGNAL_DIAGNOSTIC_ASSET_COUNT = 2
 MIN_SIGNAL_DIAGNOSTIC_HISTORY_BARS = 3
+ASSET_CLASS_BY_TICKER = {
+    "SPY": "equity",
+    "QQQ": "equity",
+    "IWM": "equity",
+    "EFA": "equity",
+    "EEM": "equity",
+    "EWJ": "equity",
+    "EWZ": "equity",
+    "VNQ": "real_estate",
+    "TLT": "bond",
+    "IEF": "bond",
+    "LQD": "bond",
+    "HYG": "bond",
+    "TIP": "bond",
+    "GLD": "commodity",
+    "SLV": "commodity",
+    "DBC": "commodity",
+    "USO": "commodity",
+    "UUP": "currency",
+    "BTC-USD": "crypto",
+    "ETH-USD": "crypto",
+}
 
 
 def parse_signal_horizon_label(label: str) -> int:
@@ -104,6 +126,155 @@ def build_signal_horizon_observation(
     }
 
 
+def get_asset_class(ticker: str) -> str:
+    return ASSET_CLASS_BY_TICKER.get(str(ticker), "other")
+
+
+def group_assets_by_class(columns: pd.Index) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for column in columns:
+        grouped.setdefault(get_asset_class(str(column)), []).append(str(column))
+    return grouped
+
+
+def summarize_yearly_signal_observations(
+    observations_by_year: dict[int, list[dict[str, float]]],
+    *,
+    horizon_bars: int,
+    bucket_count: int,
+) -> list[dict[str, object]]:
+    results = []
+    for year, observations in sorted(observations_by_year.items()):
+        summary = summarize_signal_horizon_observations(
+            observations,
+            horizon_bars=horizon_bars,
+            bucket_count=bucket_count,
+        )
+        results.append({"year": int(year), **summary})
+    return results
+
+
+def summarize_asset_class_signal_observations(
+    observations_by_asset_class: dict[str, list[dict[str, float]]],
+    *,
+    horizon_bars: int,
+    bucket_count: int,
+    asset_class_counts: dict[str, int],
+) -> list[dict[str, object]]:
+    results = []
+    for asset_class, observations in sorted(observations_by_asset_class.items()):
+        summary = summarize_signal_horizon_observations(
+            observations,
+            horizon_bars=horizon_bars,
+            bucket_count=bucket_count,
+        )
+        results.append({
+            "assetClass": asset_class,
+            "assetCount": int(asset_class_counts.get(asset_class, 0)),
+            **summary,
+        })
+    return results
+
+
+def has_positive_signal(result: dict[str, object]) -> bool:
+    return (
+        result.get("rankIc") is not None
+        and result.get("topMinusBottomForwardReturnPct") is not None
+        and result.get("hitRate") is not None
+        and float(result["rankIc"]) > 0
+        and float(result["topMinusBottomForwardReturnPct"]) > 0
+        and float(result["hitRate"]) > 0.5
+    )
+
+
+def build_signal_diagnostics_diagnosis(
+    *,
+    horizon_results: list[dict[str, object]],
+    yearly_results: list[dict[str, object]],
+    asset_class_results: list[dict[str, object]],
+) -> dict[str, object]:
+    valid_horizons = [result for result in horizon_results if result.get("rankIc") is not None]
+    if not valid_horizons:
+        return {
+            "primaryFinding": "insufficient_signal_data",
+            "flags": ["insufficient_signal_data"],
+            "positiveHorizonCount": 0,
+            "validHorizonCount": 0,
+            "positiveYearCount": 0,
+            "validYearCount": 0,
+            "positiveAssetClassCount": 0,
+            "validAssetClassCount": 0,
+        }
+
+    positive_horizons = [result for result in valid_horizons if has_positive_signal(result)]
+    valid_years = [result for result in yearly_results if result.get("rankIc") is not None]
+    positive_years = [result for result in valid_years if has_positive_signal(result)]
+    valid_asset_classes = [result for result in asset_class_results if result.get("rankIc") is not None]
+    positive_asset_classes = [result for result in valid_asset_classes if has_positive_signal(result)]
+    avg_rank_ic = float(np.mean([float(result["rankIc"]) for result in valid_horizons]))
+    avg_spread = float(np.mean([float(result["topMinusBottomForwardReturnPct"]) for result in valid_horizons]))
+    avg_hit_rate = float(np.mean([
+        float(result["hitRate"]) for result in valid_horizons if result.get("hitRate") is not None
+    ]))
+
+    flags = []
+    if not positive_horizons or avg_rank_ic < 0.02 or avg_spread <= 0 or avg_hit_rate < 0.52:
+        flags.append("weak_signal")
+    if valid_years and len(positive_years) / len(valid_years) < 0.6:
+        flags.append("unstable_signal")
+
+    crypto_results = [result for result in valid_asset_classes if result.get("assetClass") == "crypto"]
+    non_crypto_results = [result for result in valid_asset_classes if result.get("assetClass") != "crypto"]
+    crypto_positive = any(has_positive_signal(result) for result in crypto_results)
+    non_crypto_positive = any(has_positive_signal(result) for result in non_crypto_results)
+    if crypto_positive and not non_crypto_positive:
+        flags.append("crypto_dependent_signal")
+
+    if not flags:
+        primary_finding = "usable_signal"
+    elif "weak_signal" in flags and positive_horizons:
+        primary_finding = "usable_but_weak_signal"
+    else:
+        primary_finding = flags[0]
+    return {
+        "primaryFinding": primary_finding,
+        "flags": flags or ["no_obvious_signal_issue"],
+        "averageRankIc": optional_round(avg_rank_ic),
+        "averageTopMinusBottomForwardReturnPct": optional_round(avg_spread),
+        "averageHitRate": optional_round(avg_hit_rate),
+        "positiveHorizonCount": len(positive_horizons),
+        "validHorizonCount": len(valid_horizons),
+        "positiveYearCount": len(positive_years),
+        "validYearCount": len(valid_years),
+        "positiveAssetClassCount": len(positive_asset_classes),
+        "validAssetClassCount": len(valid_asset_classes),
+    }
+
+
+def build_empty_strategy_signal_diagnostics(
+    *,
+    strategy_definition,
+    horizons: Sequence[int],
+    bucket_count: int,
+) -> dict[str, object]:
+    horizon_results = [
+        summarize_signal_horizon_observations([], horizon_bars=int(horizon), bucket_count=bucket_count)
+        for horizon in horizons
+    ]
+    return {
+        "strategyKey": strategy_definition.key,
+        "strategyLabel": strategy_definition.label,
+        "horizonResults": horizon_results,
+        "yearlyResults": [],
+        "assetClassResults": [],
+        "diagnosis": build_signal_diagnostics_diagnosis(
+            horizon_results=horizon_results,
+            yearly_results=[],
+            asset_class_results=[],
+        ),
+    }
+
+
 def build_strategy_signal_diagnostics(
     *,
     strategy_definition,
@@ -116,14 +287,11 @@ def build_strategy_signal_diagnostics(
     selection_contexts, predictor_context = get_strategy_signal_execution_contexts(strategy)
     available_assets = [asset for asset in strategy.investment_universe.tickers if asset in closes.columns]
     if len(available_assets) < MIN_SIGNAL_DIAGNOSTIC_ASSET_COUNT:
-        return {
-            "strategyKey": strategy_definition.key,
-            "strategyLabel": strategy_definition.label,
-            "horizonResults": [
-                summarize_signal_horizon_observations([], horizon_bars=horizon, bucket_count=bucket_count)
-                for horizon in horizons
-            ],
-        }
+        return build_empty_strategy_signal_diagnostics(
+            strategy_definition=strategy_definition,
+            horizons=horizons,
+            bucket_count=bucket_count,
+        )
 
     scoped_closes = closes[available_assets].replace([np.inf, -np.inf], np.nan).ffill().dropna(how="all")
     scoped_volumes = None if volumes is None else volumes.reindex(scoped_closes.index)[available_assets]
@@ -141,24 +309,41 @@ def build_strategy_signal_diagnostics(
 
     max_horizon = max(int(horizon) for horizon in horizons)
     observations_by_horizon: dict[int, list[dict[str, float]]] = {int(horizon): [] for horizon in horizons}
+    yearly_observations_by_horizon: dict[int, dict[int, list[dict[str, float]]]] = {
+        int(horizon): {} for horizon in horizons
+    }
+    asset_class_observations_by_horizon: dict[int, dict[str, list[dict[str, float]]]] = {
+        int(horizon): {} for horizon in horizons
+    }
+    assets_by_class = group_assets_by_class(signal_returns.columns)
+    asset_class_counts = {asset_class: len(assets) for asset_class, assets in assets_by_class.items()}
     if len(signal_returns) <= MIN_SIGNAL_DIAGNOSTIC_HISTORY_BARS + max_horizon:
+        horizon_results = [
+            summarize_signal_horizon_observations(
+                observations_by_horizon[int(horizon)],
+                horizon_bars=int(horizon),
+                bucket_count=bucket_count,
+            )
+            for horizon in horizons
+        ]
         return {
             "strategyKey": strategy_definition.key,
             "strategyLabel": strategy_definition.label,
-            "horizonResults": [
-                summarize_signal_horizon_observations(
-                    observations_by_horizon[int(horizon)],
-                    horizon_bars=int(horizon),
-                    bucket_count=bucket_count,
-                )
-                for horizon in horizons
-            ],
+            "horizonResults": horizon_results,
+            "yearlyResults": [],
+            "assetClassResults": [],
+            "diagnosis": build_signal_diagnostics_diagnosis(
+                horizon_results=horizon_results,
+                yearly_results=[],
+                asset_class_results=[],
+            ),
         }
 
     for index in range(MIN_SIGNAL_DIAGNOSTIC_HISTORY_BARS, len(signal_returns) - max_horizon):
         history_returns = signal_returns.iloc[: index + 1]
         history_volumes = None if signal_volumes is None else signal_volumes.iloc[: index + 1]
         current_date = str(signal_returns.index[index])
+        current_year = int(pd.Timestamp(signal_returns.index[index]).year)
         try:
             scores = compute_strategy_score_series(
                 history_returns,
@@ -174,6 +359,7 @@ def build_strategy_signal_diagnostics(
             continue
         if scores is None:
             continue
+        scores = scores.reindex(signal_returns.columns)
         for horizon in horizons:
             horizon = int(horizon)
             forward_window = signal_returns.iloc[index + 1 : index + horizon + 1]
@@ -181,24 +367,66 @@ def build_strategy_signal_diagnostics(
                 continue
             forward_returns = (1.0 + forward_window).prod(axis=0) - 1.0
             observation = build_signal_horizon_observation(
-                scores.reindex(signal_returns.columns),
+                scores,
                 forward_returns.reindex(signal_returns.columns),
                 bucket_count=bucket_count,
             )
-            if observation is not None:
-                observations_by_horizon[horizon].append(observation)
+            if observation is None:
+                continue
+            observations_by_horizon[horizon].append(observation)
+            yearly_observations_by_horizon[horizon].setdefault(current_year, []).append(observation)
+            for asset_class, class_assets in assets_by_class.items():
+                if len(class_assets) < MIN_SIGNAL_DIAGNOSTIC_ASSET_COUNT:
+                    continue
+                class_observation = build_signal_horizon_observation(
+                    scores.reindex(class_assets),
+                    forward_returns.reindex(class_assets),
+                    bucket_count=bucket_count,
+                )
+                if class_observation is not None:
+                    asset_class_observations_by_horizon[horizon].setdefault(
+                        asset_class,
+                        [],
+                    ).append(class_observation)
 
+    horizon_results = [
+        summarize_signal_horizon_observations(
+            observations_by_horizon[int(horizon)],
+            horizon_bars=int(horizon),
+            bucket_count=bucket_count,
+        )
+        for horizon in horizons
+    ]
+    yearly_results = [
+        result
+        for horizon in horizons
+        for result in summarize_yearly_signal_observations(
+            yearly_observations_by_horizon[int(horizon)],
+            horizon_bars=int(horizon),
+            bucket_count=bucket_count,
+        )
+    ]
+    asset_class_results = [
+        result
+        for horizon in horizons
+        for result in summarize_asset_class_signal_observations(
+            asset_class_observations_by_horizon[int(horizon)],
+            horizon_bars=int(horizon),
+            bucket_count=bucket_count,
+            asset_class_counts=asset_class_counts,
+        )
+    ]
     return {
         "strategyKey": strategy_definition.key,
         "strategyLabel": strategy_definition.label,
-        "horizonResults": [
-            summarize_signal_horizon_observations(
-                observations_by_horizon[int(horizon)],
-                horizon_bars=int(horizon),
-                bucket_count=bucket_count,
-            )
-            for horizon in horizons
-        ],
+        "horizonResults": horizon_results,
+        "yearlyResults": yearly_results,
+        "assetClassResults": asset_class_results,
+        "diagnosis": build_signal_diagnostics_diagnosis(
+            horizon_results=horizon_results,
+            yearly_results=yearly_results,
+            asset_class_results=asset_class_results,
+        ),
     }
 
 

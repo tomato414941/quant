@@ -37,7 +37,6 @@ from app.portfolio import (
     build_portfolio_state,
     build_strategy_data_source_spec,
     build_strategy_feature_definition_spec,
-    build_direct_execution_evaluator_strategy_spec_from_definition,
     build_executable_evaluator_strategy_spec_from_definition,
     build_execution_policy_spec,
     build_risk_controls_spec,
@@ -1045,9 +1044,7 @@ def test_direct_execution_definition_compatibility_helper_accepts_signal_timefra
     assert is_direct_execution_compatible_strategy_definition(definition) is True
     assert get_direct_execution_strategy_definition_compatibility_issues(definition) == []
 
-    direct_strategy = build_direct_execution_evaluator_strategy_spec_from_definition(definition)
     executable_strategy = build_executable_evaluator_strategy_spec_from_definition(definition)
-    assert direct_strategy.timeframe.key == "1w"
     assert executable_strategy.timeframe.key == "1w"
     assert executable_strategy.execution_mode == "direct_signal_timeframe"
     assert executable_strategy.signal_execution_contexts[0]["dataTimeframe"] == "1d"

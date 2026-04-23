@@ -1448,7 +1448,7 @@ def is_direct_execution_compatible_strategy_definition(
     return not get_direct_execution_strategy_definition_compatibility_issues(strategy)
 
 
-def build_direct_execution_evaluator_strategy_spec_from_definition(
+def _build_direct_execution_evaluator_strategy_spec_from_definition(
     strategy: StrategyDefinition,
 ) -> EvaluatorStrategySpec:
     issues = get_direct_execution_strategy_definition_compatibility_issues(strategy)
@@ -1505,7 +1505,7 @@ def build_direct_execution_evaluator_strategy_spec_from_definition(
 
 
 def build_executable_evaluator_strategy_spec_from_definition(strategy: StrategyDefinition) -> EvaluatorStrategySpec:
-    return build_direct_execution_evaluator_strategy_spec_from_definition(strategy)
+    return _build_direct_execution_evaluator_strategy_spec_from_definition(strategy)
 
 
 def build_evaluator_strategy_spec(

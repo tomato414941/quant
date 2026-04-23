@@ -1201,6 +1201,7 @@ def aggregate_walk_forward_runs(runs_by_window: list[dict]) -> list[dict]:
                     "train": train_summary,
                     "weights": run.get("weights", []),
                     "selectedAssets": run.get("selectedAssets", []),
+                    "executionTrace": run.get("executionTrace", []),
                     "executionDecisionSummary": run.get("decisionSummary", {}),
                     "testAvailability": summarize_run_series_availability(
                         run.get("series", []),

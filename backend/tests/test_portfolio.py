@@ -2096,6 +2096,12 @@ def test_compare_portfolio_runs_applies_rebalance_on_next_bar() -> None:
         )[0]
 
     assert run["splitAnalysis"]["test"]["portfolio"]["totalReturnPct"] == 0.0
+    assert any(event["eventType"] == "decision" for event in run["executionTrace"])
+    assert any(event["eventType"] == "rebalance" for event in run["executionTrace"])
+    trace_event = run["executionTrace"][0]
+    assert "targetWeights" in trace_event
+    assert "executedWeights" in trace_event
+    assert trace_event["phase"] in {"train", "test"}
 
 
 def test_compare_portfolio_runs_uses_explicit_decision_schedule() -> None:
@@ -2383,6 +2389,10 @@ def test_cost_aware_decision_policy_can_skip_rebalance_when_edge_is_below_cost()
     assert decision_summary["edgeSourceCounts"][SIGNAL_RETURN_PROXY_EDGE_SOURCE] >= 1
     assert "realizedEdgePctDistribution" in decision_summary
     assert "edgeHitRate" in decision_summary
+    no_trade_events = [event for event in run["executionTrace"] if event["decisionAction"] == "no_trade"]
+    assert no_trade_events
+    assert no_trade_events[0]["decisionReason"] == "edge_below_cost"
+    assert no_trade_events[0]["estimatedEdgePct"] is not None
     assert run["strategy"]["components"]["optional"]["decisionPolicy"]["key"] == COST_AWARE_NO_TRADE_DECISION_POLICY
 
 
@@ -3939,3 +3949,53 @@ def test_compare_portfolio_runs_tracks_dynamic_asset_eligibility() -> None:
     assert any("LATE" in point["newlyEligibleAssets"] for point in run["series"])
     assert run["availabilitySummary"]["minEligibleAssetCount"] == 2
     assert run["availabilitySummary"]["maxEligibleAssetCount"] == 3
+
+
+def test_compare_portfolio_runs_traces_forced_universe_change() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0],
+            "GONE": [100.0, 101.0, 102.0, 103.0, None, None, None, None],
+        },
+        index=pd.date_range("2025-01-01", periods=8, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        strategy_id="forced_universe_change_trace",
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="forced_universe_change_universe",
+            label="Forced universe change universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="毎バー",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    run = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        bars_per_year=252.0,
+        portfolio_state=build_portfolio_state(current_weights={"GONE": 1.0}, cash_weight=0.0),
+        availability_policy={
+            "kind": "asset_availability_policy",
+            "minHistoryBars": 1,
+            "maxStaleBars": 1,
+            "delistedAssetPolicy": "liquidate_to_cash",
+        },
+    )[0]
+
+    forced_events = [event for event in run["executionTrace"] if event["eventType"] == "forced_universe_change"]
+    assert forced_events
+    assert forced_events[0]["decisionReason"] == "asset_unavailable"
+    assert forced_events[0]["decisionAction"] == "forced_rebalance"
+    assert any(row["asset"] == "GONE" and row["weightPct"] == 0.0 for row in forced_events[0]["executedWeights"])

@@ -140,6 +140,10 @@ Signal diagnostics は有用だが、日次で全観測し、年次、資産ク�
 - edge attribution は variant 生成より trace 分析を優先する。
 - 診断は本体 trace を読むだけに寄せる。
 
+進捗:
+- runtime は `executionTrace` として decision、rebalance、forced universe change を記録する。
+- edge attribution の trace 読み取り化は次段階に残っている。
+
 完了条件:
 - 診断が strategy をコピーして推測しなくても、どこで成績が変わったか見える。
 - selection effect、tilt effect、allocator effect、execution cost を同じ trace から説明できる。

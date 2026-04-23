@@ -598,6 +598,7 @@ def build_window_drilldown(window: dict) -> dict:
         "executionDecisionSummary": project_execution_decision_summary(
             window.get("executionDecisionSummary", {})
         ),
+        "executionTrace": list(window.get("executionTrace", [])),
         "testAvailability": project_availability_drilldown(window.get("testAvailability", {})),
         "trainAvailability": project_availability_drilldown(window.get("trainAvailability", {})),
     }

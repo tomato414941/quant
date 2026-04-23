@@ -236,6 +236,7 @@ def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, cap
     assert "minimumSharpeRatio" in payload["candidateResults"][0]
     assert "minTestEligibleAssetCount" in payload["candidateResults"][0]
     assert "testAvailability" in payload["candidateResults"][0]["windows"][0]
+    assert "executionTrace" in payload["candidateResults"][0]["windows"][0]
 
 
 def test_benchmark_decomposition_command_json(monkeypatch, tmp_path, capsys) -> None:
@@ -504,6 +505,7 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "diversificationSummary" in first_window
     assert "exposureSummary" in first_window
     assert "executionDecisionSummary" in first_window
+    assert "executionTrace" in first_window
     assert "estimatedCostPctDistribution" in first_window["executionDecisionSummary"]
     assert "realizedEdgeAfterCostPctDistribution" in first_window["executionDecisionSummary"]
 

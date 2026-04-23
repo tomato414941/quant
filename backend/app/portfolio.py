@@ -1340,6 +1340,49 @@ def serialize_portfolio_decision_event(
     }
 
 
+def serialize_execution_trace_event(
+    *,
+    date: str,
+    event_type: str,
+    phase: str,
+    universe_columns: pd.Index,
+    max_investment_ratio: float,
+    available_asset_count: int,
+    eligible_asset_count: int,
+    selected_assets: list[str],
+    target_weights: np.ndarray | None,
+    executed_weights: np.ndarray | None,
+    decision_action: str | None,
+    decision_reason: str | None,
+    turnover_pct: float | None,
+    estimated_cost_pct: float | None,
+    estimated_edge_pct: float | None,
+    edge_source: str | None,
+    average_confidence: float | None,
+) -> dict[str, object]:
+    return {
+        "date": date,
+        "eventType": event_type,
+        "phase": phase,
+        "availableAssetCount": available_asset_count,
+        "eligibleAssetCount": eligible_asset_count,
+        "selectedAssets": list(selected_assets),
+        "targetWeights": serialize_weights(universe_columns, target_weights, max_investment_ratio)
+        if target_weights is not None
+        else [],
+        "executedWeights": serialize_weights(universe_columns, executed_weights, max_investment_ratio)
+        if executed_weights is not None
+        else [],
+        "decisionAction": decision_action,
+        "decisionReason": decision_reason,
+        "turnoverPct": None if turnover_pct is None else round(float(turnover_pct), 2),
+        "estimatedCostPct": estimated_cost_pct,
+        "estimatedEdgePct": estimated_edge_pct,
+        "edgeSource": edge_source,
+        "averageConfidence": average_confidence,
+    }
+
+
 def empty_number_distribution() -> dict[str, object]:
     return {
         "count": 0,
@@ -1645,6 +1688,7 @@ def compare_portfolio_runs(
                 "availabilitySummary": backtest["availabilitySummary"],
                 "decisionSummary": backtest["decisionSummary"],
                 "decisionEvents": backtest["decisionEvents"],
+                "executionTrace": backtest["executionTrace"],
                 "availabilityPolicy": availability_policy,
             }
         )
@@ -2967,10 +3011,12 @@ def run_portfolio_backtest(
     next_rebalance_selected_assets: list[str] | None = None
     previous_eligible_assets: set[str] = set()
     decision_events: list[dict] = []
+    execution_trace: list[dict] = []
 
     for index, (date, row) in enumerate(returns.iterrows()):
         trade_turnover = 0.0
         trade_cost = 0.0
+        phase = "train" if index < split_index else "test"
         history_through_current = returns.iloc[: index + 1]
         available_assets = resolve_available_assets(history_through_current)
         eligible_assets = resolve_eligible_assets(history_through_current, availability_policy)
@@ -2981,8 +3027,9 @@ def run_portfolio_backtest(
         tradable_weights = zero_weights_outside_assets(current_weights, returns.columns, eligible_assets)
         forced_weight_delta = np.abs(tradable_weights - current_weights)
         if forced_weight_delta.sum() > 0:
-            trade_turnover += float(forced_weight_delta.sum())
-            trade_cost += compute_trade_cost(
+            forced_turnover = float(forced_weight_delta.sum())
+            trade_turnover += forced_turnover
+            forced_trade_cost = compute_trade_cost(
                 weight_delta=forced_weight_delta,
                 linear_cost_rates=asset_transaction_costs,
                 impact_cost_rates=asset_impact_costs,
@@ -2992,8 +3039,30 @@ def run_portfolio_backtest(
                 adv_window_bars=adv_window_bars,
                 min_adv_notional=min_adv_notional,
             )
+            trade_cost += forced_trade_cost
             current_weights = tradable_weights
             current_selected_assets = [asset for asset in current_selected_assets if asset in eligible_asset_set]
+            execution_trace.append(
+                serialize_execution_trace_event(
+                    date=str(date),
+                    event_type="forced_universe_change",
+                    phase=phase,
+                    universe_columns=returns.columns,
+                    max_investment_ratio=max_investment_ratio,
+                    available_asset_count=len(available_assets),
+                    eligible_asset_count=len(eligible_assets),
+                    selected_assets=current_selected_assets,
+                    target_weights=tradable_weights,
+                    executed_weights=current_weights,
+                    decision_action="forced_rebalance",
+                    decision_reason="asset_unavailable",
+                    turnover_pct=forced_turnover * 100,
+                    estimated_cost_pct=round(forced_trade_cost * 100, 4),
+                    estimated_edge_pct=None,
+                    edge_source=None,
+                    average_confidence=None,
+                )
+            )
 
         if index == split_index:
             split_history_returns = returns.iloc[:index]
@@ -3025,6 +3094,27 @@ def run_portfolio_backtest(
                     realized_returns=row,
                 )
             )
+            execution_trace.append(
+                serialize_execution_trace_event(
+                    date=str(date),
+                    event_type="decision",
+                    phase=phase,
+                    universe_columns=returns.columns,
+                    max_investment_ratio=max_investment_ratio,
+                    available_asset_count=len(available_assets),
+                    eligible_asset_count=len(eligible_assets),
+                    selected_assets=split_decision.selected_assets,
+                    target_weights=initial_weights,
+                    executed_weights=current_weights,
+                    decision_action=split_decision.action,
+                    decision_reason=split_decision.reason,
+                    turnover_pct=split_decision.turnover * 100,
+                    estimated_cost_pct=split_decision.estimated_cost_pct,
+                    estimated_edge_pct=split_decision.estimated_edge_pct,
+                    edge_source=split_decision.edge_source,
+                    average_confidence=split_decision.average_confidence,
+                )
+            )
             next_rebalance_weights = split_decision.weights.copy()
             next_rebalance_selected_assets = list(split_decision.selected_assets)
 
@@ -3036,8 +3126,9 @@ def run_portfolio_backtest(
             )
             selected_assets = [asset for asset in (next_rebalance_selected_assets or []) if asset in eligible_asset_set]
             weight_delta = np.abs(rebalanced_weights - current_weights)
-            trade_turnover += float(weight_delta.sum())
-            trade_cost += compute_trade_cost(
+            rebalance_turnover = float(weight_delta.sum())
+            trade_turnover += rebalance_turnover
+            rebalance_trade_cost = compute_trade_cost(
                 weight_delta=weight_delta,
                 linear_cost_rates=asset_transaction_costs,
                 impact_cost_rates=asset_impact_costs,
@@ -3047,10 +3138,32 @@ def run_portfolio_backtest(
                 adv_window_bars=adv_window_bars,
                 min_adv_notional=min_adv_notional,
             )
+            trade_cost += rebalance_trade_cost
             current_weights = rebalanced_weights
             current_selected_assets = list(selected_assets)
             latest_weights = rebalanced_weights.copy()
             latest_selected_assets = list(current_selected_assets)
+            execution_trace.append(
+                serialize_execution_trace_event(
+                    date=str(date),
+                    event_type="rebalance",
+                    phase=phase,
+                    universe_columns=returns.columns,
+                    max_investment_ratio=max_investment_ratio,
+                    available_asset_count=len(available_assets),
+                    eligible_asset_count=len(eligible_assets),
+                    selected_assets=current_selected_assets,
+                    target_weights=next_rebalance_weights,
+                    executed_weights=current_weights,
+                    decision_action="rebalance",
+                    decision_reason="scheduled_rebalance",
+                    turnover_pct=rebalance_turnover * 100,
+                    estimated_cost_pct=round(rebalance_trade_cost * 100, 4),
+                    estimated_edge_pct=None,
+                    edge_source=None,
+                    average_confidence=None,
+                )
+            )
             next_rebalance_weights = None
             next_rebalance_selected_assets = None
 
@@ -3134,6 +3247,27 @@ def run_portfolio_backtest(
                     realized_returns=returns.iloc[index + 1] if index + 1 < len(returns) else None,
                 )
             )
+            execution_trace.append(
+                serialize_execution_trace_event(
+                    date=str(date),
+                    event_type="decision",
+                    phase=phase,
+                    universe_columns=returns.columns,
+                    max_investment_ratio=max_investment_ratio,
+                    available_asset_count=len(available_assets),
+                    eligible_asset_count=len(eligible_assets),
+                    selected_assets=portfolio_decision.selected_assets,
+                    target_weights=target_weights,
+                    executed_weights=current_weights,
+                    decision_action=portfolio_decision.action,
+                    decision_reason=portfolio_decision.reason,
+                    turnover_pct=portfolio_decision.turnover * 100,
+                    estimated_cost_pct=portfolio_decision.estimated_cost_pct,
+                    estimated_edge_pct=portfolio_decision.estimated_edge_pct,
+                    edge_source=portfolio_decision.edge_source,
+                    average_confidence=portfolio_decision.average_confidence,
+                )
+            )
             pending_decision_selected_assets = list(portfolio_decision.selected_assets)
             pending_decision_weights = portfolio_decision.weights.copy()
         if should_rebalance(
@@ -3164,6 +3298,7 @@ def run_portfolio_backtest(
         "availabilitySummary": summarize_availability_series(series),
         "decisionSummary": summarize_portfolio_decision_events(decision_events),
         "decisionEvents": decision_events,
+        "executionTrace": execution_trace,
         "splitAnalysis": {
             "config": {"splitRatioPct": round(split_ratio * 100, 1)},
             "train": train_summary,

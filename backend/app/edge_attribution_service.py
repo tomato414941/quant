@@ -223,8 +223,8 @@ def strip_tilt_from_selection_signal(signal):
     if not isinstance(score_parameters, dict):
         return signal
     score_parameters = dict(score_parameters)
-    score_parameters.pop("tilt_strength", None)
-    score_parameters.pop("tilt_shape", None)
+    score_parameters["tilt_strength"] = 0.0
+    score_parameters["tilt_shape"] = 0.0
     signal_parameters["scoreParameters"] = score_parameters
     return replace(
         signal,

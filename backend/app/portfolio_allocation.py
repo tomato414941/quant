@@ -27,7 +27,6 @@ def fit_portfolio_model(
     max_weight: float | None,
     previous_weights: np.ndarray | None,
     transaction_cost: float,
-    expected_return_proxy: np.ndarray | None,
 ) -> np.ndarray:
     asset_count = len(returns.columns)
     if asset_count == 0:

@@ -42,7 +42,6 @@ def test_fit_equal_weight_model_respects_max_weight_after_investment_scaling() -
         max_weight=0.2,
         previous_weights=None,
         transaction_cost=0.0,
-        expected_return_proxy=None,
     )
 
     np.testing.assert_allclose(weights, np.asarray([0.25, 0.25, 0.25, 0.25]))
@@ -64,7 +63,6 @@ def test_fit_equal_weight_model_preserves_cash_when_cap_prevents_full_investment
         max_weight=0.2,
         previous_weights=None,
         transaction_cost=0.0,
-        expected_return_proxy=None,
     )
 
     np.testing.assert_allclose(weights, np.asarray([0.2, 0.2, 0.2]))
@@ -86,7 +84,6 @@ def test_fit_mean_risk_utility_falls_back_to_equal_weight() -> None:
         max_weight=None,
         previous_weights=None,
         transaction_cost=0.0,
-        expected_return_proxy=np.asarray([0.1, 0.2, 0.3]),
     )
 
     np.testing.assert_allclose(weights, np.asarray([1 / 3, 1 / 3, 1 / 3]))

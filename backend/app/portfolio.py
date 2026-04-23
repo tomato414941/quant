@@ -2813,7 +2813,6 @@ def compute_portfolio_allocation(
         max_weight=max_weight,
         previous_weights=selected_previous_weights,
         transaction_cost=transaction_cost,
-        expected_return_proxy=None,
     ) * max_investment_ratio
     if portfolio_model.model_type != "mean_risk_utility":
         weights = apply_strategy_weight_tilt(

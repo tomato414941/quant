@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 
 from app.portfolio_allocation import (
+    ForecastAllocationInput,
+    PortfolioAllocationInput,
     build_equal_weight_fallback,
     expand_weights,
     fit_portfolio_model,
@@ -36,12 +38,14 @@ def test_fit_equal_weight_model_respects_max_weight_after_investment_scaling() -
         }
     )
     weights = fit_portfolio_model(
-        returns,
-        build_portfolio_model_spec("equal_weight"),
-        max_investment_ratio=0.8,
-        max_weight=0.2,
-        previous_weights=None,
-        transaction_cost=0.0,
+        PortfolioAllocationInput(
+            returns=returns,
+            portfolio_model=build_portfolio_model_spec("equal_weight"),
+            max_investment_ratio=0.8,
+            max_weight=0.2,
+            previous_weights=None,
+            transaction_cost=0.0,
+        )
     )
 
     np.testing.assert_allclose(weights, np.asarray([0.25, 0.25, 0.25, 0.25]))
@@ -57,12 +61,14 @@ def test_fit_equal_weight_model_preserves_cash_when_cap_prevents_full_investment
         }
     )
     weights = fit_portfolio_model(
-        returns,
-        build_portfolio_model_spec("equal_weight"),
-        max_investment_ratio=1.0,
-        max_weight=0.2,
-        previous_weights=None,
-        transaction_cost=0.0,
+        PortfolioAllocationInput(
+            returns=returns,
+            portfolio_model=build_portfolio_model_spec("equal_weight"),
+            max_investment_ratio=1.0,
+            max_weight=0.2,
+            previous_weights=None,
+            transaction_cost=0.0,
+        )
     )
 
     np.testing.assert_allclose(weights, np.asarray([0.2, 0.2, 0.2]))
@@ -77,13 +83,21 @@ def test_fit_mean_risk_utility_falls_back_to_equal_weight() -> None:
             "C": [0.00, 0.01, 0.02],
         }
     )
-    weights = fit_portfolio_model(
-        returns,
-        build_portfolio_model_spec("mean_risk_utility"),
-        max_investment_ratio=1.0,
-        max_weight=None,
-        previous_weights=None,
+    forecast_input = ForecastAllocationInput(
+        expected_returns=np.asarray([0.1, 0.2, 0.3]),
+        confidence=None,
+        risk_proxy=None,
         transaction_cost=0.0,
+    )
+    weights = fit_portfolio_model(
+        PortfolioAllocationInput(
+            returns=returns,
+            portfolio_model=build_portfolio_model_spec("mean_risk_utility"),
+            max_investment_ratio=1.0,
+            max_weight=None,
+            previous_weights=None,
+            transaction_cost=forecast_input.transaction_cost,
+        )
     )
 
     np.testing.assert_allclose(weights, np.asarray([1 / 3, 1 / 3, 1 / 3]))

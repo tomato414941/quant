@@ -31,7 +31,7 @@
 
 ### 2. 期待リターン経路が存在するが主経路で使われていない
 
-`fit_portfolio_model()` は `expected_return_proxy` を受け取るが、実質使っていない。本線の `compute_portfolio_allocation()` でも `expected_return_proxy=None` を渡している。
+以前の `fit_portfolio_model()` は `expected_return_proxy` を受け取っていたが、主経路では実質使っていなかった。現在は未使用引数を削除し、risk allocator 入力と forecast-aware allocator 入力を分離している。
 
 返済方針:
 - まず `expected_return_proxy` を未使用引数として削除するか、使うモデルだけに閉じ込める。
@@ -124,6 +124,10 @@ Signal diagnostics は有用だが、日次で全観測し、年次、資産ク�
 - HRP、equal weight、risk budgeting、expected-return-aware allocator を同列に扱う。
 - HRP を通らない評価経路を自然な本線として用意する。
 - 予測、confidence、risk、cost を allocator input として明示する。
+
+進捗:
+- risk structure allocator の入力は `PortfolioAllocationInput` に分離済み。
+- forecast-aware allocator 用の入力は `ForecastAllocationInput` として分けたが、未校正 forecast を risk allocator へ混ぜる経路は作らない。
 
 完了条件:
 - 「予測が良いか」と「配分モデルが良いか」を別々に評価できる。

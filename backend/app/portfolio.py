@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from app.instrument_registry import get_instrument
 from app.portfolio_allocation import (
+    PortfolioAllocationInput,
     build_equal_weight_fallback,
     expand_weights,
     fit_portfolio_model,
@@ -2807,12 +2808,14 @@ def compute_portfolio_allocation(
         predictor_context=predictor_context,
     )
     weights = fit_portfolio_model(
-        strategy_returns,
-        portfolio_model,
-        max_investment_ratio=max_investment_ratio,
-        max_weight=max_weight,
-        previous_weights=selected_previous_weights,
-        transaction_cost=transaction_cost,
+        PortfolioAllocationInput(
+            returns=strategy_returns,
+            portfolio_model=portfolio_model,
+            max_investment_ratio=max_investment_ratio,
+            max_weight=max_weight,
+            previous_weights=selected_previous_weights,
+            transaction_cost=transaction_cost,
+        )
     ) * max_investment_ratio
     if portfolio_model.model_type != "mean_risk_utility":
         weights = apply_strategy_weight_tilt(

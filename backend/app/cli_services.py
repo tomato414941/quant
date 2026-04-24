@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 
-from app.comparison_service import build_walk_forward_comparison_payload
+from app.comparison_walk_forward import build_walk_forward_comparison_payload
 from app.diagnostics_service import summarize_diagnostic_events
 from app.instrument_registry import get_universe_variant, resolve_universe_variant_excluded_tickers
 from app.portfolio import (

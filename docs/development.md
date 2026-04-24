@@ -53,3 +53,8 @@ Web UI やリモート確認が必要な場合は、上位の `INFRA.md` の環�
 - `ModuleNotFoundError: No module named 'app'`: backend 直下で実行するか、`uv run` を使う。
 - `skfolio` の covariance warning: テストでは既知の fallback warning として `pytest.ini` で抑制している。
 - 依存が古い: `uv sync --dev` を再実行する。
+
+## Module Boundaries
+
+- 新しい comparison 関連処理は用途別の `comparison_*` module に追加する。
+- `app.comparison_service` は移行期間の互換 facade として扱い、新規実装先にしない。

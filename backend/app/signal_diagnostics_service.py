@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from app.comparison_models import ComparisonSpec
-from app.comparison_service import collect_comparison_tickers, resolve_strategy_market_data_timeframe
+from app.comparison_market_context import collect_comparison_tickers, resolve_strategy_market_data_timeframe
 from app.instrument_registry import get_normalized_asset_class
 from app.portfolio import (
     build_executable_evaluator_strategy_spec_from_definition,

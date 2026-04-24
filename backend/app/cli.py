@@ -9,15 +9,15 @@ from typing import Sequence
 from app import edge_attribution_service
 from app import robustness_service
 from app import signal_diagnostics_service
-from app.comparison_service import (
+from app.comparison_market_context import build_run_result_store
+from app.comparison_payloads import (
     build_comparison_payload,
     build_comparison_payload_from_run_spec_payload,
-    build_walk_forward_comparison_payload,
     build_comparison_run_spec_payload,
     build_latest_run_payload,
     build_run_catalog_payload,
-    build_run_result_store,
 )
+from app.comparison_walk_forward import build_walk_forward_comparison_payload
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
 from app.instrument_registry import UNIVERSE_VARIANT_KEYS

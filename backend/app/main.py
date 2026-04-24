@@ -4,7 +4,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
-from app.comparison_service import (
+from app.comparison_payloads import (
     build_condition_sweep_payload,
     build_comparison_payload,
     build_comparison_payload_from_run_spec_payload,

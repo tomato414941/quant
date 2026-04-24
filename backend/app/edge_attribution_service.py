@@ -5,7 +5,7 @@ import math
 from dataclasses import replace
 
 from app.comparison_models import ComparisonSpec
-from app.comparison_service import build_walk_forward_comparison_payload
+from app.comparison_walk_forward import build_walk_forward_comparison_payload
 from app.portfolio import (
     build_evaluator_strategy_spec,
     build_execution_policy_spec,

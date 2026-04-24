@@ -7,10 +7,7 @@ from dataclasses import replace
 from typing import Callable
 
 from app.comparison_models import ComparisonSpec, ConditionVariant, scale_cost_model_spec
-from app.comparison_service import (
-    build_walk_forward_comparison_payload,
-    summarize_execution_decision_summaries,
-)
+from app.comparison_walk_forward import build_walk_forward_comparison_payload, summarize_execution_decision_summaries
 from app.diagnostics_service import (
     build_evaluation_diagnostic_events,
     has_invalidating_diagnostic,

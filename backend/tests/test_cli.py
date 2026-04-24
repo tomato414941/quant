@@ -6,7 +6,7 @@ import pandas as pd
 
 from app import cli as cli_module
 from app import main as main_module
-from app.comparison_service import sort_walk_forward_results
+from app.comparison_walk_forward import sort_walk_forward_results
 
 
 def fake_fetch_market_universe_bundle(

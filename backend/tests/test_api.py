@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
-from app.comparison_service import build_availability_diagnostics, build_run_result_store
+from app.comparison_market_context import build_run_result_store
+from app.comparison_serialization import build_availability_diagnostics
 from app.main import app
 from app.portfolio import (
     StrategyDefinition,

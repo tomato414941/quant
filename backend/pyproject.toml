@@ -1,0 +1,29 @@
+[project]
+name = "quant"
+version = "0.1.0"
+description = "Quant strategy evaluation API and CLI."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.116.1",
+    "python-multipart==0.0.20",
+    "skfolio==0.16.1",
+    "uvicorn[standard]==0.35.0",
+    "yfinance==1.2.0",
+]
+
+[project.scripts]
+quant = "app.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest==8.4.2",
+]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

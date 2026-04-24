@@ -1,0 +1,55 @@
+# Development
+
+このプロジェクトの backend は `uv` を正本の開発入口にする。
+
+## Setup
+
+```bash
+cd /home/dev/projects/quant/backend
+uv sync --dev
+```
+
+既存の `requirements.txt` と `requirements-dev.txt` は移行期間の互換ファイルとして残す。
+新しい依存は `pyproject.toml` を先に更新する。
+
+## Test
+
+```bash
+cd /home/dev/projects/quant/backend
+uv run pytest -q
+```
+
+日常確認で長いテストを外す場合は、対象テストに `slow` marker を付けたうえで次を使う。
+
+```bash
+uv run pytest -q -m "not slow"
+```
+
+## CLI
+
+```bash
+cd /home/dev/projects/quant/backend
+uv run quant comparison-summary --top 1
+uv run quant signal-diagnostics --strategy-key pred-fu-momo2-supplement-5bar --json
+```
+
+互換入口として次も使える。
+
+```bash
+uv run python -m app comparison-summary --top 1
+```
+
+## API
+
+```bash
+cd /home/dev/projects/quant/backend
+uv run uvicorn app.main:app --reload
+```
+
+Web UI やリモート確認が必要な場合は、上位の `INFRA.md` の環境前提に従う。
+
+## Common Failures
+
+- `ModuleNotFoundError: No module named 'app'`: backend 直下で実行するか、`uv run` を使う。
+- `skfolio` の covariance warning: テストでは既知の fallback warning として `pytest.ini` で抑制している。
+- 依存が古い: `uv sync --dev` を再実行する。

@@ -4,6 +4,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
+from app.comparison_market_context import build_run_result_store
 from app.comparison_payloads import (
     build_condition_sweep_payload,
     build_comparison_payload,
@@ -241,12 +242,21 @@ def strategy_inventory(
     status: str | None = Query(None),
     priority: str | None = Query(None),
     family: str | None = Query(None),
+    with_latest_runs: bool = Query(False),
 ) -> dict:
     try:
+        latest_run_records = None
+        if with_latest_runs:
+            latest_run_records = build_run_result_store(DEFAULT_COMPARISON_SPEC).list_compact_records(
+                run_kind="strategy_run",
+                view="generic",
+            )
         return build_strategy_inventory_payload(
             status=status,
             priority=priority,
             family=family,
+            with_latest_runs=with_latest_runs,
+            latest_run_records=latest_run_records,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

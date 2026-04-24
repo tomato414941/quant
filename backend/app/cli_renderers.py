@@ -179,10 +179,31 @@ def render_strategy_inventory(payload: dict) -> str:
     for entry in payload["entries"]:
         baseline = entry.get("baselineStrategyId") or "none"
         tags = ", ".join(entry.get("tags") or [])
+        run_summary = ""
+        if payload.get("withLatestRuns"):
+            latest_run = entry.get("latestRun")
+            if latest_run is None:
+                run_summary = " | run=missing"
+            else:
+                run_summary = (
+                    " | "
+                    f"run=available Sharpe {format_optional_decimal(latest_run.get('sharpeRatio'))} "
+                    f"Return {format_optional_percent(latest_run.get('totalReturnPct'))} "
+                    f"MDD {format_optional_percent(latest_run.get('maxDrawdownPct'))}"
+                )
         lines.append(
             f"- {entry['strategyId']} | {entry['status']} | {entry['priority']} | "
-            f"{entry['family']} | baseline={baseline}"
+            f"{entry['family']} | baseline={baseline}{run_summary}"
         )
+        baseline_comparison = entry.get("baselineComparison")
+        if baseline_comparison:
+            lines.append(
+                "  "
+                f"delta vs {baseline_comparison['baselineStrategyId']}: "
+                f"Sharpe {format_optional_signed_decimal(baseline_comparison.get('deltaSharpeRatio'))} | "
+                f"Return {format_optional_percent(baseline_comparison.get('deltaTotalReturnPct'))} | "
+                f"MDD {format_optional_percent(baseline_comparison.get('deltaMaxDrawdownPct'))}"
+            )
         if tags:
             lines.append(f"  tags={tags}")
         if entry.get("notes"):

@@ -153,6 +153,8 @@ def build_strategy_inventory_payload(
     status: str | None = None,
     priority: str | None = None,
     family: str | None = None,
+    with_latest_runs: bool = False,
+    latest_run_records: list[dict] | None = None,
 ) -> dict:
     entries = filter_strategy_inventory_entries(
         build_strategy_inventory_entries(),
@@ -160,11 +162,24 @@ def build_strategy_inventory_payload(
         priority=priority,
         family=family,
     )
+    latest_records_by_strategy_id = (
+        build_latest_run_records_by_strategy_id(latest_run_records or [])
+        if with_latest_runs
+        else {}
+    )
     return {
         "kind": "strategy_inventory",
         "schemaVersion": STRATEGY_INVENTORY_SCHEMA_VERSION,
         "counts": build_strategy_inventory_counts(entries),
-        "entries": [serialize_strategy_inventory_entry(entry) for entry in entries],
+        "withLatestRuns": with_latest_runs,
+        "entries": [
+            serialize_strategy_inventory_entry(
+                entry,
+                latest_records_by_strategy_id=latest_records_by_strategy_id,
+                with_latest_run=with_latest_runs,
+            )
+            for entry in entries
+        ],
     }
 
 
@@ -265,8 +280,13 @@ def count_strategy_inventory_values(entries: list[StrategyInventoryEntry], field
     return dict(sorted(counts.items()))
 
 
-def serialize_strategy_inventory_entry(entry: StrategyInventoryEntry) -> dict:
-    return {
+def serialize_strategy_inventory_entry(
+    entry: StrategyInventoryEntry,
+    *,
+    with_latest_run: bool = False,
+    latest_records_by_strategy_id: dict[str, dict] | None = None,
+) -> dict:
+    payload = {
         "strategyId": entry.strategy_id,
         "family": entry.family,
         "role": entry.role,
@@ -278,6 +298,77 @@ def serialize_strategy_inventory_entry(entry: StrategyInventoryEntry) -> dict:
         "tags": list(entry.tags),
         "notes": entry.notes,
     }
+    if not with_latest_run:
+        return payload
+
+    records_by_strategy_id = latest_records_by_strategy_id or {}
+    latest_record = records_by_strategy_id.get(entry.strategy_id)
+    baseline_record = (
+        records_by_strategy_id.get(entry.baseline_strategy_id)
+        if entry.baseline_strategy_id is not None
+        else None
+    )
+    payload["runStatus"] = "available" if latest_record is not None else "missing"
+    payload["latestRun"] = serialize_strategy_inventory_latest_run(latest_record)
+    payload["baselineComparison"] = build_strategy_inventory_baseline_comparison(
+        latest_record,
+        baseline_record,
+    )
+    return payload
+
+
+def build_latest_run_records_by_strategy_id(records: list[dict]) -> dict[str, dict]:
+    records_by_strategy_id: dict[str, dict] = {}
+    for record in records:
+        strategy_id = record.get("strategyId")
+        if not strategy_id:
+            continue
+        records_by_strategy_id.setdefault(str(strategy_id), record)
+    return records_by_strategy_id
+
+
+def serialize_strategy_inventory_latest_run(record: dict | None) -> dict | None:
+    if record is None:
+        return None
+    return {
+        "runKey": record.get("runKey"),
+        "savedAtUtc": record.get("savedAtUtc"),
+        "period": record.get("period"),
+        "timeframe": record.get("timeframe"),
+        "sharpeRatio": record.get("sharpeRatio"),
+        "totalReturnPct": record.get("totalReturnPct"),
+        "maxDrawdownPct": record.get("maxDrawdownPct"),
+    }
+
+
+def build_strategy_inventory_baseline_comparison(
+    latest_record: dict | None,
+    baseline_record: dict | None,
+) -> dict | None:
+    if latest_record is None or baseline_record is None:
+        return None
+    return {
+        "baselineStrategyId": baseline_record.get("strategyId"),
+        "baselineRunKey": baseline_record.get("runKey"),
+        "deltaSharpeRatio": subtract_optional_metric(
+            latest_record.get("sharpeRatio"),
+            baseline_record.get("sharpeRatio"),
+        ),
+        "deltaTotalReturnPct": subtract_optional_metric(
+            latest_record.get("totalReturnPct"),
+            baseline_record.get("totalReturnPct"),
+        ),
+        "deltaMaxDrawdownPct": subtract_optional_metric(
+            latest_record.get("maxDrawdownPct"),
+            baseline_record.get("maxDrawdownPct"),
+        ),
+    }
+
+
+def subtract_optional_metric(left: object, right: object) -> float | None:
+    if left is None or right is None:
+        return None
+    return round(float(left) - float(right), 6)
 
 
 def validate_strategy_inventory_entries(
@@ -317,6 +408,7 @@ __all__ = [
     "StrategyInventoryEntry",
     "build_strategy_inventory_entries",
     "build_strategy_inventory_payload",
+    "build_latest_run_records_by_strategy_id",
     "filter_strategy_inventory_entries",
     "serialize_strategy_inventory_entry",
     "validate_strategy_inventory_entries",

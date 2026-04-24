@@ -292,6 +292,24 @@ def test_strategy_inventory_api_filters_entries() -> None:
     assert all(entry["priority"] == "high" for entry in payload["entries"])
 
 
+def test_strategy_inventory_api_with_latest_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
+    config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
+    config.result_store_dir = str(tmp_path / "run_results")
+    monkeypatch.setattr(main_module, "DEFAULT_COMPARISON_SPEC", config)
+
+    strategy_runs_response = client.post("/api/strategy-runs")
+    assert strategy_runs_response.status_code == 200
+
+    response = client.get("/api/strategy-inventory", params={"status": "active", "with_latest_runs": True})
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["withLatestRuns"] is True
+    assert any(entry["runStatus"] == "available" for entry in payload["entries"])
+    assert all("latestRun" in entry for entry in payload["entries"])
+
+
 def test_strategy_inventory_api_rejects_invalid_filter() -> None:
     response = client.get("/api/strategy-inventory", params={"status": "unknown"})
 

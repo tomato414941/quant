@@ -204,6 +204,26 @@ def test_strategy_inventory_command_json(capsys) -> None:
     assert all(entry["status"] == "active" for entry in payload["entries"])
 
 
+def test_strategy_inventory_command_with_latest_runs_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    cli_module.main(["comparison-summary", "--top", "1"])
+    capsys.readouterr()
+
+    exit_code = cli_module.main([
+        "strategy-inventory",
+        "--status",
+        "active",
+        "--with-latest-runs",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["withLatestRuns"] is True
+    assert any(entry["runStatus"] == "available" for entry in payload["entries"])
+    assert all("latestRun" in entry for entry in payload["entries"])
+
+
 def test_strategy_inventory_command_text(capsys) -> None:
     exit_code = cli_module.main(["strategy-inventory", "--priority", "high"])
 

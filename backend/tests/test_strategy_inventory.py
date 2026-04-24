@@ -69,9 +69,75 @@ def test_strategy_inventory_payload_filters_entries() -> None:
 
     assert payload["kind"] == "strategy_inventory"
     assert payload["schemaVersion"] == "v1"
+    assert payload["withLatestRuns"] is False
     assert payload["counts"]["total"] > 0
     assert all(entry["status"] == "active" for entry in payload["entries"])
     assert all(entry["priority"] == "high" for entry in payload["entries"])
+
+
+def test_strategy_inventory_payload_attaches_latest_run_records() -> None:
+    payload = build_strategy_inventory_payload(
+        status="active",
+        with_latest_runs=True,
+        latest_run_records=[
+            {
+                "runKey": "candidate-newer",
+                "savedAtUtc": "2026-04-24T00:00:00Z",
+                "strategyId": "stg-fu-momo12-top035-hrp",
+                "period": "10y",
+                "timeframe": "1d",
+                "sharpeRatio": 1.25,
+                "totalReturnPct": 42.0,
+                "maxDrawdownPct": -12.0,
+            },
+            {
+                "runKey": "baseline",
+                "savedAtUtc": "2026-04-24T00:00:00Z",
+                "strategyId": "stg-fu-hrp",
+                "period": "10y",
+                "timeframe": "1d",
+                "sharpeRatio": 1.0,
+                "totalReturnPct": 35.0,
+                "maxDrawdownPct": -10.0,
+            },
+            {
+                "runKey": "candidate-older",
+                "savedAtUtc": "2026-04-23T00:00:00Z",
+                "strategyId": "stg-fu-momo12-top035-hrp",
+                "period": "10y",
+                "timeframe": "1d",
+                "sharpeRatio": 0.5,
+                "totalReturnPct": 20.0,
+                "maxDrawdownPct": -20.0,
+            },
+        ],
+    )
+    entries_by_id = {entry["strategyId"]: entry for entry in payload["entries"]}
+
+    entry = entries_by_id["stg-fu-momo12-top035-hrp"]
+
+    assert payload["withLatestRuns"] is True
+    assert entry["runStatus"] == "available"
+    assert entry["latestRun"]["runKey"] == "candidate-newer"
+    assert entry["baselineComparison"] == {
+        "baselineStrategyId": "stg-fu-hrp",
+        "baselineRunKey": "baseline",
+        "deltaSharpeRatio": 0.25,
+        "deltaTotalReturnPct": 7.0,
+        "deltaMaxDrawdownPct": -2.0,
+    }
+
+
+def test_strategy_inventory_payload_marks_missing_latest_runs() -> None:
+    payload = build_strategy_inventory_payload(
+        status="active",
+        with_latest_runs=True,
+        latest_run_records=[],
+    )
+
+    assert all(entry["runStatus"] == "missing" for entry in payload["entries"])
+    assert all(entry["latestRun"] is None for entry in payload["entries"])
+    assert all(entry["baselineComparison"] is None for entry in payload["entries"])
 
 
 def test_strategy_inventory_payload_rejects_unknown_filter() -> None:

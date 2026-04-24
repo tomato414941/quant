@@ -58,3 +58,5 @@ Web UI やリモート確認が必要な場合は、上位の `INFRA.md` の環�
 
 - 新しい comparison 関連処理は用途別の `comparison_*` module に追加する。
 - `app.comparison_service` は移行期間の互換 facade として扱い、新規実装先にしない。
+- 新しい portfolio selection / forecast / execution / availability 処理は用途別の `portfolio_*` module に追加する。
+- `app.portfolio` は移行期間の互換 facade として扱い、新規実装先にしない。

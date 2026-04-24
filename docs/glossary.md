@@ -325,6 +325,30 @@ Strategy そのものではなく、Strategy を評価するために外側か�
 - `Evaluation Context` は評価の土俵
 - `Run` は `Strategy + Evaluation Context + Result`
 
+### Evaluation Plan
+
+どの `Strategy` を、どの `Evaluation Context` で評価するかを管理する文書。
+
+このプロジェクトでは [Evaluation Plan](./evaluation-plan.md) を現在の評価作業を束ねる薄い計画文書として扱う。全Strategyは [Strategy Catalog](./strategy-catalog.md)、評価条件は [Evaluation Contexts](./evaluation-contexts.md)、評価済みrunの比較は [Leaderboard](./leaderboard.md) に分ける。
+
+### Strategy Catalog
+
+プロジェクトに存在する全Strategyの台帳。
+
+[Strategy Catalog](./strategy-catalog.md) は、Strategyの発見可能性、status、priority、評価計画へ載せる前の整理状態を管理する。評価結果や最終採用判断は書かない。
+
+### Evaluation Context Catalog
+
+Strategyを評価する条件の台帳。
+
+[Evaluation Contexts](./evaluation-contexts.md) は、正式に追跡している評価条件と今後増やす候補を管理する。どのStrategyを今回評価するかはEvaluation Planで扱う。
+
+### Leaderboard
+
+評価済みrunを人間が比較するための手動スナップショット。
+
+[Leaderboard](./leaderboard.md) は議論の入口であり、最終採用判断そのものではない。今の段階ではCLI/API機能仕様として扱わない。
+
 ### Dataset Context
 
 Strategy の外側で、どの期間・頻度・整列済みデータ範囲で評価したかを表す文脈。

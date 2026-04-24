@@ -266,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     strategy_inventory_parser.add_argument("--priority", choices=STRATEGY_INVENTORY_PRIORITIES)
     strategy_inventory_parser.add_argument("--family")
     strategy_inventory_parser.add_argument("--with-latest-runs", action="store_true")
+    strategy_inventory_parser.add_argument("--with-evaluation-matrix", action="store_true")
     strategy_inventory_parser.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
@@ -396,7 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "strategy-inventory":
         latest_run_records = None
-        if args.with_latest_runs:
+        if args.with_latest_runs or args.with_evaluation_matrix:
             latest_run_records = build_run_result_store(DEFAULT_COMPARISON_SPEC).list_compact_records(
                 run_kind="strategy_run",
                 view="generic",
@@ -407,6 +408,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             family=args.family,
             with_latest_runs=args.with_latest_runs,
             latest_run_records=latest_run_records,
+            with_evaluation_matrix=args.with_evaluation_matrix,
+            evaluation_run_records=latest_run_records,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))

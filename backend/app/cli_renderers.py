@@ -176,6 +176,10 @@ def render_strategy_inventory(payload: dict) -> str:
         "",
         "Strategies:",
     ]
+    matrix_by_strategy_id = {
+        row["strategyId"]: row
+        for row in payload.get("evaluationMatrix", [])
+    }
     for entry in payload["entries"]:
         baseline = entry.get("baselineStrategyId") or "none"
         tags = ", ".join(entry.get("tags") or [])
@@ -204,6 +208,13 @@ def render_strategy_inventory(payload: dict) -> str:
                 f"Return {format_optional_percent(baseline_comparison.get('deltaTotalReturnPct'))} | "
                 f"MDD {format_optional_percent(baseline_comparison.get('deltaMaxDrawdownPct'))}"
             )
+        matrix_row = matrix_by_strategy_id.get(entry["strategyId"])
+        if matrix_row:
+            profile_statuses = ", ".join(
+                f"{cell['profileId']}={cell['runStatus']}"
+                for cell in matrix_row["profiles"]
+            )
+            lines.append(f"  evaluations={profile_statuses}")
         if tags:
             lines.append(f"  tags={tags}")
         if entry.get("notes"):

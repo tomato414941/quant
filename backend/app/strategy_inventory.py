@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.evaluation_profiles import EVALUATION_PROFILES, serialize_evaluation_profile
 from app.strategy_catalog import CANONICAL_CANDIDATE_DEFINITIONS
 
 
@@ -155,6 +156,8 @@ def build_strategy_inventory_payload(
     family: str | None = None,
     with_latest_runs: bool = False,
     latest_run_records: list[dict] | None = None,
+    with_evaluation_matrix: bool = False,
+    evaluation_run_records: list[dict] | None = None,
 ) -> dict:
     entries = filter_strategy_inventory_entries(
         build_strategy_inventory_entries(),
@@ -167,7 +170,7 @@ def build_strategy_inventory_payload(
         if with_latest_runs
         else {}
     )
-    return {
+    payload = {
         "kind": "strategy_inventory",
         "schemaVersion": STRATEGY_INVENTORY_SCHEMA_VERSION,
         "counts": build_strategy_inventory_counts(entries),
@@ -181,6 +184,19 @@ def build_strategy_inventory_payload(
             for entry in entries
         ],
     }
+    if with_evaluation_matrix:
+        payload["withEvaluationMatrix"] = True
+        payload["evaluationProfiles"] = [
+            serialize_evaluation_profile(profile)
+            for profile in EVALUATION_PROFILES
+        ]
+        payload["evaluationMatrix"] = build_strategy_evaluation_matrix(
+            entries,
+            evaluation_run_records or [],
+        )
+    else:
+        payload["withEvaluationMatrix"] = False
+    return payload
 
 
 def build_strategy_inventory_entries() -> list[StrategyInventoryEntry]:
@@ -371,6 +387,57 @@ def subtract_optional_metric(left: object, right: object) -> float | None:
     return round(float(left) - float(right), 6)
 
 
+def build_strategy_evaluation_matrix(
+    entries: list[StrategyInventoryEntry],
+    records: list[dict],
+) -> list[dict]:
+    return [
+        {
+            "strategyId": entry.strategy_id,
+            "profiles": [
+                build_strategy_evaluation_matrix_cell(entry.strategy_id, profile, records)
+                for profile in EVALUATION_PROFILES
+            ],
+        }
+        for entry in entries
+    ]
+
+
+def build_strategy_evaluation_matrix_cell(strategy_id: str, profile, records: list[dict]) -> dict:
+    record = find_evaluation_profile_record(strategy_id, profile, records)
+    return {
+        "profileId": profile.profile_id,
+        "runStatus": "available" if record is not None else "missing",
+        "latestRun": serialize_strategy_inventory_latest_run(record),
+    }
+
+
+def find_evaluation_profile_record(strategy_id: str, profile, records: list[dict]) -> dict | None:
+    if profile.evaluation_kind != "single_run":
+        return None
+    for record in records:
+        if record_matches_evaluation_profile(strategy_id, profile, record):
+            return record
+    return None
+
+
+def record_matches_evaluation_profile(strategy_id: str, profile, record: dict) -> bool:
+    if record.get("strategyId") != strategy_id:
+        return False
+    if record.get("period") != profile.period_key:
+        return False
+    if record.get("investmentUniverseLabel") not in {"ETF", None}:
+        return False
+    if profile.max_weight is not None and record.get("maxWeightPct") is not None:
+        if round(float(record["maxWeightPct"]), 6) != round(profile.max_weight * 100, 6):
+            return False
+    expected_commission = 0.05 * profile.cost_multiplier
+    if record.get("commissionPct") is not None:
+        if round(float(record["commissionPct"]), 6) != round(expected_commission, 6):
+            return False
+    return True
+
+
 def validate_strategy_inventory_entries(
     entries: list[StrategyInventoryEntry],
     *,
@@ -409,6 +476,7 @@ __all__ = [
     "build_strategy_inventory_entries",
     "build_strategy_inventory_payload",
     "build_latest_run_records_by_strategy_id",
+    "build_strategy_evaluation_matrix",
     "filter_strategy_inventory_entries",
     "serialize_strategy_inventory_entry",
     "validate_strategy_inventory_entries",

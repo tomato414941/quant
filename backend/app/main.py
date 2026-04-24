@@ -243,10 +243,11 @@ def strategy_inventory(
     priority: str | None = Query(None),
     family: str | None = Query(None),
     with_latest_runs: bool = Query(False),
+    with_evaluation_matrix: bool = Query(False),
 ) -> dict:
     try:
         latest_run_records = None
-        if with_latest_runs:
+        if with_latest_runs or with_evaluation_matrix:
             latest_run_records = build_run_result_store(DEFAULT_COMPARISON_SPEC).list_compact_records(
                 run_kind="strategy_run",
                 view="generic",
@@ -257,6 +258,8 @@ def strategy_inventory(
             family=family,
             with_latest_runs=with_latest_runs,
             latest_run_records=latest_run_records,
+            with_evaluation_matrix=with_evaluation_matrix,
+            evaluation_run_records=latest_run_records,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

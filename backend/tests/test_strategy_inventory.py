@@ -140,6 +140,56 @@ def test_strategy_inventory_payload_marks_missing_latest_runs() -> None:
     assert all(entry["baselineComparison"] is None for entry in payload["entries"])
 
 
+def test_strategy_inventory_payload_builds_evaluation_matrix() -> None:
+    payload = build_strategy_inventory_payload(
+        status="active",
+        with_evaluation_matrix=True,
+        evaluation_run_records=[
+            {
+                "runKey": "base-run",
+                "savedAtUtc": "2026-04-24T00:00:00Z",
+                "strategyId": "stg-fu-eq",
+                "investmentUniverseLabel": "ETF",
+                "period": "2015_2025",
+                "commissionPct": 0.05,
+                "maxWeightPct": 45.0,
+                "sharpeRatio": 1.0,
+                "totalReturnPct": 20.0,
+                "maxDrawdownPct": -8.0,
+            },
+            {
+                "runKey": "cost-run",
+                "savedAtUtc": "2026-04-24T00:00:00Z",
+                "strategyId": "stg-fu-eq",
+                "investmentUniverseLabel": "ETF",
+                "period": "2015_2025",
+                "commissionPct": 0.10,
+                "maxWeightPct": 45.0,
+                "sharpeRatio": 0.8,
+                "totalReturnPct": 18.0,
+                "maxDrawdownPct": -9.0,
+            },
+        ],
+    )
+    matrix_by_strategy_id = {row["strategyId"]: row for row in payload["evaluationMatrix"]}
+    cells_by_profile = {
+        cell["profileId"]: cell
+        for cell in matrix_by_strategy_id["stg-fu-eq"]["profiles"]
+    }
+
+    assert payload["withEvaluationMatrix"] is True
+    assert {profile["profileId"] for profile in payload["evaluationProfiles"]} == {
+        "etf_2015_2025",
+        "etf_cost_2x_2015_2025",
+        "etf_walk_forward_2020_2025",
+    }
+    assert cells_by_profile["etf_2015_2025"]["runStatus"] == "available"
+    assert cells_by_profile["etf_2015_2025"]["latestRun"]["runKey"] == "base-run"
+    assert cells_by_profile["etf_cost_2x_2015_2025"]["runStatus"] == "available"
+    assert cells_by_profile["etf_cost_2x_2015_2025"]["latestRun"]["runKey"] == "cost-run"
+    assert cells_by_profile["etf_walk_forward_2020_2025"]["runStatus"] == "missing"
+
+
 def test_strategy_inventory_payload_rejects_unknown_filter() -> None:
     with pytest.raises(ValueError, match="Unknown strategy inventory status"):
         build_strategy_inventory_payload(status="unknown")

@@ -224,6 +224,35 @@ def test_strategy_inventory_command_with_latest_runs_json(monkeypatch, tmp_path,
     assert all("latestRun" in entry for entry in payload["entries"])
 
 
+def test_strategy_inventory_command_with_evaluation_matrix_json(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    cli_module.main(["comparison-summary", "--top", "1"])
+    capsys.readouterr()
+
+    exit_code = cli_module.main([
+        "strategy-inventory",
+        "--status",
+        "active",
+        "--with-evaluation-matrix",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["withEvaluationMatrix"] is True
+    assert {profile["profileId"] for profile in payload["evaluationProfiles"]} == {
+        "etf_2015_2025",
+        "etf_cost_2x_2015_2025",
+        "etf_walk_forward_2020_2025",
+    }
+    assert len(payload["evaluationMatrix"]) == payload["counts"]["total"]
+    assert any(
+        cell["runStatus"] == "available"
+        for row in payload["evaluationMatrix"]
+        for cell in row["profiles"]
+    )
+
+
 def test_strategy_inventory_command_text(capsys) -> None:
     exit_code = cli_module.main(["strategy-inventory", "--priority", "high"])
 

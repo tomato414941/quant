@@ -10,7 +10,7 @@ from app.strategy_definition_builder import (
 from app.strategy_presets import (
     DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_EVERY_BAR_EXECUTION_POLICY,
-    DEFAULT_INVESTMENT_UNIVERSE,
+    ETF_INVESTMENT_UNIVERSE,
     DEFAULT_MONTH_END_EXECUTION_POLICY,
     DEFAULT_RISK_CONTROLS,
     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
@@ -51,7 +51,7 @@ PREDICTOR_CANDIDATE_DEFINITIONS = [
                 description="全ETFを候補に残しつつ、2ヶ月モメンタムに10bar予測補助 90/10 を薄く混ぜて月次でHRPに反映する",
             ),
         ],
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        investment_universe=ETF_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
     *build_predictor_strategy_definition_product(
@@ -94,7 +94,7 @@ PREDICTOR_CANDIDATE_DEFINITIONS = [
                 description="全ETFを候補に残しつつ、2ヶ月モメンタムに10bar予測補助 50/50 を 40% 混ぜて毎バーでHRPに反映する",
             ),
         ],
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        investment_universe=ETF_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
 ]

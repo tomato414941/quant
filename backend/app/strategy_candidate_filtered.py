@@ -10,7 +10,7 @@ from app.strategy_presets import (
     DEFAULT_ANNUAL_EXECUTION_POLICY,
     DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_MONTH_END_EXECUTION_POLICY,
-    DEFAULT_INVESTMENT_UNIVERSE,
+    ETF_INVESTMENT_UNIVERSE,
     DEFAULT_RISK_CONTROLS,
     DUAL_MOMENTUM_TOP3,
     EQUAL_WEIGHT,
@@ -49,7 +49,7 @@ FILTERED_CANDIDATE_DEFINITIONS = [
                 execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
             ),
         ],
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        investment_universe=ETF_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
     *build_selection_strategy_definition_product(
@@ -70,7 +70,7 @@ FILTERED_CANDIDATE_DEFINITIONS = [
                 execution_policy=DEFAULT_ANNUAL_EXECUTION_POLICY,
             ),
         ],
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        investment_universe=ETF_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
     *build_selection_strategy_definition_product(
@@ -102,7 +102,7 @@ FILTERED_CANDIDATE_DEFINITIONS = [
                 execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
             ),
         ],
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        investment_universe=ETF_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
 ]

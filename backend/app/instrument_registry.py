@@ -25,6 +25,8 @@ class CostProfileSpec:
 class UniverseVariantSpec:
     key: str
     label: str
+    include_asset_classes: tuple[str, ...] = ()
+    include_symbols: tuple[str, ...] = ()
     exclude_asset_classes: tuple[str, ...] = ()
     exclude_symbols: tuple[str, ...] = ()
 
@@ -62,12 +64,17 @@ NORMALIZED_ASSET_CLASS_BY_INSTRUMENT_CLASS = {
     "crypto": "crypto",
 }
 
-GLOBAL_MULTI_ASSET_TICKERS = tuple(instrument.symbol for instrument in INSTRUMENTS)
-ETF_ONLY_TICKERS = tuple(
+ETF_TICKERS = tuple(
     instrument.symbol
     for instrument in INSTRUMENTS
     if instrument.asset_class != "crypto"
 )
+CRYPTO_TICKERS = tuple(
+    instrument.symbol
+    for instrument in INSTRUMENTS
+    if instrument.asset_class == "crypto"
+)
+ETF_PLUS_CRYPTO_TICKERS = (*ETF_TICKERS, *CRYPTO_TICKERS)
 
 RETAIL_MULTI_ASSET_DEFAULT_COST_PROFILE = CostProfileSpec(
     key="retail_multi_asset_default",
@@ -101,15 +108,75 @@ UNIVERSE_VARIANTS = {
         key="crypto_included",
         label="Crypto included",
     ),
+    "only_etf": UniverseVariantSpec(
+        key="only_etf",
+        label="Only ETFs",
+        exclude_asset_classes=("crypto",),
+    ),
     "btc_only": UniverseVariantSpec(
         key="btc_only",
         label="BTC only",
         exclude_symbols=("ETH-USD",),
     ),
+    "only_crypto": UniverseVariantSpec(
+        key="only_crypto",
+        label="Only crypto",
+        include_asset_classes=("crypto",),
+    ),
     "no_crypto": UniverseVariantSpec(
         key="no_crypto",
         label="No crypto",
         exclude_asset_classes=("crypto",),
+    ),
+    "only_equity": UniverseVariantSpec(
+        key="only_equity",
+        label="Only equity ETFs",
+        include_asset_classes=("equity_etf",),
+    ),
+    "no_equity": UniverseVariantSpec(
+        key="no_equity",
+        label="No equity ETFs",
+        exclude_asset_classes=("equity_etf",),
+    ),
+    "only_real_estate": UniverseVariantSpec(
+        key="only_real_estate",
+        label="Only real estate ETFs",
+        include_asset_classes=("real_estate_etf",),
+    ),
+    "no_real_estate": UniverseVariantSpec(
+        key="no_real_estate",
+        label="No real estate ETFs",
+        exclude_asset_classes=("real_estate_etf",),
+    ),
+    "only_bond": UniverseVariantSpec(
+        key="only_bond",
+        label="Only bond ETFs",
+        include_asset_classes=("bond_etf",),
+    ),
+    "no_bond": UniverseVariantSpec(
+        key="no_bond",
+        label="No bond ETFs",
+        exclude_asset_classes=("bond_etf",),
+    ),
+    "only_commodity": UniverseVariantSpec(
+        key="only_commodity",
+        label="Only commodity ETFs",
+        include_asset_classes=("commodity_etf",),
+    ),
+    "no_commodity": UniverseVariantSpec(
+        key="no_commodity",
+        label="No commodity ETFs",
+        exclude_asset_classes=("commodity_etf",),
+    ),
+    "only_currency": UniverseVariantSpec(
+        key="only_currency",
+        label="Only currency ETFs",
+        include_asset_classes=("currency_etf",),
+    ),
+    "no_currency": UniverseVariantSpec(
+        key="no_currency",
+        label="No currency ETFs",
+        exclude_asset_classes=("currency_etf",),
     ),
 }
 UNIVERSE_VARIANT_KEYS = tuple(UNIVERSE_VARIANTS)
@@ -128,7 +195,7 @@ def get_normalized_asset_class(symbol: str) -> str:
 
 def build_cost_overrides_for_profile(
     profile: CostProfileSpec = DEFAULT_COST_PROFILE,
-    symbols: tuple[str, ...] = GLOBAL_MULTI_ASSET_TICKERS,
+    symbols: tuple[str, ...] = ETF_PLUS_CRYPTO_TICKERS,
 ) -> dict[str, dict[str, float]]:
     overrides: dict[str, dict[str, float]] = {}
     for symbol in symbols:
@@ -154,9 +221,18 @@ def resolve_universe_variant_excluded_tickers(
 ) -> set[str]:
     variant = get_universe_variant(variant_key)
     excluded_symbols = set(variant.exclude_symbols)
+    included_symbols = set(variant.include_symbols)
+    included_asset_classes = set(variant.include_asset_classes)
     excluded_asset_classes = set(variant.exclude_asset_classes)
     for ticker in tickers:
         instrument = get_instrument(ticker)
+        if included_symbols or included_asset_classes:
+            if ticker in included_symbols:
+                continue
+            if instrument is not None and instrument.asset_class in included_asset_classes:
+                continue
+            excluded_symbols.add(ticker)
+            continue
         if instrument is None:
             continue
         if instrument.asset_class in excluded_asset_classes:

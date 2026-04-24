@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.portfolio import build_risk_controls_spec, build_strategy_definition_from_evaluator_strategy_spec, build_evaluator_strategy_spec
 from app.strategy_presets import (
-    DEFAULT_INVESTMENT_UNIVERSE,
+    ETF_INVESTMENT_UNIVERSE,
     EQUAL_WEIGHT,
     FULL_UNIVERSE,
     REFERENCE_HOLD_EXECUTION_POLICY,
@@ -11,7 +11,7 @@ from app.strategy_presets import (
 
 _REFERENCE_EQUAL_WEIGHT_WITH_CASH_SPEC = build_evaluator_strategy_spec(
     strategy_id="ref-fu-eq-cash",
-    investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+    investment_universe=ETF_INVESTMENT_UNIVERSE,
     selection=FULL_UNIVERSE,
     portfolio_model=EQUAL_WEIGHT,
     execution_policy=REFERENCE_HOLD_EXECUTION_POLICY,

@@ -34,8 +34,8 @@ EXPLICIT_STRATEGY_INVENTORY_ENTRIES = (
         baseline_strategy_id=None,
         expected_regimes=("broad_market",),
         risk_regimes=("benchmark",),
-        tags=("full_universe", "equal_weight", "reference_point"),
-        notes="Full-universe equal-weight baseline for return and drawdown context.",
+        tags=("etf_universe", "equal_weight", "reference_point"),
+        notes="ETF equal-weight baseline for return and drawdown context.",
     ),
     StrategyInventoryEntry(
         strategy_id="stg-fu-hrp",
@@ -46,8 +46,8 @@ EXPLICIT_STRATEGY_INVENTORY_ENTRIES = (
         baseline_strategy_id="stg-fu-eq",
         expected_regimes=("broad_market", "diversification"),
         risk_regimes=("benchmark",),
-        tags=("full_universe", "hrp", "reference_point"),
-        notes="Full-universe HRP baseline for portfolio construction effects.",
+        tags=("etf_universe", "hrp", "reference_point"),
+        notes="ETF HRP baseline for portfolio construction effects.",
     ),
     StrategyInventoryEntry(
         strategy_id="stg-fu-momo12-top035-hrp",
@@ -58,7 +58,7 @@ EXPLICIT_STRATEGY_INVENTORY_ENTRIES = (
         baseline_strategy_id="stg-fu-hrp",
         expected_regimes=("trend", "risk_on"),
         risk_regimes=("momentum_reversal",),
-        tags=("full_universe", "momentum", "12m", "hrp"),
+        tags=("etf_universe", "momentum", "12m", "hrp"),
         notes="Core annual 12-month momentum tilt candidate.",
     ),
     StrategyInventoryEntry(
@@ -70,7 +70,7 @@ EXPLICIT_STRATEGY_INVENTORY_ENTRIES = (
         baseline_strategy_id="stg-fu-hrp",
         expected_regimes=("short_trend", "rotation"),
         risk_regimes=("whipsaw", "high_turnover"),
-        tags=("full_universe", "momentum", "2m", "monthly", "hrp"),
+        tags=("etf_universe", "momentum", "2m", "monthly", "hrp"),
         notes="Core monthly 2-month momentum candidate for faster adaptation.",
     ),
     StrategyInventoryEntry(
@@ -130,7 +130,7 @@ EXPLICIT_STRATEGY_INVENTORY_ENTRIES = (
         baseline_strategy_id="stg-fu-momo12-top035-hrp",
         expected_regimes=("trend", "volatile_market"),
         risk_regimes=("low_vol_crowding",),
-        tags=("full_universe", "momentum", "low_vol", "monthly", "hrp"),
+        tags=("etf_universe", "momentum", "low_vol", "monthly", "hrp"),
         notes="Momentum plus low-vol tilt candidate for robustness checks.",
     ),
     StrategyInventoryEntry(
@@ -231,7 +231,7 @@ def infer_strategy_family(definition) -> str:
 def build_default_strategy_tags(definition) -> tuple[str, ...]:
     tags = [infer_strategy_family(definition), definition.portfolio_model.key]
     if definition.strategy_id.startswith("stg-fu-"):
-        tags.append("full_universe")
+        tags.append("etf_universe")
     if any(signal.predictor_key for signal in definition.signals):
         tags.append("predictor")
     if definition.execution_plan.rebalance_schedule == "month_end":

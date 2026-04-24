@@ -1,8 +1,10 @@
 from app.comparison_models import scale_cost_model_spec
 from app.execution_defaults import build_realistic_multi_asset_cost_model_spec
 from app.instrument_registry import (
-    ETF_ONLY_TICKERS,
-    GLOBAL_MULTI_ASSET_TICKERS,
+    CRYPTO_TICKERS,
+    ETF_PLUS_CRYPTO_TICKERS,
+    ETF_TICKERS,
+    UNIVERSE_VARIANTS,
     build_instrument_diagnostics,
     get_instrument,
     resolve_universe_variant_excluded_tickers,
@@ -10,8 +12,10 @@ from app.instrument_registry import (
 
 
 def test_instrument_registry_defines_multi_asset_universe_metadata() -> None:
-    assert len(GLOBAL_MULTI_ASSET_TICKERS) == 20
-    assert len(ETF_ONLY_TICKERS) == 18
+    assert len(ETF_TICKERS) == 18
+    assert len(CRYPTO_TICKERS) == 2
+    assert len(ETF_PLUS_CRYPTO_TICKERS) == 20
+    assert CRYPTO_TICKERS == ("BTC-USD", "ETH-USD")
 
     btc = get_instrument("BTC-USD")
     assert btc is not None
@@ -26,12 +30,71 @@ def test_instrument_registry_defines_multi_asset_universe_metadata() -> None:
 
 
 def test_universe_variants_resolve_from_instrument_metadata() -> None:
-    assert resolve_universe_variant_excluded_tickers(GLOBAL_MULTI_ASSET_TICKERS, "crypto_included") == set()
-    assert resolve_universe_variant_excluded_tickers(GLOBAL_MULTI_ASSET_TICKERS, "btc_only") == {"ETH-USD"}
-    assert resolve_universe_variant_excluded_tickers(GLOBAL_MULTI_ASSET_TICKERS, "no_crypto") == {
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "crypto_included") == set()
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "only_etf") == {
         "BTC-USD",
         "ETH-USD",
     }
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "btc_only") == {"ETH-USD"}
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "only_crypto") == set(ETF_TICKERS)
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "no_crypto") == {
+        "BTC-USD",
+        "ETH-USD",
+    }
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "only_equity") == {
+        "VNQ",
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP",
+        "BTC-USD",
+        "ETH-USD",
+    }
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "no_equity") == {
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+    }
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "only_bond") == {
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+        "VNQ",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP",
+        "BTC-USD",
+        "ETH-USD",
+    }
+    assert resolve_universe_variant_excluded_tickers(ETF_PLUS_CRYPTO_TICKERS, "no_bond") == {
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+    }
+
+
+def test_universe_variant_registry_has_symmetric_asset_class_views() -> None:
+    for asset_class_key in ("crypto", "equity", "real_estate", "bond", "commodity", "currency"):
+        assert f"only_{asset_class_key}" in UNIVERSE_VARIANTS
+        assert f"no_{asset_class_key}" in UNIVERSE_VARIANTS
 
 
 def test_cost_profile_builds_asset_overrides_from_instruments() -> None:

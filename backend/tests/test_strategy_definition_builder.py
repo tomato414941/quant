@@ -1884,6 +1884,14 @@ def test_canonical_definition_catalog_has_unique_strategy_ids() -> None:
     assert len({definition.strategy_id for definition in CANONICAL_CANDIDATE_DEFINITIONS}) == len(CANONICAL_CANDIDATE_DEFINITIONS)
 
 
+def test_canonical_definition_catalog_uses_etf_universe() -> None:
+    universe_keys = {definition.investment_universe.key for definition in CANONICAL_CANDIDATE_DEFINITIONS}
+
+    assert universe_keys == {"etf"}
+    assert all("BTC-USD" not in definition.investment_universe.tickers for definition in CANONICAL_CANDIDATE_DEFINITIONS)
+    assert all("ETH-USD" not in definition.investment_universe.tickers for definition in CANONICAL_CANDIDATE_DEFINITIONS)
+
+
 def test_timeframe_variant_candidates_are_strategy_definitions() -> None:
     assert len({definition.strategy_id for definition in TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS}) == len(TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS)
 

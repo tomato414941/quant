@@ -11,7 +11,7 @@ from app.strategy_definition_builder import (
 from app.strategy_presets import (
     DEFAULT_DAILY_TIMEFRAME,
     DEFAULT_EVERY_BAR_EXECUTION_POLICY,
-    DEFAULT_INVESTMENT_UNIVERSE,
+    ETF_INVESTMENT_UNIVERSE,
     DEFAULT_MONTH_END_EXECUTION_POLICY,
     DEFAULT_MONTHLY_TIMEFRAME,
     DEFAULT_RISK_CONTROLS,
@@ -49,7 +49,7 @@ TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS = [
                 description="全ETFを候補に残しつつ、9ヶ月モメンタムの上位優遇傾斜を月次バーごとにHRPへ反映する",
             ),
         ],
-        investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+        investment_universe=ETF_INVESTMENT_UNIVERSE,
         risk_controls=DEFAULT_RISK_CONTROLS,
     ),
     *build_selection_strategy_definitions([
@@ -59,7 +59,7 @@ TIMEFRAME_VARIANT_CANDIDATE_DEFINITIONS = [
             portfolio_model=HIERARCHICAL_RISK_PARITY,
             timeframe=DEFAULT_DAILY_TIMEFRAME,
             execution_policy=DEFAULT_MONTH_END_EXECUTION_POLICY,
-            investment_universe=DEFAULT_INVESTMENT_UNIVERSE,
+            investment_universe=ETF_INVESTMENT_UNIVERSE,
             risk_controls=DEFAULT_RISK_CONTROLS,
             label="全資産モメンタム傾斜 上位優遇 2ヶ月 × HRP × 月次",
             hypothesis="短期モメンタムを月次で反映すると、回転を抑えつつSharpeを改善しやすい",

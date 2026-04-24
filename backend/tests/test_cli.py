@@ -814,15 +814,15 @@ def test_sort_walk_forward_results_uses_minimum_sharpe_tiebreak() -> None:
     assert sort_walk_forward_results([fragile, stable])[0] is stable
 
 
-def test_apply_comparison_universe_variant_removes_crypto_assets() -> None:
+def test_apply_comparison_universe_variant_no_crypto_is_noop_for_etf_strategies() -> None:
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
 
     filtered = cli_module.apply_comparison_universe_variant(config, "no_crypto")
 
-    assert filtered.comparison_id.endswith("__no_crypto")
+    assert filtered is config
     assert "BTC-USD" not in filtered.run_spec.portfolio_state.current_weights
     assert "ETH-USD" not in filtered.run_spec.portfolio_state.current_weights
-    assert filtered.run_spec.portfolio_state.cash_weight > config.run_spec.portfolio_state.cash_weight
+    assert filtered.run_spec.portfolio_state.cash_weight == config.run_spec.portfolio_state.cash_weight
     assert all(
         "BTC-USD" not in strategy.investment_universe.tickers
         and "ETH-USD" not in strategy.investment_universe.tickers
@@ -836,15 +836,16 @@ def test_apply_comparison_universe_variant_removes_crypto_assets() -> None:
     )
 
 
-def test_apply_comparison_universe_variant_keeps_btc_only() -> None:
+def test_apply_comparison_universe_variant_btc_only_is_noop_for_etf_strategies() -> None:
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
 
     filtered = cli_module.apply_comparison_universe_variant(config, "btc_only")
 
-    assert "BTC-USD" in filtered.run_spec.portfolio_state.current_weights
+    assert filtered is config
+    assert "BTC-USD" not in filtered.run_spec.portfolio_state.current_weights
     assert "ETH-USD" not in filtered.run_spec.portfolio_state.current_weights
-    assert any(
-        "BTC-USD" in strategy.investment_universe.tickers
+    assert all(
+        "BTC-USD" not in strategy.investment_universe.tickers
         for strategy in filtered.candidate_strategies + filtered.reference_strategies
     )
     assert all(

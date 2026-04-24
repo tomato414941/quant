@@ -13,9 +13,8 @@ from app.portfolio import (
     build_strategy_definition_from_evaluator_strategy_spec,
 )
 from app.strategy_presets import (
-    DEFAULT_INVESTMENT_UNIVERSE,
     EQUAL_WEIGHT,
-    ETF_ONLY_INVESTMENT_UNIVERSE,
+    ETF_INVESTMENT_UNIVERSE,
     FULL_UNIVERSE,
     REFERENCE_HOLD_EXECUTION_POLICY,
 )
@@ -211,25 +210,25 @@ def build_benchmark_reference_strategies() -> list:
     return [
         build_equal_weight_hold_benchmark(
             strategy_id="ref-fu-eq-cash-15",
-            universe=DEFAULT_INVESTMENT_UNIVERSE,
+            universe=ETF_INVESTMENT_UNIVERSE,
             cash_weight=0.15,
-            label="全20資産等金額 + CASH 15%",
+            label="ETF 等金額 + CASH 15%",
         ),
         build_equal_weight_hold_benchmark(
             strategy_id="ref-fu-eq-cash-0",
-            universe=DEFAULT_INVESTMENT_UNIVERSE,
+            universe=ETF_INVESTMENT_UNIVERSE,
             cash_weight=0.0,
-            label="全20資産等金額 + CASH 0%",
+            label="ETF 等金額 + CASH 0%",
         ),
         build_equal_weight_hold_benchmark(
             strategy_id="ref-fu-eq-cash-25",
-            universe=DEFAULT_INVESTMENT_UNIVERSE,
+            universe=ETF_INVESTMENT_UNIVERSE,
             cash_weight=0.25,
-            label="全20資産等金額 + CASH 25%",
+            label="ETF 等金額 + CASH 25%",
         ),
         build_equal_weight_hold_benchmark(
             strategy_id="ref-etf-eq-cash-15",
-            universe=ETF_ONLY_INVESTMENT_UNIVERSE,
+            universe=ETF_INVESTMENT_UNIVERSE,
             cash_weight=0.15,
             label="ETF only 等金額 + CASH 15%",
         ),

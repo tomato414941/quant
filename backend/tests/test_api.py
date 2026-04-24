@@ -425,9 +425,9 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["comparison"]["runSpec"]["evaluation"]["schemaVersion"] == "v1"
     instrument_diagnostics = payload["comparison"]["runSpec"]["evaluation"]["instrumentDiagnostics"]
     assert instrument_diagnostics["costProfileKey"] == "retail_multi_asset_default"
-    assert instrument_diagnostics["mixedMarketCalendar"] is True
-    assert instrument_diagnostics["marketCalendars"] == {"24_7": 2, "nyse": 18}
-    assert instrument_diagnostics["assetClassCounts"]["crypto"] == 2
+    assert instrument_diagnostics["mixedMarketCalendar"] is False
+    assert instrument_diagnostics["marketCalendars"] == {"nyse": 18}
+    assert "crypto" not in instrument_diagnostics["assetClassCounts"]
     assert {
         context["timeframe"]["key"]
         for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
@@ -464,8 +464,8 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert {warning["requestedEndDate"] for warning in end_warnings} == {config.run_spec.market_slice.end_date}
     assert {warning["alignedEndDate"] for warning in end_warnings} == {"2025-01-07"}
     diagnostic_events = payload["comparison"]["runSpec"]["evaluation"]["diagnosticEvents"]
-    assert {event["category"] for event in diagnostic_events} == {"availability", "calendar"}
-    assert {event["severity"] for event in diagnostic_events} == {"invalidating", "info"}
+    assert {event["category"] for event in diagnostic_events} == {"availability"}
+    assert {event["severity"] for event in diagnostic_events} == {"invalidating"}
     diagnostics = payload["comparison"]["runSpec"]["evaluation"]["availabilityDiagnostics"]
     assert diagnostics["warningCount"] == len(warnings)
     assert diagnostics["actionableWarningCount"] == len(warnings)
@@ -512,8 +512,8 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
         any(signal["sourceKind"] == "predictor_overlay" for signal in strategy["components"]["optional"]["signals"])
         for strategy in payload["comparison"]["candidateStrategies"]
     )
-    assert payload["comparison"]["marketUniverse"]["assetCount"] == 20
-    assert len(payload["comparison"]["marketUniverse"]["tickers"]) == 20
+    assert payload["comparison"]["marketUniverse"]["assetCount"] == 18
+    assert len(payload["comparison"]["marketUniverse"]["tickers"]) == 18
 
     assert len(payload["candidateRuns"]) == expected_strategy_count
     assert len(payload["referenceRuns"]) == expected_reference_count
@@ -527,7 +527,7 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["candidateRuns"][0]["schemaVersion"] == "v1"
     assert (
         payload["candidateRuns"][0]["strategy"]["components"]["core"]["investmentUniverse"]["label"]
-        == "20資産マルチアセット"
+        == "ETF"
     )
     assert payload["referenceRuns"][0]["strategy"]["label"] == "等金額買い持ち + CASH"
     assert payload["runStoreSummary"]["cachedRunCount"] == 0

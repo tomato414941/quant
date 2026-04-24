@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.strategy_presets import (
-    DEFAULT_INVESTMENT_UNIVERSE,
+    ETF_INVESTMENT_UNIVERSE,
     FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M,
 )
 from app.portfolio import (
@@ -161,11 +161,11 @@ def _build_registered_predictors() -> list[PredictorSpec]:
                     observation_spec=build_observation_spec(
                         key=f"observation__pred-fu-momo2-supplement-{horizon_value}bar",
                         label="2ヶ月モメンタム supplement observation",
-                        tickers=DEFAULT_INVESTMENT_UNIVERSE.tickers,
+                        tickers=ETF_INVESTMENT_UNIVERSE.tickers,
                         fields=FULL_UNIVERSE_MOMENTUM_TILT_WEAK_TOP_2M.ranking_signal.feature_inputs,
                     ),
                     entity_kind="asset_set",
-                    entity_identifiers=DEFAULT_INVESTMENT_UNIVERSE.tickers,
+                    entity_identifiers=ETF_INVESTMENT_UNIVERSE.tickers,
                     output_spec=build_prediction_output_spec(
                         key="output__cross_sectional_score",
                         label="Cross-sectional score",

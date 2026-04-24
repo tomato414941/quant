@@ -17,7 +17,7 @@ from app.timeframe_models import (
     DEFAULT_MONTHLY_TIMEFRAME,
     DEFAULT_WEEKLY_TIMEFRAME,
 )
-from app.instrument_registry import GLOBAL_MULTI_ASSET_TICKERS, ETF_ONLY_TICKERS
+from app.instrument_registry import CRYPTO_TICKERS, ETF_PLUS_CRYPTO_TICKERS, ETF_TICKERS
 
 
 def window_spec(*, unit: str, value: float) -> dict[str, float | str]:
@@ -264,16 +264,22 @@ MEAN_RISK_UTILITY_CONSERVATIVE = build_portfolio_model_spec(
     description="校正済みforecastがない場合は保守的に等ウェイトfallbackで配分する",
 )
 
-DEFAULT_INVESTMENT_UNIVERSE = build_investment_universe_spec(
-    key="global_multi_asset_v1",
-    label="20資産マルチアセット",
-    tickers=GLOBAL_MULTI_ASSET_TICKERS,
+ETF_INVESTMENT_UNIVERSE = build_investment_universe_spec(
+    key="etf",
+    label="ETF",
+    tickers=ETF_TICKERS,
 )
 
-ETF_ONLY_INVESTMENT_UNIVERSE = build_investment_universe_spec(
-    key="global_etf_only_v1",
-    label="18資産ETF",
-    tickers=ETF_ONLY_TICKERS,
+CRYPTO_INVESTMENT_UNIVERSE = build_investment_universe_spec(
+    key="crypto",
+    label="Crypto",
+    tickers=CRYPTO_TICKERS,
+)
+
+ETF_PLUS_CRYPTO_INVESTMENT_UNIVERSE = build_investment_universe_spec(
+    key="etf_plus_crypto",
+    label="ETF + Crypto",
+    tickers=ETF_PLUS_CRYPTO_TICKERS,
 )
 
 DEFAULT_RISK_CONTROLS = build_risk_controls_spec(
@@ -286,14 +292,15 @@ __all__ = [
     "DEFAULT_ANNUAL_EXECUTION_POLICY",
     "DEFAULT_DAILY_TIMEFRAME",
     "DEFAULT_EVERY_BAR_EXECUTION_POLICY",
-    "DEFAULT_INVESTMENT_UNIVERSE",
     "DEFAULT_MONTH_END_EXECUTION_POLICY",
     "DEFAULT_MONTHLY_TIMEFRAME",
     "DEFAULT_RISK_CONTROLS",
     "DEFAULT_WEEKLY_TIMEFRAME",
     "DUAL_MOMENTUM_TOP3",
     "EQUAL_WEIGHT",
-    "ETF_ONLY_INVESTMENT_UNIVERSE",
+    "CRYPTO_INVESTMENT_UNIVERSE",
+    "ETF_INVESTMENT_UNIVERSE",
+    "ETF_PLUS_CRYPTO_INVESTMENT_UNIVERSE",
     "FULL_UNIVERSE",
     "FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_LIGHT_TOP",
     "FULL_UNIVERSE_MOMENTUM_LOW_VOL_TILT_WEAK_TOP",

@@ -13,6 +13,7 @@ from app.execution_defaults import (
     DEFAULT_COMPARISON_CONDITION_VARIANTS,
     DEFAULT_EXECUTION_ASSUMPTIONS,
 )
+from app.instrument_registry import ETF_TICKERS
 from app.strategy_registry import (
     CANONICAL_CANDIDATE_DEFINITIONS,
     REFERENCE_EQUAL_WEIGHT_WITH_CASH,
@@ -31,26 +32,8 @@ DEFAULT_COMPARISON_SPEC = ComparisonSpec(
         ),
         portfolio_state=build_portfolio_state(
             current_weights={
-                "SPY": 0.0425,
-                "QQQ": 0.0425,
-                "IWM": 0.0425,
-                "EFA": 0.0425,
-                "EEM": 0.0425,
-                "EWJ": 0.0425,
-                "EWZ": 0.0425,
-                "VNQ": 0.0425,
-                "TLT": 0.0425,
-                "IEF": 0.0425,
-                "LQD": 0.0425,
-                "HYG": 0.0425,
-                "TIP": 0.0425,
-                "GLD": 0.0425,
-                "SLV": 0.0425,
-                "DBC": 0.0425,
-                "USO": 0.0425,
-                "UUP": 0.0425,
-                "BTC-USD": 0.0425,
-                "ETH-USD": 0.0425,
+                ticker: 0.85 / len(ETF_TICKERS)
+                for ticker in ETF_TICKERS
             },
             cash_weight=0.15,
         ),

@@ -9,7 +9,7 @@ from app.comparison_models import (
 )
 from app.instrument_registry import (
     DEFAULT_COST_PROFILE,
-    GLOBAL_MULTI_ASSET_TICKERS,
+    ETF_PLUS_CRYPTO_TICKERS,
     build_cost_overrides_for_profile,
 )
 
@@ -22,7 +22,7 @@ def build_realistic_multi_asset_cost_model_spec() -> CostModelSpec:
         default_impact_coefficient_pct=profile.default_parameters["impactCoefficientPct"],
         adv_window_bars=int(profile.default_parameters["advWindowBars"]),
         min_adv_notional=profile.default_parameters["minAdvNotional"],
-        per_asset_overrides=build_cost_overrides_for_profile(profile, GLOBAL_MULTI_ASSET_TICKERS),
+        per_asset_overrides=build_cost_overrides_for_profile(profile, ETF_PLUS_CRYPTO_TICKERS),
     )
 
 

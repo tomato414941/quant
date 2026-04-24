@@ -193,6 +193,26 @@ def test_comparison_summary_command_strategy_key_filter(monkeypatch, tmp_path, c
     assert payload["referenceRuns"] == []
 
 
+def test_strategy_inventory_command_json(capsys) -> None:
+    exit_code = cli_module.main(["strategy-inventory", "--status", "active", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kind"] == "strategy_inventory"
+    assert payload["schemaVersion"] == "v1"
+    assert payload["counts"]["total"] > 0
+    assert all(entry["status"] == "active" for entry in payload["entries"])
+
+
+def test_strategy_inventory_command_text(capsys) -> None:
+    exit_code = cli_module.main(["strategy-inventory", "--priority", "high"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Strategy inventory" in captured.out
+    assert "stg-fu-eq" in captured.out
+
+
 
 def configure_cli_multiyear(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fake_fetch_market_universe_bundle_multiyear)

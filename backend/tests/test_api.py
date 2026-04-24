@@ -271,6 +271,34 @@ def test_healthcheck() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_strategy_inventory_api() -> None:
+    response = client.get("/api/strategy-inventory")
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["kind"] == "strategy_inventory"
+    assert payload["schemaVersion"] == "v1"
+    assert payload["counts"]["total"] == len(payload["entries"])
+    assert any(entry["strategyId"] == "stg-fu-eq" for entry in payload["entries"])
+
+
+def test_strategy_inventory_api_filters_entries() -> None:
+    response = client.get("/api/strategy-inventory", params={"status": "active", "priority": "high"})
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["counts"]["total"] > 0
+    assert all(entry["status"] == "active" for entry in payload["entries"])
+    assert all(entry["priority"] == "high" for entry in payload["entries"])
+
+
+def test_strategy_inventory_api_rejects_invalid_filter() -> None:
+    response = client.get("/api/strategy-inventory", params={"status": "unknown"})
+
+    assert response.status_code == 400
+    assert "Unknown strategy inventory status" in response.json()["detail"]
+
+
 def test_comparison_run_spec_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)

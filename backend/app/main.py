@@ -22,6 +22,7 @@ from app.comparison_payloads import (
 )
 from app.predictor_registry import REGISTERED_PREDICTOR_SPECS
 from app.market_data import fetch_market_universe_bundle
+from app.strategy_inventory import build_strategy_inventory_payload
 
 
 app = FastAPI(title="Quant API", version="0.1.0")
@@ -230,6 +231,22 @@ def latest_run_catalog_record(
             strategy_definition_fingerprint=strategy_definition_fingerprint,
             market_data_fingerprint=market_data_fingerprint,
             evaluation_fingerprint=evaluation_fingerprint,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/strategy-inventory")
+def strategy_inventory(
+    status: str | None = Query(None),
+    priority: str | None = Query(None),
+    family: str | None = Query(None),
+) -> dict:
+    try:
+        return build_strategy_inventory_payload(
+            status=status,
+            priority=priority,
+            family=family,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

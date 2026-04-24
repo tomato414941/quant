@@ -165,6 +165,31 @@ def render_benchmark_decomposition(payload: dict, *, top: int) -> str:
     return "\n".join(lines)
 
 
+def render_strategy_inventory(payload: dict) -> str:
+    counts = payload["counts"]
+    lines = [
+        "Strategy inventory",
+        f"Total: {counts['total']}",
+        f"Status: {format_count_map(counts['byStatus'], limit=10)}",
+        f"Priority: {format_count_map(counts['byPriority'], limit=10)}",
+        f"Family: {format_count_map(counts['byFamily'], limit=10)}",
+        "",
+        "Strategies:",
+    ]
+    for entry in payload["entries"]:
+        baseline = entry.get("baselineStrategyId") or "none"
+        tags = ", ".join(entry.get("tags") or [])
+        lines.append(
+            f"- {entry['strategyId']} | {entry['status']} | {entry['priority']} | "
+            f"{entry['family']} | baseline={baseline}"
+        )
+        if tags:
+            lines.append(f"  tags={tags}")
+        if entry.get("notes"):
+            lines.append(f"  notes={entry['notes']}")
+    return "\n".join(lines)
+
+
 def render_comparison_summary(payload: dict, *, top: int) -> str:
     comparison = payload["comparison"]
     candidate_runs = sort_candidate_runs(payload["candidateRuns"])

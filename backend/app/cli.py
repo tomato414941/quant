@@ -21,6 +21,11 @@ from app.comparison_walk_forward import build_walk_forward_comparison_payload
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
 from app.instrument_registry import UNIVERSE_VARIANT_KEYS
+from app.strategy_inventory import (
+    STRATEGY_INVENTORY_PRIORITIES,
+    STRATEGY_INVENTORY_STATUSES,
+    build_strategy_inventory_payload,
+)
 from app.cli_renderers import (
     format_count_map,
     format_decimal_distribution,
@@ -42,6 +47,7 @@ from app.cli_renderers import (
     render_robustness_summary,
     render_run_catalog,
     render_signal_diagnostics,
+    render_strategy_inventory,
     render_walk_forward_summary,
     sort_candidate_runs,
     write_json_payload,
@@ -252,6 +258,15 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
     benchmark_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    strategy_inventory_parser = subparsers.add_parser(
+        "strategy-inventory",
+        help="List strategy research inventory metadata.",
+    )
+    strategy_inventory_parser.add_argument("--status", choices=STRATEGY_INVENTORY_STATUSES)
+    strategy_inventory_parser.add_argument("--priority", choices=STRATEGY_INVENTORY_PRIORITIES)
+    strategy_inventory_parser.add_argument("--family")
+    strategy_inventory_parser.add_argument("--json", action="store_true", dest="as_json")
+
     return parser
 
 
@@ -376,6 +391,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_benchmark_decomposition(payload, top=max(args.top, 1)))
+        return 0
+
+    if args.command == "strategy-inventory":
+        payload = build_strategy_inventory_payload(
+            status=args.status,
+            priority=args.priority,
+            family=args.family,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_strategy_inventory(payload))
         return 0
 
     if args.command == "comparison-run-spec":

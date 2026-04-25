@@ -339,6 +339,8 @@ Strategy そのものではなく、Strategy を評価するために外側か�
 
 Strategy Catalogでは、コード互換の安定参照である `Strategy ID` と、人間向けの `Slug` / `Display Name` を分けて扱う。
 
+Strategy Catalogは全Strategyをフラットに並べる。`Tags` はStrategyの性質を表すために使い、評価対象かどうかや採用可否は表さない。
+
 ### Evaluation Context Catalog
 
 Strategyを評価する条件の台帳。

@@ -1,6 +1,6 @@
 # Evaluation Plan
 
-この文書は、今回どの `Strategy` をどの `Evaluation Context` で評価するかを管理する。
+この文書は、どの `Strategy` をどの `Evaluation Context` で評価するかを管理する。
 
 ## Questions This Answers
 
@@ -22,12 +22,9 @@
 
 ## Current Plan
 
-現在の計画は、`active 10 strategies x tracked 3 evaluation contexts` を埋めることである。
+現在の評価対象Strategy setは未確定である。
 
-Strategy set:
-- Source: [Strategy Catalog](./strategy-catalog.md)
-- Filter: `status = active`
-- Count: 10
+先に [Strategy Catalog](./strategy-catalog.md) をフラットな台帳として整え、そこから評価対象セットを別途選ぶ。コード側に残っている `status=active/backlog` は互換用の補助情報であり、このdocs上では評価対象の正本として扱わない。
 
 Evaluation contexts:
 - Source: [Evaluation Contexts](./evaluation-contexts.md)
@@ -35,20 +32,13 @@ Evaluation contexts:
 
 ## Evaluation Matrix
 
-`missing` は「その評価条件に一致する保存済みrunが見つからない」という意味であり、戦略が失敗したという意味ではない。
+評価対象Strategy setが未確定のため、現在のmatrixはプレースホルダとする。
 
-| Strategy ID | `etf_2015_2025` | `etf_cost_2x_2015_2025` | `etf_walk_forward_2020_2025` |
-| --- | --- | --- | --- |
-| `stg-fu-eq` | missing | missing | missing |
-| `stg-fu-hrp` | missing | missing | missing |
-| `stg-fu-momo12-top035-hrp` | missing | missing | missing |
-| `stg-fu-momolv8515-top025-hrp-month` | missing | missing | missing |
-| `stg-top3-hrp` | missing | missing | missing |
-| `stg-dualtop3-hrp` | missing | missing | missing |
-| `stg-posmom-hrp-month` | missing | missing | missing |
-| `stg-riskoff-posmom-hrp-month` | missing | missing | missing |
-| `stg-fu-momo2-top035-hrp-month` | missing | missing | missing |
-| `stg-fu-momo2-top035-pred10mom5050-pw40-hrp-month` | missing | missing | missing |
+| Strategy Set | Evaluation Contexts | Status |
+| --- | --- | --- |
+| TBD | `etf_2015_2025`, `etf_cost_2x_2015_2025`, `etf_walk_forward_2020_2025` | pending strategy set selection |
+
+`missing` は「その評価条件に一致する保存済みrunが見つからない」という意味であり、戦略が失敗したという意味ではない。
 
 ## Run Status Meaning
 
@@ -60,16 +50,17 @@ Evaluation contexts:
 
 ## Next Evaluation Order
 
-評価は次の順序で埋める。
+評価は次の順序で進める。
 
-1. `etf_2015_2025` をactive 10戦略で埋める。
-2. `etf_cost_2x_2015_2025` をactive 10戦略で埋め、コスト感応度を見る。
-3. `etf_walk_forward_2020_2025` をactive 10戦略で埋め、時間安定性を見る。
+1. Strategy Catalogから評価対象Strategy setを決める。
+2. `etf_2015_2025` を対象Strategy setで埋める。
+3. `etf_cost_2x_2015_2025` を対象Strategy setで埋め、コスト感応度を見る。
+4. `etf_walk_forward_2020_2025` を対象Strategy setで埋め、時間安定性を見る。
 
 評価結果の良し悪しは、少なくとも基本評価とコスト感応度を並べてから判断する。1つの条件だけで構造的に不可能とは結論づけない。
 
 ## Code Helper Relationship
 
-`strategy-inventory --with-evaluation-matrix` は、この文書の評価対象と保存済みrunの突き合わせを補助するための確認コマンドである。
+`strategy-inventory --with-evaluation-matrix` は、docsで選んだ評価対象と保存済みrunの突き合わせを補助するための確認コマンドである。
 
-評価条件の追加、削除、優先順位変更は、まずdocsを更新してからコード側へ反映する。
+評価対象Strategy setや評価条件の追加、削除、優先順位変更は、まずdocsを更新してからコード側へ反映する。

@@ -39,7 +39,7 @@ StrategyのIDと名前は分けて扱う。
 
 - `Strategy ID`: コード互換のための安定参照ID。既存の `stg-fu-...` を維持する。
 - `Slug`: 人間が短く参照するための短縮名。IDより読みやすく、全パラメータを詰め込みすぎない。
-- `Display Name`: 議論や表示で使う自然言語名。Strategy IDより変更しやすい。
+- `Display Name`: 議論や表示で使う自然言語名。`Universe` という語は使わず、対象資産集合は `ETF` のように短く表す。
 - `Key Parameters`: 比較に効く主要パラメータ。IDへ全て詰め込まない。
 
 ### ID Token Glossary
@@ -60,10 +60,10 @@ StrategyのIDと名前は分けて扱う。
 
 | Strategy ID | Slug | Display Name | Universe | Selection | Signal | Portfolio Model | Schedule | Overlay | Role | Baseline | Tags | Key Parameters | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `stg-fu-eq` | `fu-eq` | ETF Universe Equal Weight | ETF | full_universe | none | equal_weight | annual | none | reference | none | `etf_universe, full_universe, equal_weight, reference_point` | `universe=ETF, selection=full_universe, signal=none, portfolio=equal_weight, schedule=annual, overlay=none` | ETF equal-weight baseline for return and drawdown context. |
-| `stg-fu-rb` | `fu-rb` | ETF Universe Risk Budgeting | ETF | full_universe | none | risk_budgeting | annual | none | reference_candidate | none | `etf_universe, full_universe, risk_budgeting` | `universe=ETF, selection=full_universe, signal=none, portfolio=risk_budgeting, schedule=annual, overlay=none` | ETF full-universe risk budgeting allocation reference candidate. |
-| `stg-fu-minvar` | `fu-minvar` | ETF Universe Minimum Variance | ETF | full_universe | none | minimum_variance | annual | none | reference_candidate | none | `etf_universe, full_universe, minimum_variance` | `universe=ETF, selection=full_universe, signal=none, portfolio=minimum_variance, schedule=annual, overlay=none` | ETF full-universe minimum variance allocation reference candidate. |
-| `stg-fu-hrp` | `fu-hrp` | ETF Universe HRP | ETF | full_universe | none | hrp | annual | none | reference | `stg-fu-eq` | `etf_universe, full_universe, hrp, reference_point` | `universe=ETF, selection=full_universe, signal=none, portfolio=hrp, schedule=annual, overlay=none` | ETF HRP baseline for portfolio construction effects. |
+| `stg-fu-eq` | `fu-eq` | ETF Equal Weight | ETF | full_universe | none | equal_weight | annual | none | reference | none | `etf_universe, full_universe, equal_weight, reference_point` | `universe=ETF, selection=full_universe, signal=none, portfolio=equal_weight, schedule=annual, overlay=none` | ETF equal-weight baseline for return and drawdown context. |
+| `stg-fu-rb` | `fu-rb` | ETF Equal Risk Contribution Allocation | ETF | full_universe | none | equal_risk_contribution | annual | none | reference_candidate | none | `etf_universe, full_universe, equal_risk_contribution` | `universe=ETF, selection=full_universe, signal=none, portfolio=equal_risk_contribution, schedule=annual, overlay=none, code_portfolio_model=risk_budgeting` | ETF full-universe reference candidate. Current code model is named `risk_budgeting` but behaves like equal-risk-contribution allocation. |
+| `stg-fu-minvar` | `fu-minvar` | ETF Minimum Variance | ETF | full_universe | none | minimum_variance | annual | none | reference_candidate | none | `etf_universe, full_universe, minimum_variance` | `universe=ETF, selection=full_universe, signal=none, portfolio=minimum_variance, schedule=annual, overlay=none` | ETF full-universe minimum variance allocation reference candidate. |
+| `stg-fu-hrp` | `fu-hrp` | ETF HRP | ETF | full_universe | none | hrp | annual | none | reference | `stg-fu-eq` | `etf_universe, full_universe, hrp, reference_point` | `universe=ETF, selection=full_universe, signal=none, portfolio=hrp, schedule=annual, overlay=none` | ETF HRP baseline for portfolio construction effects. |
 | `stg-fu-momo12-lin025-hrp` | `fu-momo12-lin025-hrp` | TBD | ETF | full_universe | momentum_12m | hrp | annual | none | candidate | none | `candidate, momentum_tilt, hierarchical_risk_parity, etf_universe` | TBD | Generated backlog entry. Add explicit research metadata before promoting. |
 | `stg-fu-momo12-top035-hrp` | `fu-momo12-hrp` | ETF 12M Momentum Tilt, HRP | ETF | full_universe | momentum_12m_top_weighted | hrp | annual | none | candidate | `stg-fu-hrp` | `candidate, etf_universe, momentum, 12m, hrp` | `universe=ETF, selection=full_universe, signal=momentum_12m, top_weight=0.35, portfolio=hrp, schedule=annual, overlay=none` | Core annual 12-month momentum tilt candidate. |
 | `stg-fu-momo6-top035-hrp` | `fu-momo6-top035-hrp` | TBD | ETF | full_universe | momentum_6m | hrp | annual | none | candidate | none | `candidate, momentum_tilt, hierarchical_risk_parity, etf_universe` | TBD | Generated backlog entry. Add explicit research metadata before promoting. |

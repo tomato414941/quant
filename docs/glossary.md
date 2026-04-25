@@ -337,6 +337,8 @@ Strategy そのものではなく、Strategy を評価するために外側か�
 
 [Strategy Catalog](./strategy-catalog.md) は、Strategyの発見可能性、status、priority、評価計画へ載せる前の整理状態を管理する。評価結果や最終採用判断は書かない。
 
+Strategy Catalogでは、コード互換の安定参照である `Strategy ID` と、人間向けの `Slug` / `Display Name` を分けて扱う。
+
 ### Evaluation Context Catalog
 
 Strategyを評価する条件の台帳。

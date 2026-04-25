@@ -42,20 +42,43 @@
 
 この文書は評価結果を書く場所ではない。評価済みrunの比較は [Leaderboard](./leaderboard.md) に置く。
 
+## Naming Convention
+
+StrategyのIDと名前は分けて扱う。
+
+- `Strategy ID`: コード互換のための安定参照ID。既存の `stg-fu-...` を維持する。
+- `Slug`: 人間が短く参照するための短縮名。IDより読みやすく、全パラメータを詰め込みすぎない。
+- `Display Name`: 議論や表示で使う自然言語名。Strategy IDより変更しやすい。
+- `Key Parameters`: 比較に効く主要パラメータ。IDへ全て詰め込まない。
+
+### ID Token Glossary
+
+| Token | Meaning |
+| --- | --- |
+| `stg` | strategy |
+| `fu` | full ETF universe |
+| `eq` | equal weight |
+| `hrp` | hierarchical risk parity |
+| `momo` | momentum |
+| `momolv` | momentum + low volatility |
+| `top035` | top-weight emphasis 0.35 |
+| `pred` | predictor augmented |
+| `month` | monthly variant |
+
 ## Active Strategies
 
-| Strategy ID | Family | Role | Priority | Baseline | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `stg-fu-eq` | baseline | baseline | high | none | ETF equal-weight baseline for return and drawdown context. |
-| `stg-fu-hrp` | baseline | baseline | high | `stg-fu-eq` | ETF HRP baseline for portfolio construction effects. |
-| `stg-fu-momo12-top035-hrp` | momentum_tilt | candidate | high | `stg-fu-hrp` | Core annual 12-month momentum tilt candidate. |
-| `stg-fu-momolv8515-top025-hrp-month` | low_vol_momentum | candidate | medium | `stg-fu-momo12-top035-hrp` | Momentum plus low-vol tilt candidate for robustness checks. |
-| `stg-top3-hrp` | concentrated_momentum | candidate | medium | `stg-fu-hrp` | Concentrated top-3 momentum baseline for selection strength. |
-| `stg-dualtop3-hrp` | defensive_momentum | candidate | medium | `stg-top3-hrp` | Dual momentum variant for defensive selection behavior. |
-| `stg-posmom-hrp-month` | defensive_momentum | candidate | medium | `stg-fu-hrp` | Monthly positive momentum universe for defensive participation. |
-| `stg-riskoff-posmom-hrp-month` | defensive_momentum | candidate | medium | `stg-posmom-hrp-month` | Risk-regime gated positive momentum candidate. |
-| `stg-fu-momo2-top035-hrp-month` | short_momentum | candidate | high | `stg-fu-hrp` | Core monthly 2-month momentum candidate for faster adaptation. |
-| `stg-fu-momo2-top035-pred10mom5050-pw40-hrp-month` | predictor_augmented_momentum | candidate | high | `stg-fu-momo2-top035-hrp-month` | Main predictor-augmented candidate against the 2-month momentum baseline. |
+| Strategy ID | Slug | Display Name | Family | Role | Priority | Baseline | Key Parameters | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `stg-fu-eq` | `fu-eq` | ETF Universe Equal Weight | baseline | baseline | high | none | `universe=ETF, portfolio=equal_weight` | ETF equal-weight baseline for return and drawdown context. |
+| `stg-fu-hrp` | `fu-hrp` | ETF Universe HRP | baseline | baseline | high | `stg-fu-eq` | `universe=ETF, portfolio=hrp` | ETF HRP baseline for portfolio construction effects. |
+| `stg-fu-momo12-top035-hrp` | `fu-momo12-hrp` | ETF 12M Momentum Tilt, HRP | momentum_tilt | candidate | high | `stg-fu-hrp` | `universe=ETF, momentum=12m, top_weight=0.35, portfolio=hrp` | Core annual 12-month momentum tilt candidate. |
+| `stg-fu-momolv8515-top025-hrp-month` | `fu-momolv-month` | ETF Momentum + Low Vol Tilt, HRP, Monthly | low_vol_momentum | candidate | medium | `stg-fu-momo12-top035-hrp` | `universe=ETF, momentum_weight=0.85, low_vol_weight=0.15, top_weight=0.25, portfolio=hrp, frequency=monthly` | Momentum plus low-vol tilt candidate for robustness checks. |
+| `stg-top3-hrp` | `top3-hrp` | ETF Top 3 Momentum, HRP | concentrated_momentum | candidate | medium | `stg-fu-hrp` | `universe=ETF, selection=top3, portfolio=hrp` | Concentrated top-3 momentum baseline for selection strength. |
+| `stg-dualtop3-hrp` | `dualtop3-hrp` | ETF Dual Momentum Top 3, HRP | defensive_momentum | candidate | medium | `stg-top3-hrp` | `universe=ETF, selection=dual_momentum_top3, portfolio=hrp` | Dual momentum variant for defensive selection behavior. |
+| `stg-posmom-hrp-month` | `posmom-month` | ETF Positive Momentum, HRP, Monthly | defensive_momentum | candidate | medium | `stg-fu-hrp` | `universe=ETF, filter=positive_momentum, portfolio=hrp, frequency=monthly` | Monthly positive momentum universe for defensive participation. |
+| `stg-riskoff-posmom-hrp-month` | `riskoff-posmom-month` | ETF Risk-Off Gated Positive Momentum, HRP, Monthly | defensive_momentum | candidate | medium | `stg-posmom-hrp-month` | `universe=ETF, filter=risk_off_positive_momentum, portfolio=hrp, frequency=monthly` | Risk-regime gated positive momentum candidate. |
+| `stg-fu-momo2-top035-hrp-month` | `fu-momo2-month` | ETF 2M Momentum Tilt, HRP, Monthly | short_momentum | candidate | high | `stg-fu-hrp` | `universe=ETF, momentum=2m, top_weight=0.35, portfolio=hrp, frequency=monthly` | Core monthly 2-month momentum candidate for faster adaptation. |
+| `stg-fu-momo2-top035-pred10mom5050-pw40-hrp-month` | `fu-momo2-pred-month` | ETF 2M Momentum + Predictor Overlay, HRP, Monthly | predictor_augmented_momentum | candidate | high | `stg-fu-momo2-top035-hrp-month` | `universe=ETF, momentum=2m, top_weight=0.35, predictor=10bar_momentum_50_50, predictor_weight=0.40, portfolio=hrp, frequency=monthly` | Main predictor-augmented candidate against the 2-month momentum baseline. |
 
 ## Backlog Strategies
 

@@ -335,11 +335,13 @@ Strategy そのものではなく、Strategy を評価するために外側か�
 
 プロジェクトに存在する全Strategyの台帳。
 
-[Strategy Catalog](./strategy-catalog.md) は、Strategyの発見可能性、status、priority、評価計画へ載せる前の整理状態を管理する。評価結果や最終採用判断は書かない。
+[Strategy Catalog](./strategy-catalog.md) は、Strategyの発見可能性、人間向けの名前、主要な構成要素を管理する。評価結果や最終採用判断は書かない。
 
 Strategy Catalogでは、コード互換の安定参照である `Strategy ID` と、人間向けの `Slug` / `Display Name` を分けて扱う。
 
 Strategy Catalogは全Strategyをフラットに並べる。`Tags` はStrategyの性質を表すために使い、評価対象かどうかや採用可否は表さない。
+
+Strategy Catalogでは、`Family` のような単一分類ではなく、`Universe`、`Selection`、`Signal`、`Portfolio Model`、`Schedule`、`Overlay` の構成要素列でStrategyを読む。
 
 ### Evaluation Context Catalog
 

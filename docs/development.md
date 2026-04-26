@@ -12,17 +12,22 @@ uv sync --dev
 既存の `requirements.txt` と `requirements-dev.txt` は移行期間の互換ファイルとして残す。
 新しい依存は `pyproject.toml` を先に更新する。
 
-## Test
+## Smoke Test
+
+Use this for a quick public-repo sanity check.
+
+```bash
+cd backend
+uv run pytest -q tests/test_api.py::test_healthcheck tests/test_api.py::test_strategy_inventory_api tests/test_dependencies.py tests/test_instrument_registry.py tests/test_evaluation_profiles.py
+```
+
+## Full Test
+
+Full test execution is heavier than the smoke test.
 
 ```bash
 cd backend
 uv run pytest -q
-```
-
-日常確認で長いテストを外す場合は、対象テストに `slow` marker を付けたうえで次を使う。
-
-```bash
-uv run pytest -q -m "not slow"
 ```
 
 ## CLI

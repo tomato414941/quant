@@ -1,10 +1,11 @@
 import copy
+import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
 
+import httpx
 import pandas as pd
-from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
@@ -24,7 +25,23 @@ from app.strategy_candidate_predictors import PREDICTOR_CANDIDATE_DEFINITIONS
 from app.timeframe_models import DEFAULT_DAILY_TIMEFRAME, DEFAULT_MONTHLY_TIMEFRAME, DEFAULT_WEEKLY_TIMEFRAME, build_timeframe_spec
 
 
-client = TestClient(app)
+class ASGITestClient:
+    def __init__(self, app) -> None:
+        self._app = app
+
+    def get(self, url: str, **kwargs) -> httpx.Response:
+        return asyncio.run(self._request("GET", url, **kwargs))
+
+    def post(self, url: str, **kwargs) -> httpx.Response:
+        return asyncio.run(self._request("POST", url, **kwargs))
+
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        transport = httpx.ASGITransport(app=self._app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, url, **kwargs)
+
+
+client = ASGITestClient(app)
 
 
 def normalize_strategy_definition(strategy):

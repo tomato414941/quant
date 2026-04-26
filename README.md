@@ -27,7 +27,7 @@ The backend uses `uv` as the primary development entrypoint.
 ```bash
 cd backend
 uv sync --dev
-uv run pytest -q
+uv run pytest -q tests/test_api.py::test_healthcheck tests/test_api.py::test_strategy_inventory_api tests/test_dependencies.py tests/test_instrument_registry.py tests/test_evaluation_profiles.py
 ```
 
 See [docs/development.md](docs/development.md) for more details.

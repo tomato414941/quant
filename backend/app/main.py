@@ -39,12 +39,12 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def healthcheck() -> dict[str, str]:
+async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/api/comparison")
-def comparison() -> dict:
+async def comparison() -> dict:
     try:
         return build_comparison_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -55,7 +55,7 @@ def comparison() -> dict:
 
 
 @app.get("/api/comparison-run-spec")
-def comparison_run_spec() -> dict:
+async def comparison_run_spec() -> dict:
     try:
         return build_comparison_run_spec_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -66,7 +66,7 @@ def comparison_run_spec() -> dict:
 
 
 @app.post("/api/comparison-run-spec/rerun")
-def rerun_comparison_run_spec(payload: dict = Body(...)) -> dict:
+async def rerun_comparison_run_spec(payload: dict = Body(...)) -> dict:
     try:
         return build_comparison_payload_from_run_spec_payload(
             payload,
@@ -77,7 +77,7 @@ def rerun_comparison_run_spec(payload: dict = Body(...)) -> dict:
 
 
 @app.get("/api/predictor-runs")
-def predictor_run_index(
+async def predictor_run_index(
     limit: int = Query(50, ge=1, le=500),
     learner_kind: str | None = Query(None),
     combiner_kind: str | None = Query(None),
@@ -108,7 +108,7 @@ def predictor_run_index(
 
 
 @app.post("/api/predictor-runs")
-def predictor_runs() -> dict:
+async def predictor_runs() -> dict:
     try:
         return build_predictor_runs_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -120,7 +120,7 @@ def predictor_runs() -> dict:
 
 
 @app.get("/api/predictor-runs/{run_key}")
-def predictor_run_detail(run_key: str) -> dict:
+async def predictor_run_detail(run_key: str) -> dict:
     try:
         return build_predictor_run_detail_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -131,7 +131,7 @@ def predictor_run_detail(run_key: str) -> dict:
 
 
 @app.get("/api/strategy-runs")
-def strategy_run_index(
+async def strategy_run_index(
     limit: int = Query(50, ge=1, le=500),
     strategy_definition_fingerprint: str | None = Query(None),
     market_data_fingerprint: str | None = Query(None),
@@ -150,7 +150,7 @@ def strategy_run_index(
 
 
 @app.post("/api/strategy-runs")
-def strategy_runs() -> dict:
+async def strategy_runs() -> dict:
     try:
         return build_strategy_runs_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -161,7 +161,7 @@ def strategy_runs() -> dict:
 
 
 @app.get("/api/strategy-runs/{run_key}")
-def strategy_run_detail(run_key: str) -> dict:
+async def strategy_run_detail(run_key: str) -> dict:
     try:
         return build_strategy_run_detail_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -172,7 +172,7 @@ def strategy_run_detail(run_key: str) -> dict:
 
 
 @app.get("/api/condition-sweep")
-def condition_sweep() -> dict:
+async def condition_sweep() -> dict:
     try:
         return build_condition_sweep_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -183,7 +183,7 @@ def condition_sweep() -> dict:
 
 
 @app.post("/api/runs/generate-parameter-sweep")
-def generate_parameter_sweep_runs() -> dict:
+async def generate_parameter_sweep_runs() -> dict:
     try:
         return generate_parameter_sweep_runs_payload(
             DEFAULT_COMPARISON_SPEC,
@@ -194,7 +194,7 @@ def generate_parameter_sweep_runs() -> dict:
 
 
 @app.get("/api/run-catalog")
-def run_catalog(
+async def run_catalog(
     limit: int = Query(50, ge=1, le=500),
     run_kind: str | None = Query(None),
     generation_method: str | None = Query(None),
@@ -217,7 +217,7 @@ def run_catalog(
 
 
 @app.get("/api/run-catalog/latest")
-def latest_run_catalog_record(
+async def latest_run_catalog_record(
     run_kind: str | None = Query(None),
     generation_method: str | None = Query(None),
     strategy_definition_fingerprint: str | None = Query(None),
@@ -238,7 +238,7 @@ def latest_run_catalog_record(
 
 
 @app.get("/api/strategy-inventory")
-def strategy_inventory(
+async def strategy_inventory(
     status: str | None = Query(None),
     priority: str | None = Query(None),
     family: str | None = Query(None),
@@ -266,7 +266,7 @@ def strategy_inventory(
 
 
 @app.get("/api/ranking-evaluation")
-def ranking_evaluation() -> dict:
+async def ranking_evaluation() -> dict:
     try:
         return build_ranking_evaluation_payload(
             DEFAULT_COMPARISON_SPEC,

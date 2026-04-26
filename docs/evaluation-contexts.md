@@ -1,11 +1,11 @@
-# Evaluation Context Catalog
+# Evaluation Contexts
 
-この文書は、Strategyを評価する条件の台帳である。
+この文書は、Strategyを評価するときの測定条件を定義する。
 
 ## Questions This Answers
 
-- 現在正式に追跡している評価条件は何個あるか？
-- それぞれの評価条件は何を確認するためのものか？
+- 現在正式に追跡している評価Contextは何か？
+- それぞれの評価Contextは何を確認するためのものか？
 - 今後増やす候補には何があるか？
 
 ## Questions This Does Not Answer
@@ -19,32 +19,42 @@
 
 | Metric | Count |
 | --- | ---: |
-| Tracked evaluation contexts | 3 |
+| Tracked evaluation contexts | 1 |
 
-現在正式に追跡しているEvaluation Contextは3個である。これは候補が3個しかないという意味ではない。まず管理可能な最小セットを埋め、比較の土台を作るために3個へ絞っている。
+現在正式に追跡しているEvaluation Contextは1個である。これは候補が1個しかないという意味ではない。まずStrategy定義を上書きしない最小Contextから始め、比較の土台を作る。
 
 ## How To Read
 
 - `Evaluation Context ID`: 評価条件の安定参照ID。
 - `Display Name`: 人間が読むための評価条件名。
-- `Universe`: 評価時に使う投資対象集合。Strategy側のUniverseと混同しない。
 - `Period`: 評価に使うデータ期間。
-- `Mode`: 評価方法。例: `single_run`, `walk_forward`。
-- `Cost Model`: 取引コスト前提。
-- `Max Weight`: 1資産あたりの最大weight制約。
-- `Rebalance Assumption`: Strategy定義のリバランス頻度を使うか、評価側で固定するか。
+- `Evaluation Method`: 評価方法。例: `single_run`, `walk_forward`。
+- `Cost Assumption`: コードやrunと対応する取引コスト前提の参照名。
+- `Execution Assumption`: 約定や執行に関する前提。
 - `Purpose`: この評価条件で何を確認するか。
 - `Human Reviewed`: 人間がこの行の記載内容を確認したか。
 
-この文書は評価条件のカタログであり、Strategy x Evaluation Contextの全ケース一覧は管理しない。ケース一覧は数が膨らむため、必要に応じてコードやrun管理で扱う。
+この文書は評価Contextの定義であり、Strategy x Evaluation Contextの全ケース一覧は管理しない。ケース一覧は数が膨らむため、必要に応じてコードやrun管理で扱う。
+
+Evaluation ContextはStrategy定義を上書きしない。Universe、rebalance frequency、position limitsなどはStrategy側に従う。
 
 ## Evaluation Contexts
 
-| Evaluation Context ID | Display Name | Universe | Period | Mode | Cost Model | Max Weight | Rebalance Assumption | Purpose | Human Reviewed | Reviewed At | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `etf_2015_2025` | ETF 2015-2025 | ETF-only | 2015-2025 | single_run | normal | 45% | use_strategy_definition | 基本評価 | no |  | ETF-onlyで基本的なリターン、ドローダウン、turnoverを見る。 |
-| `etf_cost_2x_2015_2025` | ETF 2015-2025 Cost x2 | ETF-only | 2015-2025 | single_run | 2x | 45% | use_strategy_definition | コスト感応度 | no |  | 基本評価に対して取引コストを強めたときの劣化を見る。 |
-| `etf_walk_forward_2020_2025` | ETF Walk-Forward 2020-2025 | ETF-only | 2015-2025 train / 2020-2025 test windows | walk_forward | normal | 45% | use_strategy_definition | 時間安定性 | no |  | 年次walk-forwardで、特定期間だけに依存していないかを見る。 |
+| Evaluation Context ID | Display Name | Period | Evaluation Method | Cost Assumption | Execution Assumption | Purpose | Human Reviewed | Reviewed At | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `2015_2025` | 2015-2025 Full-Period Evaluation | 2015-2025 | single_run | `retail_multi_asset_default` | `close_execution` | 期間全体でリターン、ドローダウン、turnoverを見る | no |  |  |
+
+## Cost Assumptions
+
+| Cost Assumption | Summary | Source |
+| --- | --- | --- |
+| `retail_multi_asset_default` | 個人投資家が複数資産を売買する前提の既存コストプロファイル。詳細な計算はコード定義に従う。 | code |
+
+## Execution Assumptions
+
+| Execution Assumption | Summary | Source |
+| --- | --- | --- |
+| `close_execution` | 終値約定を前提にする。 | code |
 
 ## Candidate Future Contexts
 
@@ -54,11 +64,10 @@
 - `etf_plus_crypto`: ETFとcryptoを混ぜて評価する
 - shorter period: より短い期間で評価する
 - longer period: より長い期間で評価する
-- cost variants: cost 0.5x、3xなどで評価する
-- max weight variants: max weight 25%、30%、45%などで評価する
-- rebalance frequency variants: daily、weekly、monthlyなどで評価する
+- cost sensitivity contexts: 取引コスト前提を変えて評価する
+- walk-forward contexts: 年次などの窓で時間安定性を評価する
 
-これらはすぐに正式追跡対象へ追加しない。現在の3条件が埋まってから、必要なものを追加する。
+これらはすぐに正式追跡対象へ追加しない。まず現在の1Contextで比較の読み方を固めてから、必要なものを追加する。
 
 ## Relationship To Code
 

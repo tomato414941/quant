@@ -13,8 +13,8 @@
 何が効くと思っているか、という仮説。
 
 例:
-- 強い資産を少し厚くすると Sharpe が改善する
-- 上昇していて出来高も強い資産は、その後も相対的に強い
+- 特定の市場状態では、ある特徴量が将来リターンの説明力を持つ
+- ある配分ルールは、同じ候補集合に対してdrawdownを抑えやすい
 
 ### Raw Data
 
@@ -29,7 +29,7 @@
 Raw Data を加工して作る説明変数。
 
 例:
-- 12ヶ月モメンタム
+- momentum
 - 実現ボラティリティ
 - 出来高強度
 
@@ -101,7 +101,7 @@ Predictor が予測したい対象そのもの。
 
 ### Current Prediction Question
 
-現時点で主に扱う予測問題の代表例は次。
+このプロジェクトで扱う予測問題の代表例は次。
 
 - 候補資産集合の中で、次の数 bar で相対的に強い資産はどれか
 
@@ -113,7 +113,7 @@ Predictor が予測したい対象そのもの。
 
 ### Regime Prediction
 
-近いうちに扱いたい別系統の予測問題。
+cross-sectionalな順位予測とは別系統の予測問題。
 
 例:
 - risk-on / risk-off
@@ -232,16 +232,16 @@ Feature から各資産の相対順位や相対的な持ちたさを作る層。
 - Predictor overlay
 
 例:
-- 全資産を候補にし、12ヶ月モメンタムで上位優遇 tilt をかけ、HRP で配分し、年次で更新する
-- 上昇資産のみを候補にし、モメンタム上位3へ絞り、候補ゼロなら CASH に逃がす
+- 全資産を候補にし、ranking signalでweight tiltをかけ、risk-based modelで配分する
+- 条件を満たす資産だけを候補にし、候補ゼロならcash fallbackにする
 
 ### Investment Universe
 
 Strategy が実際に投資対象として扱う資産集合そのもの。
 
 例:
-- 20資産マルチアセット
-- crypto only
+- multi-asset ETF
+- crypto
 
 補足:
 - `Investment Universe` は「何を対象にするか」

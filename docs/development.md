@@ -5,7 +5,7 @@
 ## Setup
 
 ```bash
-cd /home/dev/projects/quant/backend
+cd backend
 uv sync --dev
 ```
 
@@ -15,7 +15,7 @@ uv sync --dev
 ## Test
 
 ```bash
-cd /home/dev/projects/quant/backend
+cd backend
 uv run pytest -q
 ```
 
@@ -28,9 +28,9 @@ uv run pytest -q -m "not slow"
 ## CLI
 
 ```bash
-cd /home/dev/projects/quant/backend
+cd backend
 uv run quant comparison-summary --top 1
-uv run quant signal-diagnostics --strategy-key pred-fu-momo2-supplement-5bar --json
+uv run quant signal-diagnostics --help
 ```
 
 互換入口として次も使える。
@@ -42,11 +42,11 @@ uv run python -m app comparison-summary --top 1
 ## API
 
 ```bash
-cd /home/dev/projects/quant/backend
+cd backend
 uv run uvicorn app.main:app --reload
 ```
 
-Web UI やリモート確認が必要な場合は、上位の `INFRA.md` の環境前提に従う。
+Web UI やリモート確認が必要な場合は、利用環境ごとの手順に従う。
 
 ## Common Failures
 

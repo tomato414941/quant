@@ -49,8 +49,8 @@ Raw Data を加工して作る説明変数。
 Predictor が予測したい対象そのもの。
 
 例:
-- 次の5bar超過収益
-- 次の10bar超過収益
+- short-horizon excess return
+- medium-horizon excess return
 - 市場レジーム
 - 将来ボラティリティ
 
@@ -68,8 +68,8 @@ Predictor が予測したい対象そのもの。
 - どの baseline からの差として扱うか
 
 例:
-- 次の5bar超過収益
-- 次の10bar超過収益
+- short-horizon excess return
+- medium-horizon excess return
 
 ### Decision Use
 
@@ -101,12 +101,12 @@ Predictor が予測したい対象そのもの。
 
 ### Current Prediction Question
 
-現時点で主に解いている予測問題は次。
+現時点で主に扱う予測問題の代表例は次。
 
 - 候補資産集合の中で、次の数 bar で相対的に強い資産はどれか
 
 このため、今の Predictor は主に
-- `Predicted Quantity`: 次の5bar / 10bar 超過収益
+- `Predicted Quantity`: short-horizon / medium-horizon excess return
 - `Decision Use`: 候補集合内の順位付けや weighting 補助
 
 を担っている。
@@ -126,7 +126,7 @@ Predictor が予測したい対象そのもの。
 - したがって、将来的には `Predicted Quantity` や `Decision Use` の違いとして表現するのが自然
 
 参照:
-- 詳しい設計原則は [prediction-surface.md](/home/dev/projects/quant/docs/prediction-surface.md)
+- 詳しい設計原則は [prediction-surface.md](./prediction-surface.md)
 
 ### Asset Ranking Model
 

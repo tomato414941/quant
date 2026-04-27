@@ -1,6 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 from pathlib import Path
+
+import pytest
 
 from app.run_store import FileRunResultStore, RUN_STORE_INDEX_FILENAME, build_run_spec
 
@@ -87,6 +90,82 @@ def test_run_store_warns_when_rebuilding_corrupt_index(tmp_path: Path, caplog) -
     assert len(records) == 1
     assert "Rebuilding run store index" in caplog.text
     assert str(index_path) in caplog.text
+
+
+def test_run_store_concurrent_save_does_not_lose_index_updates(tmp_path: Path) -> None:
+    run_specs = [
+        make_run_spec(
+            run_kind="strategy_run",
+            strategy_label=f"strategy-{index}",
+            fingerprint_seed=f"strategy-{index}",
+        )
+        for index in range(24)
+    ]
+
+    def save_run(index: int) -> None:
+        store = FileRunResultStore(tmp_path)
+        store.save(run_specs[index], {"summary": {"sharpeRatio": index}})
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(save_run, range(len(run_specs))))
+
+    index_payload = json.loads((tmp_path / RUN_STORE_INDEX_FILENAME).read_text(encoding="utf-8"))
+
+    assert len(index_payload["entries"]) == len(run_specs)
+    assert {entry["strategyDefinitionFingerprint"] for entry in index_payload["entries"]} == {
+        run_spec["fingerprints"]["strategyDefinition"] for run_spec in run_specs
+    }
+
+
+def test_run_store_concurrent_save_same_run_key_does_not_duplicate_index(tmp_path: Path) -> None:
+    run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="shared",
+        fingerprint_seed="shared",
+    )
+
+    def save_run(index: int) -> None:
+        store = FileRunResultStore(tmp_path)
+        store.save(run_spec, {"summary": {"sharpeRatio": index}})
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(save_run, range(24)))
+
+    index_payload = json.loads((tmp_path / RUN_STORE_INDEX_FILENAME).read_text(encoding="utf-8"))
+    run_keys = [entry["runKey"] for entry in index_payload["entries"]]
+
+    assert len(run_keys) == 1
+    assert len(set(run_keys)) == 1
+
+
+def test_run_store_atomic_index_write_failure_keeps_existing_index(tmp_path: Path, monkeypatch) -> None:
+    store = FileRunResultStore(tmp_path)
+    first_run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="alpha",
+        fingerprint_seed="alpha",
+    )
+    second_run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="beta",
+        fingerprint_seed="beta",
+    )
+    store.save(first_run_spec, {"summary": {"sharpeRatio": 1.0}})
+    index_path = tmp_path / RUN_STORE_INDEX_FILENAME
+    original_index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    original_replace = Path.replace
+
+    def fail_index_replace(self: Path, target: Path) -> Path:
+        if target == index_path:
+            raise OSError("simulated index replace failure")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_index_replace)
+
+    with pytest.raises(OSError, match="simulated index replace failure"):
+        store.save(second_run_spec, {"summary": {"sharpeRatio": 2.0}})
+
+    assert json.loads(index_path.read_text(encoding="utf-8")) == original_index_payload
 
 
 def test_run_store_warns_when_index_rebuild_skips_corrupt_run_file(tmp_path: Path, caplog) -> None:

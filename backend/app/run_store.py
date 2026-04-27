@@ -2,16 +2,83 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
+import threading
+import uuid
 
 
 RUN_STORE_LOGIC_VERSION = "v71"
 RUN_STORE_INDEX_FILENAME = "_index.json"
 
 logger = logging.getLogger(__name__)
+
+
+class _RunStoreRootLock:
+    _thread_state = threading.local()
+
+    def __init__(self, root_dir: Path, lock_path: Path) -> None:
+        self._root_dir = root_dir
+        self._lock_path = lock_path
+        self._thread_lock: threading.RLock | None = None
+        self._lock_file = None
+        self._already_locked = False
+
+    def __enter__(self) -> None:
+        self._thread_lock = self._get_thread_lock()
+        self._thread_lock.acquire()
+        depths = self._get_depths()
+        if depths.get(self._root_dir, 0) > 0:
+            depths[self._root_dir] += 1
+            self._already_locked = True
+            return
+        try:
+            self._lock_file = self._lock_path.open("a+b")
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX)
+            depths[self._root_dir] = 1
+        except BaseException:
+            self._thread_lock.release()
+            self._thread_lock = None
+            if self._lock_file is not None:
+                self._lock_file.close()
+                self._lock_file = None
+            raise
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        try:
+            depths = self._get_depths()
+            depth = depths.get(self._root_dir, 0)
+            if depth > 1:
+                depths[self._root_dir] = depth - 1
+                return
+            depths.pop(self._root_dir, None)
+            if not self._already_locked and self._lock_file is not None:
+                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                self._lock_file.close()
+        finally:
+            self._lock_file = None
+            if self._thread_lock is not None:
+                self._thread_lock.release()
+                self._thread_lock = None
+
+    def _get_thread_lock(self) -> threading.RLock:
+        with FileRunResultStore._root_locks_guard:
+            lock = FileRunResultStore._root_locks.get(self._root_dir)
+            if lock is None:
+                lock = threading.RLock()
+                FileRunResultStore._root_locks[self._root_dir] = lock
+            return lock
+
+    def _get_depths(self) -> dict[Path, int]:
+        depths = getattr(self._thread_state, "depths", None)
+        if depths is None:
+            depths = {}
+            self._thread_state.depths = depths
+        return depths
 
 
 @dataclass(frozen=True)
@@ -27,9 +94,13 @@ class RunStoreSummary:
 
 
 class FileRunResultStore:
+    _root_locks_guard = threading.Lock()
+    _root_locks: dict[Path, threading.RLock] = {}
+
     def __init__(self, root_dir: Path) -> None:
         self.root_dir = root_dir
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self._lock_path = self.root_dir / ".lock"
 
     def load(self, run_spec: dict) -> dict | None:
         path = self._path_for(run_spec)
@@ -124,8 +195,9 @@ class FileRunResultStore:
         return compact_records[0]
 
     def rebuild_index(self) -> dict[str, int]:
-        entries = self._rebuild_index_entries()
-        self._write_index_entries(entries)
+        with self._locked_root():
+            entries = self._rebuild_index_entries()
+            self._write_index_entries(entries)
         return {"entryCount": len(entries)}
 
     def get_record(self, run_key: str) -> dict | None:
@@ -160,11 +232,9 @@ class FileRunResultStore:
             "runSpec": run_spec,
             "result": result,
         }
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8",
-        )
-        self._upsert_index_entry(path.stem, saved_at_utc, run_spec, result)
+        with self._locked_root():
+            self._atomic_write_json(path, payload)
+            self._upsert_index_entry(path.stem, saved_at_utc, run_spec, result)
 
     def _path_for(self, run_spec: dict) -> Path:
         digest = build_run_cache_key(run_spec)
@@ -184,8 +254,9 @@ class FileRunResultStore:
                 logger.warning("Rebuilding run store index because %s has invalid entries.", index_path)
             except json.JSONDecodeError as exc:
                 logger.warning("Rebuilding run store index because %s is corrupt: %s", index_path, exc)
-        entries = self._rebuild_index_entries()
-        self._write_index_entries(entries)
+        with self._locked_root():
+            entries = self._rebuild_index_entries()
+            self._write_index_entries(entries)
         return entries
 
     def _write_index_entries(self, entries: list[dict]) -> None:
@@ -195,10 +266,43 @@ class FileRunResultStore:
             "logicVersion": RUN_STORE_LOGIC_VERSION,
             "entries": entries,
         }
-        self._index_path().write_text(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8",
-        )
+        self._atomic_write_json(self._index_path(), payload)
+
+    def _atomic_write_json(self, path: Path, payload: dict) -> None:
+        temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        try:
+            with temp_path.open("w", encoding="utf-8") as temp_file:
+                temp_file.write(serialized)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+        except OSError:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+            raise
+        try:
+            temp_path.replace(path)
+            self._fsync_directory(path.parent)
+        except OSError:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+            raise
+
+    def _fsync_directory(self, path: Path) -> None:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+    def _locked_root(self):
+        return _RunStoreRootLock(self.root_dir.resolve(), self._lock_path)
 
     def _rebuild_index_entries(self) -> list[dict]:
         entries: list[dict] = []

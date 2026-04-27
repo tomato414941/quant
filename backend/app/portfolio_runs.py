@@ -27,7 +27,7 @@ from app.portfolio_metrics import (
     summarize_portfolio_decision_events,
     summarize_segment_from_returns,
 )
-from app.portfolio_positioning import compute_portfolio_allocation
+from app.portfolio_positioning import compute_portfolio_allocation_with_metadata
 from app.portfolio_selection import (
     get_strategy_definition_signal_execution_contexts,
     resolve_decision_schedule,
@@ -42,7 +42,7 @@ AllocationReturn = tuple[list[str], np.ndarray] | tuple[list[str], np.ndarray, d
 def compute_dynamic_portfolio_allocation(**kwargs) -> AllocationReturn:
     return _compute_dynamic_portfolio_allocation(
         **kwargs,
-        allocation_fn=compute_portfolio_allocation,
+        allocation_fn=compute_portfolio_allocation_with_metadata,
     )
 
 

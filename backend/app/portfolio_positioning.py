@@ -30,6 +30,42 @@ def compute_portfolio_allocation(
     predictor_panel: pd.DataFrame | None,
     selection_contexts: list[dict[str, object]] | None = None,
     predictor_context: dict[str, object] | None = None,
+) -> tuple[list[str], np.ndarray]:
+    result = compute_portfolio_allocation_with_metadata(
+        history_returns=history_returns,
+        volume_history=volume_history,
+        strategy=strategy,
+        portfolio_model=portfolio_model,
+        bars_per_year=bars_per_year,
+        universe_columns=universe_columns,
+        max_investment_ratio=max_investment_ratio,
+        max_weight=max_weight,
+        previous_weights=previous_weights,
+        transaction_cost=transaction_cost,
+        current_date=current_date,
+        predictor_panel=predictor_panel,
+        selection_contexts=selection_contexts,
+        predictor_context=predictor_context,
+    )
+    return result[0], result[1]
+
+
+def compute_portfolio_allocation_with_metadata(
+    *,
+    history_returns: pd.DataFrame,
+    volume_history: pd.DataFrame | None,
+    strategy: EvaluatorStrategySpec,
+    portfolio_model: PortfolioModelSpec,
+    bars_per_year: float,
+    universe_columns: pd.Index,
+    max_investment_ratio: float,
+    max_weight: float | None,
+    previous_weights: np.ndarray | None,
+    transaction_cost: float,
+    current_date: str | None,
+    predictor_panel: pd.DataFrame | None,
+    selection_contexts: list[dict[str, object]] | None = None,
+    predictor_context: dict[str, object] | None = None,
 ) -> tuple[list[str], np.ndarray] | tuple[list[str], np.ndarray, dict[str, object]]:
     signal_returns, signal_volumes, signal_bars_per_year = prepare_strategy_signal_data(
         history_returns=history_returns,

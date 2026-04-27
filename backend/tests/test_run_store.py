@@ -1,3 +1,5 @@
+import json
+import logging
 from pathlib import Path
 
 from app.run_store import FileRunResultStore, RUN_STORE_INDEX_FILENAME, build_run_spec
@@ -66,6 +68,69 @@ def test_run_store_rebuilds_index_from_saved_runs(tmp_path: Path) -> None:
     assert len(rebuilt_records) == 1
     assert rebuilt_records[0]["runSpec"]["runKind"] == "predictor_run"
     assert index_path.exists()
+
+
+def test_run_store_warns_when_rebuilding_corrupt_index(tmp_path: Path, caplog) -> None:
+    store = FileRunResultStore(tmp_path)
+    run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="alpha",
+        fingerprint_seed="alpha",
+    )
+    store.save(run_spec, {"summary": {"sharpeRatio": 1.0}})
+    index_path = tmp_path / RUN_STORE_INDEX_FILENAME
+    index_path.write_text("{invalid json", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="app.run_store"):
+        records = store.list_records(run_kind="strategy_run")
+
+    assert len(records) == 1
+    assert "Rebuilding run store index" in caplog.text
+    assert str(index_path) in caplog.text
+
+
+def test_run_store_warns_when_index_rebuild_skips_corrupt_run_file(tmp_path: Path, caplog) -> None:
+    store = FileRunResultStore(tmp_path)
+    run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="alpha",
+        fingerprint_seed="alpha",
+    )
+    store.save(run_spec, {"summary": {"sharpeRatio": 1.0}})
+    corrupt_path = tmp_path / "corrupt.json"
+    corrupt_path.write_text("{invalid json", encoding="utf-8")
+    (tmp_path / RUN_STORE_INDEX_FILENAME).unlink()
+
+    with caplog.at_level(logging.WARNING, logger="app.run_store"):
+        records = store.list_records(run_kind="strategy_run")
+
+    assert len(records) == 1
+    assert "Skipping corrupt run result file during index rebuild" in caplog.text
+    assert str(corrupt_path) in caplog.text
+
+
+def test_run_store_warns_when_index_rebuild_skips_unsupported_logic_version(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    store = FileRunResultStore(tmp_path)
+    store.save(
+        make_run_spec(run_kind="strategy_run", strategy_label="alpha", fingerprint_seed="alpha"),
+        {"summary": {"sharpeRatio": 1.0}},
+    )
+    stale_path = tmp_path / "stale.json"
+    stale_path.write_text(
+        json.dumps({"runSpec": {"logicVersion": "old"}, "result": {}}),
+        encoding="utf-8",
+    )
+    (tmp_path / RUN_STORE_INDEX_FILENAME).unlink()
+
+    with caplog.at_level(logging.WARNING, logger="app.run_store"):
+        records = store.list_records(run_kind="strategy_run")
+
+    assert len(records) == 1
+    assert "unsupported logic version old" in caplog.text
+    assert str(stale_path) in caplog.text
 
 
 def test_predictor_compact_record_reads_evaluation_subject(tmp_path: Path) -> None:

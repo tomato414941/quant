@@ -30,14 +30,22 @@ uv sync --dev
 uv run pytest -q tests/test_api.py::test_healthcheck tests/test_api.py::test_strategy_inventory_api tests/test_dependencies.py tests/test_instrument_registry.py tests/test_evaluation_profiles.py
 ```
 
-See [docs/development.md](docs/development.md) for more details.
+This is the smoke test: it is intended as a quick sanity check for setup,
+inventory, dependencies, and evaluation profile wiring. The full test suite is
+heavier and is described in [docs/development.md](docs/development.md).
 
-## Current Documentation Entry Points
+## What To Read First
 
-- [Strategy Catalog](docs/strategy-catalog.md): Strategy definitions and review status.
-- [Evaluation Contexts](docs/evaluation-contexts.md): Measurement conditions used to evaluate strategies.
-- [Evaluation Plan](docs/evaluation-plan.md): Current strategy set and context selected for evaluation.
-- [Leaderboard](docs/leaderboard.md): Manual snapshots for comparing evaluated runs.
+Start here if you are viewing the repository for the first time:
+
+1. [Development](docs/development.md): local setup, smoke test, full test, CLI, and API commands.
+2. [Strategy Catalog](docs/strategy-catalog.md): strategy definitions and review status.
+3. [Evaluation Contexts](docs/evaluation-contexts.md): measurement conditions used to evaluate strategies.
+4. [Evaluation Plan](docs/evaluation-plan.md): current strategy set and context selected for evaluation.
+5. [Leaderboard](docs/leaderboard.md): manual snapshots for comparing evaluated runs.
+
+The leaderboard is not an automatically generated ranking. It is a concise,
+human-maintained snapshot of selected evaluated runs.
 
 ## Data And Secrets
 

@@ -3,6 +3,7 @@ import json
 import math
 
 import pandas as pd
+import pytest
 
 from app import cli as cli_module
 from app import main as main_module
@@ -160,6 +161,7 @@ def configure_cli(monkeypatch, tmp_path):
     return config
 
 
+@pytest.mark.slow
 def test_comparison_summary_command(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
@@ -204,6 +206,7 @@ def test_strategy_inventory_command_json(capsys) -> None:
     assert all(entry["status"] == "active" for entry in payload["entries"])
 
 
+@pytest.mark.slow
 def test_strategy_inventory_command_with_latest_runs_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
     cli_module.main(["comparison-summary", "--top", "1"])
@@ -224,6 +227,7 @@ def test_strategy_inventory_command_with_latest_runs_json(monkeypatch, tmp_path,
     assert all("latestRun" in entry for entry in payload["entries"])
 
 
+@pytest.mark.slow
 def test_strategy_inventory_command_with_evaluation_matrix_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
     cli_module.main(["comparison-summary", "--top", "1"])
@@ -275,6 +279,7 @@ def configure_cli_multiyear(monkeypatch, tmp_path):
     return config
 
 
+@pytest.mark.slow
 def test_comparison_summary_walk_forward_command(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli_multiyear(monkeypatch, tmp_path)
 
@@ -302,6 +307,7 @@ def test_comparison_summary_walk_forward_command(monkeypatch, tmp_path, capsys) 
     assert "Warnings:" not in captured.out
 
 
+@pytest.mark.slow
 def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_multiyear(monkeypatch, tmp_path)
 
@@ -329,6 +335,7 @@ def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, cap
     assert "executionTrace" in payload["candidateResults"][0]["windows"][0]
 
 
+@pytest.mark.slow
 def test_comparison_summary_walk_forward_command_strategy_key_filter(
     monkeypatch, tmp_path, capsys
 ) -> None:
@@ -353,6 +360,7 @@ def test_comparison_summary_walk_forward_command_strategy_key_filter(
     assert payload["referenceResults"] == []
 
 
+@pytest.mark.slow
 def test_benchmark_decomposition_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_multiyear(monkeypatch, tmp_path)
 
@@ -396,6 +404,7 @@ def test_benchmark_decomposition_command_json(monkeypatch, tmp_path, capsys) -> 
     assert benchmarks_by_key["ref-spy-hold"]["worstWindow"] is not None
 
 
+@pytest.mark.slow
 def test_benchmark_decomposition_command(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_multiyear(monkeypatch, tmp_path)
 
@@ -417,6 +426,7 @@ def test_benchmark_decomposition_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Delta vs ref-fu-eq-cash-15" in captured.out
 
 
+@pytest.mark.slow
 def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli_multiyear(monkeypatch, tmp_path)
     strategy_key = config.candidate_strategies[0].key
@@ -480,6 +490,7 @@ def test_edge_attribution_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "portfolioModelEffectReturnPct" in payload["diagnosis"]
 
 
+@pytest.mark.slow
 def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli_multiyear(monkeypatch, tmp_path)
     strategy_key = config.candidate_strategies[0].key
@@ -511,6 +522,7 @@ def test_edge_attribution_command_text(monkeypatch, tmp_path, capsys) -> None:
     assert "Full effect vs universe" in captured.out
 
 
+@pytest.mark.slow
 def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_multiyear(monkeypatch, tmp_path)
 
@@ -563,6 +575,7 @@ def configure_cli_robustness(monkeypatch, tmp_path):
     return config
 
 
+@pytest.mark.slow
 def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_robustness(monkeypatch, tmp_path)
 
@@ -591,6 +604,7 @@ def test_robustness_summary_command(monkeypatch, tmp_path, capsys) -> None:
     assert "Delta vs ref-fu-eq-cash" in captured.out
 
 
+@pytest.mark.slow
 def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_robustness(monkeypatch, tmp_path)
 
@@ -643,6 +657,7 @@ def test_robustness_summary_command_json(monkeypatch, tmp_path, capsys) -> None:
     assert "realizedEdgeAfterCostPctDistribution" in first_window["executionDecisionSummary"]
 
 
+@pytest.mark.slow
 def test_robustness_summary_command_filters_strategy_keys(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli_robustness(monkeypatch, tmp_path)
     selected_key = config.candidate_strategies[0].key
@@ -664,6 +679,7 @@ def test_robustness_summary_command_filters_strategy_keys(monkeypatch, tmp_path,
     } == {selected_key}
 
 
+@pytest.mark.slow
 def test_robustness_summary_command_progress_and_output_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli_robustness(monkeypatch, tmp_path)
     output_path = tmp_path / "robustness-summary.json"
@@ -691,6 +707,7 @@ def test_robustness_summary_command_progress_and_output_json(monkeypatch, tmp_pa
     assert "elapsed=" in captured.err
 
 
+@pytest.mark.slow
 def test_signal_diagnostics_command_text(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli_multiyear(monkeypatch, tmp_path)
     strategy_key = config.candidate_strategies[0].key
@@ -716,6 +733,7 @@ def test_signal_diagnostics_command_text(monkeypatch, tmp_path, capsys) -> None:
     assert "diagnosis" in captured.out
 
 
+@pytest.mark.slow
 def test_signal_diagnostics_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli_multiyear(monkeypatch, tmp_path)
     strategy_key = config.candidate_strategies[0].key
@@ -883,6 +901,7 @@ def test_apply_comparison_universe_variant_btc_only_is_noop_for_etf_strategies()
     )
 
 
+@pytest.mark.slow
 def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
@@ -925,6 +944,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     )
 
 
+@pytest.mark.slow
 def test_rebuild_run_index_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
 
@@ -959,6 +979,7 @@ def test_comparison_run_spec_command_json(monkeypatch, tmp_path, capsys) -> None
     assert payload["referenceStrategies"][0]["kind"] == "strategy_definition"
 
 
+@pytest.mark.slow
 def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
     spec_file = tmp_path / "comparison-run-spec.json"
@@ -979,6 +1000,7 @@ def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> No
     assert payload["runStoreSummary"]["cachedRunCount"] + payload["runStoreSummary"]["computedRunCount"] > 0
 
 
+@pytest.mark.slow
 def test_latest_run_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
 

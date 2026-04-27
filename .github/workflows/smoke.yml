@@ -1,0 +1,35 @@
+name: Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --dev
+
+      - name: Run smoke tests
+        working-directory: backend
+        run: >
+          uv run pytest -q
+          tests/test_api.py::test_healthcheck
+          tests/test_api.py::test_strategy_inventory_api
+          tests/test_dependencies.py
+          tests/test_instrument_registry.py
+          tests/test_evaluation_profiles.py

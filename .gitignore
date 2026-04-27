@@ -1,6 +1,8 @@
 .venv/
 *.egg-info/
 **/.pytest_cache/
+**/.cache/
+**/cache/
 **/__pycache__/
 backend/data/
 private/

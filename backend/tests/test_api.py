@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
+import pytest
 
 from app import main as main_module
 from app.comparison_models import ConditionVariant
@@ -309,6 +310,7 @@ def test_strategy_inventory_api_filters_entries() -> None:
     assert all(entry["priority"] == "high" for entry in payload["entries"])
 
 
+@pytest.mark.slow
 def test_strategy_inventory_api_with_latest_runs(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -327,6 +329,7 @@ def test_strategy_inventory_api_with_latest_runs(monkeypatch, tmp_path) -> None:
     assert all("latestRun" in entry for entry in payload["entries"])
 
 
+@pytest.mark.slow
 def test_strategy_inventory_api_with_evaluation_matrix(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -401,6 +404,7 @@ def test_rerun_comparison_run_spec_endpoint_rejects_mismatched_fingerprint(monke
     assert "comparisonFingerprint does not match" in response.json()["detail"]
 
 
+@pytest.mark.slow
 def test_rerun_comparison_run_spec_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -420,6 +424,7 @@ def test_rerun_comparison_run_spec_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["runStoreSummary"]["cachedRunCount"] + payload["runStoreSummary"]["computedRunCount"] > 0
 
 
+@pytest.mark.slow
 def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -601,6 +606,7 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     )
 
 
+@pytest.mark.slow
 def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -738,6 +744,7 @@ def test_predictor_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -770,6 +777,7 @@ def test_comparison_endpoint_accepts_definition_candidates(monkeypatch, tmp_path
 
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_supports_explicit_strategy_signal_context_without_extensions(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -815,6 +823,7 @@ def test_comparison_endpoint_supports_explicit_strategy_signal_context_without_e
     assert any(context["timeframe"]["key"] == "1d" for context in market_contexts)
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -863,6 +872,7 @@ def test_comparison_endpoint_accepts_direct_execution_definition_candidates(monk
     assert strategy_payload["components"]["optional"]["signals"][0]["signalTimeframe"]["key"] == "1w"
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_execution(monkeypatch, tmp_path) -> None:
     requested_timeframes: list[str] = []
 
@@ -922,6 +932,7 @@ def test_comparison_endpoint_fetches_signal_source_timeframe_for_direct_executio
     assert "1wk" in requested_timeframes
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_accepts_direct_execution_multi_selection_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -980,6 +991,7 @@ def test_comparison_endpoint_accepts_direct_execution_multi_selection_definition
     assert selection_signals[1]["signalTimeframe"]["key"] == "1w"
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_direct_execution_multi_selection_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1048,6 +1060,7 @@ def test_comparison_endpoint_returns_selection_alignment_policy_payloads_for_dir
     assert signals[1]["alignmentPolicy"]["method"] == "end_of_period"
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_direct_execution_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1088,6 +1101,7 @@ def test_comparison_endpoint_returns_predictor_alignment_policy_payload_for_dire
     assert predictor_signal["alignmentPolicy"]["method"] == "calendar_resample"
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candidates_with_multi_selection(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1142,6 +1156,7 @@ def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candi
     assert signals[1]["signalParameters"]["selectionKey"] == "secondary_momo6"
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_accepts_direct_execution_predictor_definition_candidates(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle_extended)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1217,6 +1232,7 @@ def test_comparison_endpoint_reports_incompatible_definition(monkeypatch, tmp_pa
 
 
 
+@pytest.mark.slow
 def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1298,6 +1314,7 @@ def test_strategy_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert second_payload["runStoreSummary"]["computedRunCount"] == 0
 
 
+@pytest.mark.slow
 def test_comparison_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp_path) -> None:
     fetch_calls: list[tuple[str, str]] = []
 
@@ -1375,6 +1392,7 @@ def test_comparison_endpoint_supports_mixed_strategy_timeframes(monkeypatch, tmp
     )
 
 
+@pytest.mark.slow
 def test_comparison_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     base_config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1405,6 +1423,7 @@ def test_comparison_reuses_existing_runs_when_strategy_added(monkeypatch, tmp_pa
     assert second_payload["runStoreSummary"]["computedRunCount"] == 1
 
 
+@pytest.mark.slow
 def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1468,6 +1487,7 @@ def test_condition_sweep_reuses_existing_runs_when_condition_added(monkeypatch, 
     assert third_payload["runStoreSummary"]["computedRunCount"] == 1
 
 
+@pytest.mark.slow
 def test_latest_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1508,6 +1528,7 @@ def test_latest_run_catalog_endpoint_requires_fingerprint(monkeypatch, tmp_path)
     assert "At least one fingerprint filter is required" in response.json()["detail"]
 
 
+@pytest.mark.slow
 def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1557,6 +1578,7 @@ def test_run_catalog_endpoint(monkeypatch, tmp_path) -> None:
     )
 
 
+@pytest.mark.slow
 def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)
@@ -1603,6 +1625,7 @@ def test_generate_parameter_sweep_runs_endpoint(monkeypatch, tmp_path) -> None:
     assert all(record["generationMethod"] == "parameter_sweep" for record in catalog_payload["records"])
 
 
+@pytest.mark.slow
 def test_ranking_evaluation_endpoint(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.main.fetch_market_universe_bundle", fake_fetch_market_universe_bundle)
     config = copy.deepcopy(main_module.DEFAULT_COMPARISON_SPEC)

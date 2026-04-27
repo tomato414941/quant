@@ -4,11 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 
 RUN_STORE_LOGIC_VERSION = "v71"
 RUN_STORE_INDEX_FILENAME = "_index.json"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -34,7 +37,8 @@ class FileRunResultStore:
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning("Skipping corrupt run result file %s: %s", path, exc)
             return None
         return payload["result"]
 
@@ -130,10 +134,16 @@ class FileRunResultStore:
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning("Skipping corrupt run record file %s: %s", path, exc)
             return None
         run_spec = payload.get("runSpec", {})
         if run_spec.get("logicVersion") != RUN_STORE_LOGIC_VERSION:
+            logger.warning(
+                "Skipping run record %s with unsupported logic version %s",
+                path,
+                run_spec.get("logicVersion"),
+            )
             return None
         return {
             "runKey": run_key,
@@ -171,8 +181,9 @@ class FileRunResultStore:
                 entries = payload.get("entries")
                 if isinstance(entries, list):
                     return entries
-            except json.JSONDecodeError:
-                pass
+                logger.warning("Rebuilding run store index because %s has invalid entries.", index_path)
+            except json.JSONDecodeError as exc:
+                logger.warning("Rebuilding run store index because %s is corrupt: %s", index_path, exc)
         entries = self._rebuild_index_entries()
         self._write_index_entries(entries)
         return entries
@@ -196,10 +207,16 @@ class FileRunResultStore:
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                logger.warning("Skipping corrupt run result file during index rebuild %s: %s", path, exc)
                 continue
             run_spec = payload.get("runSpec", {})
             if run_spec.get("logicVersion") != RUN_STORE_LOGIC_VERSION:
+                logger.warning(
+                    "Skipping run result file during index rebuild %s with unsupported logic version %s",
+                    path,
+                    run_spec.get("logicVersion"),
+                )
                 continue
             entries.append(
                 self._build_index_entry(

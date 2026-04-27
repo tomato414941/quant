@@ -1,6 +1,8 @@
 # Evaluation Plan
 
 この文書は、今回評価するStrategy setとEvaluation Contextを定義する。
+初めて読む場合は、この文書で「何を評価するか」を確認し、結果の読み方は
+[Leaderboard](./leaderboard.md) の手動スナップショットを見る。
 
 ## Questions This Answers
 
@@ -36,6 +38,9 @@
 1. `no_signal_allocation_v1` を `2015_2025` で評価する。
 2. 結果を [Leaderboard](./leaderboard.md) に手動スナップショットとして記録する。
 3. 必要になったらcost sensitivityやwalk-forwardをEvaluation Context候補から正式化する。
+
+Leaderboardへの記録は手動で行う。評価runの保存やhelper出力が存在しても、
+この文書で選んだEvaluation SetとContextだけを混ぜずに転記する。
 
 ## Code Helper Relationship
 

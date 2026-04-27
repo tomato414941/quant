@@ -14,7 +14,9 @@ uv sync --dev
 
 ## Smoke Test
 
-Use this for a quick public-repo sanity check.
+Use this for a quick public-repo sanity check after setup or small documentation
+and wiring changes. It checks the API health endpoint, strategy inventory,
+dependency imports, instrument registry, and evaluation profile definitions.
 
 ```bash
 cd backend
@@ -23,7 +25,8 @@ uv run pytest -q tests/test_api.py::test_healthcheck tests/test_api.py::test_str
 
 ## Full Test
 
-Full test execution is heavier than the smoke test.
+Use this before larger code changes or release-oriented cleanup. It runs the
+entire backend test suite and is expected to be slower than the smoke test.
 
 ```bash
 cd backend

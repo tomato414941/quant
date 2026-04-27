@@ -13,6 +13,7 @@ from app.comparison_models import ConditionVariant
 from app.comparison_market_context import build_run_result_store
 from app.comparison_serialization import build_availability_diagnostics
 from app.main import DEFAULT_CORS_ALLOW_ORIGINS, app, parse_cors_allow_origins
+from app.market_data import build_dataset_snapshot_metadata
 from app.portfolio import (
     StrategyDefinition,
     build_alignment_policy_spec,
@@ -234,15 +235,31 @@ def fake_fetch_market_universe(
         ],
     )
     aligned = frame[tickers]
-    return aligned, {
+    metadata = {
         "tickers": tickers,
+        "requested_tickers": tickers,
         "period": period,
         "source": "test",
         "timeframe": timeframe,
+        "start_date": start_date,
+        "end_date": end_date,
         "aligned_start_date": aligned.index[0],
         "aligned_end_date": aligned.index[-1],
         "row_count": len(aligned),
     }
+    metadata["datasetSnapshot"] = build_dataset_snapshot_metadata(
+        source="test",
+        timeframe=timeframe,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        requested_tickers=tickers,
+        available_tickers=tickers,
+        row_count=len(aligned),
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    return aligned, metadata
 
 
 def fake_fetch_market_universe_bundle(
@@ -297,15 +314,31 @@ def fake_fetch_market_universe_bundle_extended(
         },
         index=index,
     )
-    return {"closes": closes, "volumes": volumes}, {
+    metadata = {
         "tickers": tickers,
+        "requested_tickers": tickers,
         "period": period,
         "source": "test",
         "timeframe": timeframe,
+        "start_date": start_date,
+        "end_date": end_date,
         "aligned_start_date": str(index[0].date()),
         "aligned_end_date": str(index[-1].date()),
         "row_count": len(index),
     }
+    metadata["datasetSnapshot"] = build_dataset_snapshot_metadata(
+        source="test",
+        timeframe=timeframe,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        requested_tickers=tickers,
+        available_tickers=tickers,
+        row_count=len(index),
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    return {"closes": closes, "volumes": volumes}, metadata
 
 
 def test_healthcheck() -> None:
@@ -522,6 +555,13 @@ def test_comparison_endpoint(monkeypatch, tmp_path) -> None:
     assert all(context["alignedStartDate"] == "2025-01-01" for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"])
     assert all(context["alignedEndDate"] == "2025-01-07" for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"])
     assert all(context["rowCount"] == 7 for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"])
+    dataset_snapshots = [
+        context["datasetSnapshot"]
+        for context in payload["comparison"]["runSpec"]["evaluation"]["marketDataContexts"]
+    ]
+    assert {snapshot["source"] for snapshot in dataset_snapshots} == {"test"}
+    assert {snapshot["rowCount"] for snapshot in dataset_snapshots} == {7}
+    assert all(snapshot["fingerprint"] == snapshot["snapshotId"] for snapshot in dataset_snapshots)
     warnings = payload["comparison"]["runSpec"]["evaluation"]["warnings"]
     assert {warning["kind"] for warning in warnings} == {
         "aligned_start_after_requested_start",

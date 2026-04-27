@@ -152,3 +152,7 @@ walk-forwardでは、windowごとにeligible universeの推移を記録する。
 - Strategyは「何を対象にしたいか」を持つ
 - Evaluation Contextは「その期間で何が実際に使えたか」を持つ
 - Runは「その条件でどう動いたか」を記録する
+
+Market data metadata includes `datasetSnapshot` so a run can identify the requested universe, available universe, date range, timeframe, row count, adjustment policy, and metadata fingerprint used for availability decisions.
+
+This is intentionally metadata-only. Do not commit raw provider downloads, adjusted price panels, volume panels, or other market data extracts; commit only reproducibility metadata and documentation.

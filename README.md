@@ -51,6 +51,8 @@ human-maintained snapshot of selected evaluated runs.
 
 Local data, run results, environment files, credentials, and private keys must not be committed. Generated run data belongs under ignored data directories such as `backend/data/`.
 
+Market data snapshots are metadata-only. Commit snapshot contracts, fingerprints, and provenance fields, but do not commit raw prices, volumes, provider downloads, or generated market data panels.
+
 Use ignored directories such as `private/` for local research notes or evaluation notes that should not be published.
 
 Before making the repository public, run a secret scan and review the strategy documentation for research ideas you do not want to publish.

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 import time
 from typing import Protocol
 
@@ -10,6 +12,7 @@ import yfinance as yf
 
 
 DEFAULT_MAX_STALE_BARS = 5
+DEFAULT_ADJUSTMENT_POLICY = "auto_adjust"
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,17 @@ class YFinanceMarketDataProvider:
             "aligned_end_date": str(closes.index[-1]),
             "row_count": len(closes),
         }
+        metadata["datasetSnapshot"] = build_dataset_snapshot_metadata(
+            source=self.source_label,
+            timeframe=request.timeframe,
+            period=request.period,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            requested_tickers=unique_tickers,
+            available_tickers=list(closes.columns),
+            row_count=len(closes),
+            adjustment_policy=DEFAULT_ADJUSTMENT_POLICY,
+        )
         return {"closes": closes, "volumes": volumes}, metadata
 
     def _download_ticker(
@@ -274,6 +288,52 @@ def fetch_market_universe_bundle(
         max_stale_bars=max_stale_bars,
     )
     return DEFAULT_MARKET_DATA_PROVIDER.fetch_bundle(request)
+
+
+def build_dataset_snapshot_metadata(
+    *,
+    source: str,
+    timeframe: str,
+    period: str,
+    start_date: str | None,
+    end_date: str | None,
+    requested_tickers: list[str],
+    available_tickers: list[str],
+    row_count: int,
+    adjustment_policy: str = DEFAULT_ADJUSTMENT_POLICY,
+    created_at_utc: str | None = None,
+) -> dict[str, object]:
+    created_at = created_at_utc or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    payload: dict[str, object] = {
+        "source": source,
+        "createdAtUtc": created_at,
+        "timeframe": timeframe,
+        "period": period,
+        "start": start_date,
+        "end": end_date,
+        "requestedTickers": list(requested_tickers),
+        "availableTickers": list(available_tickers),
+        "rowCount": int(row_count),
+        "adjustmentPolicy": adjustment_policy,
+    }
+    fingerprint = build_dataset_snapshot_fingerprint(payload)
+    payload["fingerprint"] = fingerprint
+    payload["snapshotId"] = fingerprint
+    return payload
+
+
+def build_dataset_snapshot_fingerprint(snapshot: dict[str, object]) -> str:
+    fingerprint_payload = {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {"createdAtUtc", "fingerprint", "snapshotId"}
+    }
+    encoded = json.dumps(
+        fingerprint_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def exclusive_yfinance_end_date(end_date: str | None) -> str | None:

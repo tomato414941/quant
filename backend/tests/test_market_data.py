@@ -1,7 +1,11 @@
 import pandas as pd
 import pytest
 
-from app.market_data import MarketDataRequest, YFinanceMarketDataProvider
+from app.market_data import (
+    MarketDataRequest,
+    YFinanceMarketDataProvider,
+    build_dataset_snapshot_metadata,
+)
 
 
 def build_download_frame(values: list[float]) -> pd.DataFrame:
@@ -41,6 +45,9 @@ def test_yfinance_provider_allows_partial_failures(monkeypatch) -> None:
     assert metadata["tickers"] == ["SPY", "QQQ"]
     assert metadata["requested_tickers"] == ["SPY", "EWJ", "QQQ"]
     assert metadata["failed_tickers"] == {"EWJ": "download_exception:TypeError"}
+    assert metadata["datasetSnapshot"]["source"] == "Yahoo Finance via yfinance"
+    assert metadata["datasetSnapshot"]["requestedTickers"] == ["SPY", "EWJ", "QQQ"]
+    assert metadata["datasetSnapshot"]["availableTickers"] == ["SPY", "QQQ"]
 
 
 def test_yfinance_provider_raises_when_too_few_tickers_survive(monkeypatch) -> None:
@@ -186,3 +193,34 @@ def test_yfinance_provider_keeps_rows_before_late_asset_starts(monkeypatch) -> N
     assert float(bundle["closes"].loc["2025-01-03", "ETH-USD"]) == 300.0
     assert metadata["assetAvailability"]["ETH-USD"]["firstValidDate"] == "2025-01-03"
     assert metadata["aligned_start_date"] == "2025-01-01"
+
+
+def test_dataset_snapshot_fingerprint_excludes_created_at_utc() -> None:
+    first_snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date="2025-01-01",
+        end_date="2025-01-07",
+        requested_tickers=["SPY", "QQQ", "EWJ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=7,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    second_snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date="2025-01-01",
+        end_date="2025-01-07",
+        requested_tickers=["SPY", "QQQ", "EWJ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=7,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-02T00:00:00Z",
+    )
+
+    assert first_snapshot["createdAtUtc"] != second_snapshot["createdAtUtc"]
+    assert first_snapshot["fingerprint"] == second_snapshot["fingerprint"]
+    assert first_snapshot["snapshotId"] == first_snapshot["fingerprint"]

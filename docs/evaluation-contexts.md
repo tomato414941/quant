@@ -74,3 +74,21 @@ Evaluation ContextはStrategy定義を上書きしない。Universe、rebalance 
 コード上の `EvaluationProfileRegistry` は、保存済みrunを機械的に突き合わせるための補助ビューである。
 
 評価条件の意思決定正本はこの文書に置く。コードへ反映するのは、docs上で評価条件が安定してからにする。
+
+## Data Snapshot Contract
+
+Evaluation run specs include `marketDataContexts[].datasetSnapshot` as metadata-only provenance for the market data used by the run.
+
+The v1 contract records:
+
+- `source`: data provider label.
+- `createdAtUtc`: snapshot metadata creation time.
+- `timeframe`: data timeframe such as `1d`, `1wk`, or `1mo`.
+- `period`, `start`, `end`: requested evaluation range.
+- `requestedTickers`: requested universe symbols.
+- `availableTickers`: symbols with usable rows after provider filtering.
+- `rowCount`: aligned market data row count.
+- `adjustmentPolicy`: price adjustment policy used by the provider.
+- `fingerprint` and `snapshotId`: stable identifiers derived from the snapshot metadata excluding `createdAtUtc`.
+
+The snapshot does not store raw prices, volumes, or downloaded provider payloads. Raw market data remains local/generated data and must not be committed.

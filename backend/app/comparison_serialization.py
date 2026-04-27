@@ -662,6 +662,9 @@ def serialize_market_slice_context(
     asset_availability = dataset_metadata.get("assetAvailability")
     if asset_availability:
         payload["assetAvailability"] = asset_availability
+    dataset_snapshot = dataset_metadata.get("datasetSnapshot")
+    if dataset_snapshot:
+        payload["datasetSnapshot"] = dataset_snapshot
     return payload
 
 

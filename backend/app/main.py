@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,12 +28,26 @@ from app.market_data import fetch_market_universe_bundle
 from app.strategy_inventory import build_strategy_inventory_payload
 
 
+DEFAULT_CORS_ALLOW_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+CORS_ALLOW_ORIGINS_ENV = "QUANT_CORS_ALLOW_ORIGINS"
+
+
+def parse_cors_allow_origins(value: str | None) -> list[str]:
+    if value is None or not value.strip():
+        return list(DEFAULT_CORS_ALLOW_ORIGINS)
+    return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
 app = FastAPI(title="Quant API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|[\w\.-]+)(:\d+)?$",
+    allow_origins=parse_cors_allow_origins(os.getenv(CORS_ALLOW_ORIGINS_ENV)),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

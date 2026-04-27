@@ -54,7 +54,17 @@ cd backend
 uv run uvicorn app.main:app --reload
 ```
 
-Web UI やリモート確認が必要な場合は、利用環境ごとの手順に従う。
+The API uses an explicit CORS allowlist. By default it allows common local
+frontend origins only: `http://localhost:5173`, `http://127.0.0.1:5173`,
+`http://localhost:3000`, and `http://127.0.0.1:3000`.
+
+For remote previews, set exact origins explicitly.
+
+```bash
+QUANT_CORS_ALLOW_ORIGINS=http://100.x.y.z:5173,https://preview.example.com uv run uvicorn app.main:app --reload
+```
+
+Web UI やリモート確認が必要な場合は、利用環境ごとの手順に従う。CORS は wildcard ではなく、必要な origin だけを明示する。
 
 ## Common Failures
 

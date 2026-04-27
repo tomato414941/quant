@@ -29,6 +29,10 @@ jobs:
         run: >
           uv run pytest -q
           tests/test_api.py::test_healthcheck
+          tests/test_api.py::test_parse_cors_allow_origins_uses_safe_defaults_for_empty_values
+          tests/test_api.py::test_parse_cors_allow_origins_trims_comma_separated_values
+          tests/test_api.py::test_cors_allows_default_localhost_origin
+          tests/test_api.py::test_cors_rejects_unlisted_origin
           tests/test_api.py::test_strategy_inventory_api
           tests/test_dependencies.py
           tests/test_instrument_registry.py

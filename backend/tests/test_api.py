@@ -12,7 +12,7 @@ from app import main as main_module
 from app.comparison_models import ConditionVariant
 from app.comparison_market_context import build_run_result_store
 from app.comparison_serialization import build_availability_diagnostics
-from app.main import app
+from app.main import DEFAULT_CORS_ALLOW_ORIGINS, app, parse_cors_allow_origins
 from app.portfolio import (
     StrategyDefinition,
     build_alignment_policy_spec,
@@ -109,6 +109,32 @@ def test_availability_diagnostics_classifies_calendar_lifecycle_and_actionable_r
     assert diagnostics["calendarBoundaryWarnings"][0]["kind"] == "aligned_start_after_requested_start"
     assert diagnostics["assetLifecycleWarnings"][0]["asset"] == "ETH-USD"
     assert diagnostics["actionableWarnings"][0]["asset"] == "MISSING"
+
+
+def test_parse_cors_allow_origins_uses_safe_defaults_for_empty_values() -> None:
+    assert parse_cors_allow_origins(None) == list(DEFAULT_CORS_ALLOW_ORIGINS)
+    assert parse_cors_allow_origins("  ") == list(DEFAULT_CORS_ALLOW_ORIGINS)
+
+
+def test_parse_cors_allow_origins_trims_comma_separated_values() -> None:
+    assert parse_cors_allow_origins(" http://example.test:5173,https://preview.test ,, ") == [
+        "http://example.test:5173",
+        "https://preview.test",
+    ]
+
+
+def test_cors_allows_default_localhost_origin() -> None:
+    response = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_cors_rejects_unlisted_origin() -> None:
+    response = client.get("/api/health", headers={"Origin": "http://unlisted.example"})
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
 
 
 def test_comparison_service_does_not_import_evaluator_strategy_spec_dto_bridge() -> None:

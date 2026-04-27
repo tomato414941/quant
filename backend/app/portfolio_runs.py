@@ -24,6 +24,7 @@ from app.portfolio_metrics import (
     serialize_weights,
     should_rebalance,
     summarize_availability_series,
+    summarize_evaluation_diagnostic_metrics,
     summarize_portfolio_decision_events,
     summarize_segment_from_returns,
 )
@@ -217,6 +218,10 @@ def compare_portfolio_runs(
                 "series": backtest["series"],
                 "availabilitySummary": backtest["availabilitySummary"],
                 "decisionSummary": backtest["decisionSummary"],
+                "allocationFallbackCount": backtest["allocationFallbackCount"],
+                "allocationFallbackRate": backtest["allocationFallbackRate"],
+                "diagnosticEventCount": backtest["diagnosticEventCount"],
+                "availabilityWarningCount": backtest["availabilityWarningCount"],
                 "decisionEvents": backtest["decisionEvents"],
                 "executionTrace": backtest["executionTrace"],
                 "availabilityPolicy": availability_policy,
@@ -703,6 +708,7 @@ def run_portfolio_backtest(
         bars_per_year=bars_per_year,
         turnover=test_turnover,
     )
+    diagnostic_metrics = summarize_evaluation_diagnostic_metrics(execution_trace=execution_trace)
     return {
         "summary": test_summary["portfolio"],
         "series": series,
@@ -710,6 +716,10 @@ def run_portfolio_backtest(
         "latestSelectedAssets": latest_selected_assets,
         "availabilitySummary": summarize_availability_series(series),
         "decisionSummary": summarize_portfolio_decision_events(decision_events),
+        "allocationFallbackCount": diagnostic_metrics["allocationFallbackCount"],
+        "allocationFallbackRate": diagnostic_metrics["allocationFallbackRate"],
+        "diagnosticEventCount": diagnostic_metrics["diagnosticEventCount"],
+        "availabilityWarningCount": diagnostic_metrics["availabilityWarningCount"],
         "decisionEvents": decision_events,
         "executionTrace": execution_trace,
         "splitAnalysis": {

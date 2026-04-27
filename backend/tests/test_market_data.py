@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 import pytest
 
@@ -5,6 +7,7 @@ from app.market_data import (
     MarketDataRequest,
     YFinanceMarketDataProvider,
     build_dataset_snapshot_metadata,
+    write_market_data_snapshot,
 )
 
 
@@ -224,3 +227,51 @@ def test_dataset_snapshot_fingerprint_excludes_created_at_utc() -> None:
     assert first_snapshot["createdAtUtc"] != second_snapshot["createdAtUtc"]
     assert first_snapshot["fingerprint"] == second_snapshot["fingerprint"]
     assert first_snapshot["snapshotId"] == first_snapshot["fingerprint"]
+
+
+def test_write_market_data_snapshot_persists_manifest_and_csv_content(tmp_path) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date="2025-01-01",
+        end_date="2025-01-02",
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame(
+        {"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    volumes = pd.DataFrame(
+        {"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    closes.index.name = "date"
+    volumes.index.name = "date"
+
+    snapshot_path = write_market_data_snapshot(
+        bundle={"closes": closes, "volumes": volumes},
+        metadata={"datasetSnapshot": snapshot},
+        storage_dir=tmp_path,
+    )
+
+    assert snapshot_path == tmp_path / str(snapshot["snapshotId"])
+
+    manifest = json.loads((snapshot_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest == {
+        "schemaVersion": 1,
+        "datasetSnapshot": snapshot,
+        "files": {
+            "closes": "closes.csv",
+            "volumes": "volumes.csv",
+        },
+    }
+
+    stored_closes = pd.read_csv(snapshot_path / "closes.csv", index_col="date")
+    stored_volumes = pd.read_csv(snapshot_path / "volumes.csv", index_col="date")
+    pd.testing.assert_frame_equal(stored_closes, closes)
+    pd.testing.assert_frame_equal(stored_volumes, volumes)

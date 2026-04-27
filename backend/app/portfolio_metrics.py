@@ -144,6 +144,42 @@ def summarize_portfolio_decision_events(events: list[dict]) -> dict[str, object]
         "confidenceDistribution": summarize_optional_number_distribution(confidence_values),
     }
 
+
+def summarize_evaluation_diagnostic_metrics(
+    *,
+    execution_trace: list[dict] | None = None,
+    evaluation: dict | None = None,
+    existing_metrics: dict | None = None,
+) -> dict[str, object]:
+    trace = execution_trace if isinstance(execution_trace, list) else []
+    evaluation_payload = evaluation if isinstance(evaluation, dict) else {}
+    trace_events = [event for event in trace if isinstance(event, dict)]
+    decision_count = sum(1 for event in trace_events if event.get("eventType") == "decision")
+    allocation_fallback_count = sum(1 for event in trace_events if event.get("allocationFallback") is not None)
+    diagnostic_events = evaluation_payload.get("diagnosticEvents") or []
+    if not isinstance(diagnostic_events, list):
+        diagnostic_events = []
+    availability_diagnostics = evaluation_payload.get("availabilityDiagnostics") or {}
+    if not isinstance(availability_diagnostics, dict):
+        availability_diagnostics = {}
+    availability_warning_count = availability_diagnostics.get("warningCount")
+    if availability_warning_count is None:
+        warnings = evaluation_payload.get("warnings") or []
+        availability_warning_count = len(warnings) if isinstance(warnings, list) else 0
+    metrics = {
+        "allocationFallbackCount": allocation_fallback_count,
+        "allocationFallbackRate": (
+            0.0 if decision_count == 0 else round(allocation_fallback_count / decision_count, 4)
+        ),
+        "diagnosticEventCount": len(diagnostic_events),
+        "availabilityWarningCount": int(availability_warning_count or 0),
+    }
+    for key in metrics:
+        if existing_metrics is not None and existing_metrics.get(key) is not None:
+            metrics[key] = existing_metrics[key]
+    return metrics
+
+
 def summarize_availability_series(series: list[dict]) -> dict[str, object]:
     if not series:
         return {
@@ -164,6 +200,7 @@ def summarize_availability_series(series: list[dict]) -> dict[str, object]:
         "newlyEligibleAssetCount": sum(len(point.get("newlyEligibleAssets", [])) for point in series),
         "removedAssetCount": sum(len(point.get("removedAssets", [])) for point in series),
     }
+
 
 def summarize_portfolio_metrics(
     final_value: float,
@@ -263,4 +300,3 @@ def should_rebalance(previous_date, current_date, rebalance_schedule: str) -> bo
     if rebalance_schedule == "year_end":
         return previous_timestamp.year != current_timestamp.year
     raise ValueError("Unsupported rebalance schedule.")
-

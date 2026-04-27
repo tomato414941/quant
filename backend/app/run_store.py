@@ -11,9 +11,17 @@ from pathlib import Path
 import threading
 import uuid
 
+from app.portfolio_metrics import summarize_evaluation_diagnostic_metrics
+
 
 RUN_STORE_LOGIC_VERSION = "v71"
 RUN_STORE_INDEX_FILENAME = "_index.json"
+DIAGNOSTIC_METRIC_KEYS = (
+    "allocationFallbackCount",
+    "allocationFallbackRate",
+    "diagnosticEventCount",
+    "availabilityWarningCount",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +174,11 @@ class FileRunResultStore:
             compact_record = entry.get(compact_key)
             if compact_record is None:
                 continue
+            compact_record = self._backfill_compact_diagnostic_metrics(
+                entry=entry,
+                compact_key=compact_key,
+                compact_record=compact_record,
+            )
             records.append(compact_record)
             if limit is not None and len(records) >= limit:
                 break
@@ -438,6 +451,31 @@ class FileRunResultStore:
             return "predictorCompactRecord"
         raise ValueError(f"Unsupported compact record view: {view}")
 
+    def _backfill_compact_diagnostic_metrics(
+        self,
+        *,
+        entry: dict,
+        compact_key: str,
+        compact_record: dict,
+    ) -> dict:
+        if all(key in compact_record for key in DIAGNOSTIC_METRIC_KEYS):
+            return compact_record
+        run_key = entry.get("runKey")
+        if not isinstance(run_key, str):
+            return compact_record
+        record = self.get_record(run_key)
+        if record is None:
+            return compact_record
+        rebuilt_record = (
+            build_compact_predictor_run_record(record)
+            if compact_key == "predictorCompactRecord"
+            else build_compact_run_record(record)
+        )
+        merged_record = dict(compact_record)
+        for key in DIAGNOSTIC_METRIC_KEYS:
+            if key in rebuilt_record:
+                merged_record[key] = rebuilt_record[key]
+        return merged_record
 
 
 def build_compact_run_record(record: dict) -> dict:
@@ -450,6 +488,11 @@ def build_compact_run_record(record: dict) -> dict:
     fingerprints = run_spec.get("fingerprints", {})
     summary = result.get("summary", {})
     portfolio_summary = summary.get("portfolio", summary)
+    diagnostic_metrics = summarize_evaluation_diagnostic_metrics(
+        execution_trace=result.get("executionTrace"),
+        evaluation=evaluation,
+        existing_metrics=result,
+    )
 
     return {
         "runKey": record["runKey"],
@@ -485,6 +528,10 @@ def build_compact_run_record(record: dict) -> dict:
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
         "totalReturnPct": portfolio_summary.get("totalReturnPct"),
         "maxDrawdownPct": portfolio_summary.get("maxDrawdownPct"),
+        "allocationFallbackCount": diagnostic_metrics["allocationFallbackCount"],
+        "allocationFallbackRate": diagnostic_metrics["allocationFallbackRate"],
+        "diagnosticEventCount": diagnostic_metrics["diagnosticEventCount"],
+        "availabilityWarningCount": diagnostic_metrics["availabilityWarningCount"],
     }
 
 
@@ -492,6 +539,7 @@ def build_compact_predictor_run_record(record: dict) -> dict:
     run_spec = record["runSpec"]
     result = record["result"]
     fingerprints = run_spec.get("fingerprints", {})
+    evaluation = run_spec.get("evaluation", {})
     evaluation_subject = run_spec.get("evaluationSubject", {})
     predictor = evaluation_subject.get("predictor") or run_spec.get("strategy", {}).get("predictor", {})
     signal = predictor.get("signalSpec", {})
@@ -509,6 +557,11 @@ def build_compact_predictor_run_record(record: dict) -> dict:
     combiner = engine.get("combinerSpec") or {}
     overall = result.get("overall", {})
     test = result.get("test", {})
+    diagnostic_metrics = summarize_evaluation_diagnostic_metrics(
+        execution_trace=result.get("executionTrace"),
+        evaluation=evaluation,
+        existing_metrics=result,
+    )
 
     return {
         "runKey": record["runKey"],
@@ -551,7 +604,12 @@ def build_compact_predictor_run_record(record: dict) -> dict:
         "overallTopMinusBottomPct": overall.get("meanTopMinusBottomPct"),
         "testTopMinusBottomPct": test.get("meanTopMinusBottomPct"),
         "testHitRatePct": test.get("hitRatePct"),
+        "allocationFallbackCount": diagnostic_metrics["allocationFallbackCount"],
+        "allocationFallbackRate": diagnostic_metrics["allocationFallbackRate"],
+        "diagnosticEventCount": diagnostic_metrics["diagnosticEventCount"],
+        "availabilityWarningCount": diagnostic_metrics["availabilityWarningCount"],
     }
+
 
 def build_run_cache_key(run_spec: dict) -> str:
     serialized = json.dumps(run_spec, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

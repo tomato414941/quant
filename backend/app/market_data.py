@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+from pathlib import Path
 import time
 from typing import Protocol
 
@@ -13,6 +14,9 @@ import yfinance as yf
 
 DEFAULT_MAX_STALE_BARS = 5
 DEFAULT_ADJUSTMENT_POLICY = "auto_adjust"
+DEFAULT_MARKET_SNAPSHOT_STORAGE_DIR = (
+    Path(__file__).resolve().parents[1] / "data" / "market_snapshots"
+)
 
 
 @dataclass(frozen=True)
@@ -320,6 +324,50 @@ def build_dataset_snapshot_metadata(
     payload["fingerprint"] = fingerprint
     payload["snapshotId"] = fingerprint
     return payload
+
+
+def write_market_data_snapshot(
+    bundle: dict[str, pd.DataFrame],
+    metadata: dict[str, object],
+    storage_dir: Path | str = DEFAULT_MARKET_SNAPSHOT_STORAGE_DIR,
+) -> Path:
+    snapshot = metadata.get("datasetSnapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("metadata must include datasetSnapshot metadata.")
+
+    snapshot_id = snapshot.get("snapshotId")
+    if not isinstance(snapshot_id, str) or not snapshot_id:
+        raise ValueError("datasetSnapshot must include a non-empty snapshotId.")
+    if snapshot_id != Path(snapshot_id).name:
+        raise ValueError("datasetSnapshot snapshotId must be a single path segment.")
+
+    closes = bundle.get("closes")
+    volumes = bundle.get("volumes")
+    if not isinstance(closes, pd.DataFrame):
+        raise ValueError("bundle must include a closes DataFrame.")
+    if not isinstance(volumes, pd.DataFrame):
+        raise ValueError("bundle must include a volumes DataFrame.")
+
+    snapshot_path = Path(storage_dir) / snapshot_id
+    snapshot_path.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        "closes": "closes.csv",
+        "volumes": "volumes.csv",
+    }
+    closes.to_csv(snapshot_path / files["closes"], index_label="date")
+    volumes.to_csv(snapshot_path / files["volumes"], index_label="date")
+
+    manifest = {
+        "schemaVersion": 1,
+        "datasetSnapshot": snapshot,
+        "files": files,
+    }
+    with (snapshot_path / "manifest.json").open("w", encoding="utf-8") as manifest_file:
+        json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+        manifest_file.write("\n")
+
+    return snapshot_path
 
 
 def build_dataset_snapshot_fingerprint(snapshot: dict[str, object]) -> str:

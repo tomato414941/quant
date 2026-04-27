@@ -415,6 +415,12 @@ def test_compare_portfolio_runs_adds_allocation_fallback_only_to_decision_trace(
     ]
     assert decision_events
     assert all(event["allocationFallback"] == fallback_metadata for event in decision_events)
+    assert run_with_metadata["allocationFallbackCount"] == len(decision_events)
+    assert run_with_metadata["allocationFallbackRate"] == 1.0
+    assert run_with_metadata["diagnosticEventCount"] == 0
+    assert run_with_metadata["availabilityWarningCount"] == 0
+    assert run_without_metadata["allocationFallbackCount"] == 0
+    assert run_without_metadata["allocationFallbackRate"] == 0.0
     assert all("allocationFallback" not in event for event in run_with_metadata["decisionEvents"])
     assert all(
         "allocationFallback" not in event

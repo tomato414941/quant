@@ -275,6 +275,10 @@ def test_predictor_compact_record_reads_evaluation_subject(tmp_path: Path) -> No
     assert records[0]["predictorKey"] == "predictor-alpha"
     assert records[0]["evaluationSubjectFingerprint"] == run_spec["fingerprints"]["evaluationSubject"]
     assert records[0]["strategyDefinitionFingerprint"] == run_spec["fingerprints"]["strategyDefinition"]
+    assert records[0]["allocationFallbackCount"] == 0
+    assert records[0]["allocationFallbackRate"] == 0.0
+    assert records[0]["diagnosticEventCount"] == 0
+    assert records[0]["availabilityWarningCount"] == 0
     assert "strategy" not in store.list_records(run_kind="predictor_run")[0]["runSpec"]
 
 
@@ -296,6 +300,80 @@ def test_run_store_lists_compact_records_from_index_only(tmp_path: Path) -> None
     assert len(compact_records) == 1
     assert compact_records[0]["strategyLabel"] == "gamma"
     assert compact_records[0]["sharpeRatio"] == 3.0
+    assert compact_records[0]["allocationFallbackCount"] == 0
+    assert compact_records[0]["allocationFallbackRate"] == 0.0
+    assert compact_records[0]["diagnosticEventCount"] == 0
+    assert compact_records[0]["availabilityWarningCount"] == 0
+
+
+def test_run_store_compact_record_includes_diagnostic_metrics(tmp_path: Path) -> None:
+    store = FileRunResultStore(tmp_path)
+    run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="diagnostic",
+        fingerprint_seed="diagnostic",
+    )
+    run_spec["evaluation"]["availabilityDiagnostics"] = {"warningCount": 3}
+    run_spec["evaluation"]["diagnosticEvents"] = [
+        {"kind": "requested_asset_unavailable", "category": "availability"},
+        {"kind": "mixed_market_calendar", "category": "calendar"},
+    ]
+    store.save(
+        run_spec,
+        {
+            "summary": {"sharpeRatio": 3.0, "totalReturnPct": 12.0, "maxDrawdownPct": 4.0},
+            "executionTrace": [
+                {"eventType": "decision", "allocationFallback": {"fallback": "equal_weight"}},
+                {"eventType": "rebalance"},
+                {"eventType": "decision"},
+            ],
+        },
+    )
+
+    compact_records = store.list_compact_records(run_kind="strategy_run")
+
+    assert len(compact_records) == 1
+    assert compact_records[0]["allocationFallbackCount"] == 1
+    assert compact_records[0]["allocationFallbackRate"] == 0.5
+    assert compact_records[0]["diagnosticEventCount"] == 2
+    assert compact_records[0]["availabilityWarningCount"] == 3
+
+
+def test_run_store_backfills_diagnostic_metrics_for_existing_compact_index(tmp_path: Path) -> None:
+    store = FileRunResultStore(tmp_path)
+    run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="legacy-index",
+        fingerprint_seed="legacy-index",
+    )
+    store.save(
+        run_spec,
+        {
+            "summary": {"sharpeRatio": 3.0},
+            "executionTrace": [
+                {"eventType": "decision", "allocationFallback": {"fallback": "equal_weight"}},
+                {"eventType": "decision"},
+            ],
+        },
+    )
+    index_path = tmp_path / RUN_STORE_INDEX_FILENAME
+    index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    compact_record = index_payload["entries"][0]["genericCompactRecord"]
+    for key in (
+        "allocationFallbackCount",
+        "allocationFallbackRate",
+        "diagnosticEventCount",
+        "availabilityWarningCount",
+    ):
+        compact_record.pop(key)
+    index_path.write_text(json.dumps(index_payload), encoding="utf-8")
+
+    compact_records = store.list_compact_records(run_kind="strategy_run")
+
+    assert compact_records[0]["allocationFallbackCount"] == 1
+    assert compact_records[0]["allocationFallbackRate"] == 0.5
+    assert compact_records[0]["diagnosticEventCount"] == 0
+    assert compact_records[0]["availabilityWarningCount"] == 0
 
 
 def test_run_store_rebuild_index_returns_entry_count(tmp_path: Path) -> None:

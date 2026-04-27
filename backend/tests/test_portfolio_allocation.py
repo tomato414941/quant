@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 
@@ -7,6 +9,7 @@ from app.portfolio_allocation import (
     build_equal_weight_fallback,
     expand_weights,
     fit_portfolio_model,
+    fit_portfolio_model_result,
 )
 from app.portfolio_domain import build_portfolio_model_spec
 
@@ -101,3 +104,62 @@ def test_fit_mean_risk_utility_falls_back_to_equal_weight() -> None:
     )
 
     np.testing.assert_allclose(weights, np.asarray([1 / 3, 1 / 3, 1 / 3]))
+
+
+def test_fit_portfolio_model_result_reports_uncalibrated_forecast_fallback_metadata() -> None:
+    returns = pd.DataFrame(
+        {
+            "A": [0.01, 0.02, -0.01],
+            "B": [0.02, 0.01, 0.00],
+            "C": [0.00, 0.01, 0.02],
+        }
+    )
+
+    result = fit_portfolio_model_result(
+        PortfolioAllocationInput(
+            returns=returns,
+            portfolio_model=build_portfolio_model_spec("mean_risk_utility"),
+            max_investment_ratio=1.0,
+            max_weight=None,
+            previous_weights=None,
+            transaction_cost=0.0,
+        )
+    )
+
+    np.testing.assert_allclose(result.weights, np.asarray([1 / 3, 1 / 3, 1 / 3]))
+    assert result.fallback_metadata == {
+        "modelType": "mean_risk_utility",
+        "reason": "uncalibrated_forecast",
+        "fallback": "equal_weight",
+    }
+
+
+def test_fit_portfolio_model_result_reports_optimizer_exception_fallback_metadata() -> None:
+    returns = pd.DataFrame(
+        {
+            "A": [0.01, 0.02, -0.01, 0.01],
+            "B": [0.02, 0.01, 0.00, -0.01],
+            "C": [0.00, 0.01, 0.02, 0.01],
+        }
+    )
+
+    with patch("app.portfolio_allocation.RiskBudgeting.fit", side_effect=RuntimeError("boom")):
+        result = fit_portfolio_model_result(
+            PortfolioAllocationInput(
+                returns=returns,
+                portfolio_model=build_portfolio_model_spec("risk_budgeting"),
+                max_investment_ratio=1.0,
+                max_weight=None,
+                previous_weights=None,
+                transaction_cost=0.0,
+            )
+        )
+
+    np.testing.assert_allclose(result.weights, np.asarray([1 / 3, 1 / 3, 1 / 3]))
+    assert result.fallback_metadata == {
+        "modelType": "risk_budgeting",
+        "reason": "optimizer_exception",
+        "fallback": "equal_weight",
+        "exceptionType": "RuntimeError",
+        "message": "boom",
+    }

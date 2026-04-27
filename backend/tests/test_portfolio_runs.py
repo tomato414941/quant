@@ -71,6 +71,7 @@ from app.portfolio import (
     select_assets,
     should_rebalance,
 )
+from app.portfolio_runs import compare_portfolio_runs as compare_portfolio_runs_with_dynamic_allocation
 from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
@@ -345,6 +346,81 @@ def test_compare_portfolio_runs_does_not_apply_test_initial_weights_to_train() -
 
     assert run["splitAnalysis"]["train"]["portfolio"]["totalReturnPct"] == 0.0
     assert run["summary"] == run["splitAnalysis"]["test"]["portfolio"]
+
+
+def test_compare_portfolio_runs_adds_allocation_fallback_only_to_decision_trace() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100, 101, 102, 103, 104, 105, 106],
+            "BBB": [100, 100, 101, 101, 102, 102, 103],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="allocation_fallback_trace_universe",
+            label="Allocation fallback trace universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        execution_policy=build_execution_policy_spec(
+            key="every_bar",
+            label="Every bar",
+            entry="train_once_then_periodic_rebalance",
+            rebalance_schedule="every_bar",
+        ),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+        extensions={"decision_policy": "direct_score_to_weight"},
+    )
+    fallback_metadata = {
+        "modelType": "risk_budgeting",
+        "reason": "optimizer_exception",
+        "fallback": "equal_weight",
+        "exceptionType": "RuntimeError",
+        "message": "boom",
+    }
+
+    def allocate_without_metadata(**kwargs):
+        return ["AAA", "BBB"], np.asarray([0.5, 0.5], dtype="float64")
+
+    def allocate_with_metadata(**kwargs):
+        return ["AAA", "BBB"], np.asarray([0.5, 0.5], dtype="float64"), fallback_metadata
+
+    run_without_metadata = compare_portfolio_runs_with_dynamic_allocation(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        dynamic_allocation_fn=allocate_without_metadata,
+    )[0]
+    run_with_metadata = compare_portfolio_runs_with_dynamic_allocation(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        dynamic_allocation_fn=allocate_with_metadata,
+    )[0]
+
+    assert run_with_metadata["weights"] == run_without_metadata["weights"]
+    assert run_with_metadata["selectedAssets"] == run_without_metadata["selectedAssets"]
+    assert run_with_metadata["summary"] == run_without_metadata["summary"]
+    assert run_with_metadata["series"] == run_without_metadata["series"]
+    decision_events = [
+        event for event in run_with_metadata["executionTrace"] if event["eventType"] == "decision"
+    ]
+    assert decision_events
+    assert all(event["allocationFallback"] == fallback_metadata for event in decision_events)
+    assert all("allocationFallback" not in event for event in run_with_metadata["decisionEvents"])
+    assert all(
+        "allocationFallback" not in event
+        for event in run_without_metadata["executionTrace"]
+        if event["eventType"] == "decision"
+    )
 
 
 def test_compare_portfolio_runs_returns_strategy_combinations() -> None:

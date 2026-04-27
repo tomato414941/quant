@@ -36,11 +36,31 @@ from app.portfolio_selection import (
 from app.portfolio_state import resolve_initial_weights
 
 
-def compute_dynamic_portfolio_allocation(**kwargs) -> tuple[list[str], np.ndarray]:
+AllocationReturn = tuple[list[str], np.ndarray] | tuple[list[str], np.ndarray, dict[str, object]]
+
+
+def compute_dynamic_portfolio_allocation(**kwargs) -> AllocationReturn:
     return _compute_dynamic_portfolio_allocation(
         **kwargs,
         allocation_fn=compute_portfolio_allocation,
     )
+
+
+def unpack_allocation_result(result: AllocationReturn) -> tuple[list[str], np.ndarray, dict[str, object] | None]:
+    if len(result) == 2:
+        selected_assets, weights = result
+        return selected_assets, weights, None
+    selected_assets, weights, metadata = result
+    return selected_assets, weights, metadata
+
+
+def append_allocation_fallback(
+    event: dict[str, object],
+    metadata: dict[str, object] | None,
+) -> dict[str, object]:
+    if metadata is not None:
+        event["allocationFallback"] = dict(metadata)
+    return event
 
 
 def compare_portfolio_runs(
@@ -57,7 +77,7 @@ def compare_portfolio_runs(
     predictor_panels_by_strategy: dict[str, pd.DataFrame] | None = None,
     strategy_signal_execution_contexts_by_key: dict[str, tuple[list[dict[str, object]], dict[str, object] | None]] | None = None,
     availability_policy: dict[str, object] | None = None,
-    dynamic_allocation_fn: Callable[..., tuple[list[str], np.ndarray]] | None = None,
+    dynamic_allocation_fn: Callable[..., AllocationReturn] | None = None,
 ) -> list[dict]:
     if not strategies:
         raise ValueError("At least one strategy is required.")
@@ -131,22 +151,24 @@ def compare_portfolio_runs(
 
         portfolio_model = strategy.portfolio_model
         risk_controls = strategy.risk_controls
-        initial_selected_assets, initial_weights = dynamic_allocation_fn(
-            history_returns=train_returns,
-            volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
-            strategy=strategy,
-            portfolio_model=portfolio_model,
-            bars_per_year=bars_per_year,
-            universe_columns=returns.columns,
-            max_investment_ratio=risk_controls.max_investment_ratio,
-            max_weight=risk_controls.max_weight,
-            previous_weights=initial_portfolio_weights,
-            transaction_cost=default_transaction_cost,
-            current_date=str(returns.index[split_index]) if split_index < len(returns.index) else None,
-            predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
-            selection_contexts=selection_contexts,
-            predictor_context=predictor_context,
-            availability_policy=availability_policy,
+        initial_selected_assets, initial_weights, initial_allocation_fallback = unpack_allocation_result(
+            dynamic_allocation_fn(
+                history_returns=train_returns,
+                volume_history=strategy_volumes.loc[train_returns.index] if strategy_volumes is not None else None,
+                strategy=strategy,
+                portfolio_model=portfolio_model,
+                bars_per_year=bars_per_year,
+                universe_columns=returns.columns,
+                max_investment_ratio=risk_controls.max_investment_ratio,
+                max_weight=risk_controls.max_weight,
+                previous_weights=initial_portfolio_weights,
+                transaction_cost=default_transaction_cost,
+                current_date=str(returns.index[split_index]) if split_index < len(returns.index) else None,
+                predictor_panel=None if predictor_panels_by_strategy is None else predictor_panels_by_strategy.get(strategy.key),
+                selection_contexts=selection_contexts,
+                predictor_context=predictor_context,
+                availability_policy=availability_policy,
+            )
         )
         backtest = run_portfolio_backtest(
             closes=strategy_closes,
@@ -160,6 +182,7 @@ def compare_portfolio_runs(
             warmup_weights=initial_portfolio_weights,
             initial_weights=initial_weights,
             initial_selected_assets=initial_selected_assets,
+            initial_allocation_fallback=initial_allocation_fallback,
             max_investment_ratio=risk_controls.max_investment_ratio,
             initial_capital=initial_capital,
             transaction_cost=default_transaction_cost,
@@ -217,7 +240,7 @@ def evaluate_strategy_run(
     predictor_panel: pd.DataFrame | None = None,
     signal_execution_contexts: tuple[list[dict[str, object]], dict[str, object] | None] | None = None,
     availability_policy: dict[str, object] | None = None,
-    dynamic_allocation_fn: Callable[..., tuple[list[str], np.ndarray]] | None = None,
+    dynamic_allocation_fn: Callable[..., AllocationReturn] | None = None,
 ) -> dict:
     return compare_portfolio_runs(
         closes=closes,
@@ -254,7 +277,7 @@ def evaluate_strategy_definition_run(
     portfolio_state: PortfolioState | None = None,
     predictor_panel: pd.DataFrame | None = None,
     availability_policy: dict[str, object] | None = None,
-    dynamic_allocation_fn: Callable[..., tuple[list[str], np.ndarray]] | None = None,
+    dynamic_allocation_fn: Callable[..., AllocationReturn] | None = None,
 ) -> dict:
     try:
         strategy = build_executable_evaluator_strategy_spec_from_definition(strategy_definition)
@@ -293,7 +316,7 @@ def compare_portfolio_models(
     transaction_cost: float,
     bars_per_year: float = 252.0,
     portfolio_state: PortfolioState | None = None,
-    dynamic_allocation_fn: Callable[..., tuple[list[str], np.ndarray]] | None = None,
+    dynamic_allocation_fn: Callable[..., AllocationReturn] | None = None,
 ) -> list[dict]:
     return compare_portfolio_runs(
         closes=closes,
@@ -352,6 +375,7 @@ def run_portfolio_backtest(
     warmup_weights: np.ndarray,
     initial_weights: np.ndarray,
     initial_selected_assets: list[str],
+    initial_allocation_fallback: dict[str, object] | None,
     max_investment_ratio: float,
     initial_capital: float,
     transaction_cost: float,
@@ -366,7 +390,7 @@ def run_portfolio_backtest(
     selection_contexts: list[dict[str, object]] | None = None,
     predictor_context: dict[str, object] | None = None,
     availability_policy: dict[str, object] | None = None,
-    dynamic_allocation_fn: Callable[..., tuple[list[str], np.ndarray]] | None = None,
+    dynamic_allocation_fn: Callable[..., AllocationReturn] | None = None,
 ) -> dict:
     if availability_policy is None:
         availability_policy = build_default_availability_policy()
@@ -476,24 +500,27 @@ def run_portfolio_backtest(
                 )
             )
             execution_trace.append(
-                serialize_execution_trace_event(
-                    date=str(date),
-                    event_type="decision",
-                    phase=phase,
-                    universe_columns=returns.columns,
-                    max_investment_ratio=max_investment_ratio,
-                    available_asset_count=len(available_assets),
-                    eligible_asset_count=len(eligible_assets),
-                    selected_assets=split_decision.selected_assets,
-                    target_weights=initial_weights,
-                    executed_weights=current_weights,
-                    decision_action=split_decision.action,
-                    decision_reason=split_decision.reason,
-                    turnover_pct=split_decision.turnover * 100,
-                    estimated_cost_pct=split_decision.estimated_cost_pct,
-                    estimated_edge_pct=split_decision.estimated_edge_pct,
-                    edge_source=split_decision.edge_source,
-                    average_confidence=split_decision.average_confidence,
+                append_allocation_fallback(
+                    serialize_execution_trace_event(
+                        date=str(date),
+                        event_type="decision",
+                        phase=phase,
+                        universe_columns=returns.columns,
+                        max_investment_ratio=max_investment_ratio,
+                        available_asset_count=len(available_assets),
+                        eligible_asset_count=len(eligible_assets),
+                        selected_assets=split_decision.selected_assets,
+                        target_weights=initial_weights,
+                        executed_weights=current_weights,
+                        decision_action=split_decision.action,
+                        decision_reason=split_decision.reason,
+                        turnover_pct=split_decision.turnover * 100,
+                        estimated_cost_pct=split_decision.estimated_cost_pct,
+                        estimated_edge_pct=split_decision.estimated_edge_pct,
+                        edge_source=split_decision.edge_source,
+                        average_confidence=split_decision.average_confidence,
+                    ),
+                    initial_allocation_fallback,
                 )
             )
             next_rebalance_weights = split_decision.weights.copy()
@@ -584,22 +611,24 @@ def run_portfolio_backtest(
             current_date=date,
             rebalance_schedule=decision_schedule,
         ):
-            target_selected_assets, target_weights = dynamic_allocation_fn(
-                history_returns=returns.iloc[: index + 1],
-                volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
-                strategy=strategy,
-                portfolio_model=portfolio_model,
-                bars_per_year=bars_per_year,
-                universe_columns=returns.columns,
-                max_investment_ratio=max_investment_ratio,
-                max_weight=max_weight,
-                previous_weights=current_weights,
-                transaction_cost=transaction_cost,
-                current_date=str(date),
-                predictor_panel=predictor_panel,
-                selection_contexts=selection_contexts,
-                predictor_context=predictor_context,
-                availability_policy=availability_policy,
+            target_selected_assets, target_weights, allocation_fallback = unpack_allocation_result(
+                dynamic_allocation_fn(
+                    history_returns=returns.iloc[: index + 1],
+                    volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
+                    strategy=strategy,
+                    portfolio_model=portfolio_model,
+                    bars_per_year=bars_per_year,
+                    universe_columns=returns.columns,
+                    max_investment_ratio=max_investment_ratio,
+                    max_weight=max_weight,
+                    previous_weights=current_weights,
+                    transaction_cost=transaction_cost,
+                    current_date=str(date),
+                    predictor_panel=predictor_panel,
+                    selection_contexts=selection_contexts,
+                    predictor_context=predictor_context,
+                    availability_policy=availability_policy,
+                )
             )
             portfolio_decision = build_portfolio_decision(
                 history_returns=returns.iloc[: index + 1],
@@ -629,24 +658,27 @@ def run_portfolio_backtest(
                 )
             )
             execution_trace.append(
-                serialize_execution_trace_event(
-                    date=str(date),
-                    event_type="decision",
-                    phase=phase,
-                    universe_columns=returns.columns,
-                    max_investment_ratio=max_investment_ratio,
-                    available_asset_count=len(available_assets),
-                    eligible_asset_count=len(eligible_assets),
-                    selected_assets=portfolio_decision.selected_assets,
-                    target_weights=target_weights,
-                    executed_weights=current_weights,
-                    decision_action=portfolio_decision.action,
-                    decision_reason=portfolio_decision.reason,
-                    turnover_pct=portfolio_decision.turnover * 100,
-                    estimated_cost_pct=portfolio_decision.estimated_cost_pct,
-                    estimated_edge_pct=portfolio_decision.estimated_edge_pct,
-                    edge_source=portfolio_decision.edge_source,
-                    average_confidence=portfolio_decision.average_confidence,
+                append_allocation_fallback(
+                    serialize_execution_trace_event(
+                        date=str(date),
+                        event_type="decision",
+                        phase=phase,
+                        universe_columns=returns.columns,
+                        max_investment_ratio=max_investment_ratio,
+                        available_asset_count=len(available_assets),
+                        eligible_asset_count=len(eligible_assets),
+                        selected_assets=portfolio_decision.selected_assets,
+                        target_weights=target_weights,
+                        executed_weights=current_weights,
+                        decision_action=portfolio_decision.action,
+                        decision_reason=portfolio_decision.reason,
+                        turnover_pct=portfolio_decision.turnover * 100,
+                        estimated_cost_pct=portfolio_decision.estimated_cost_pct,
+                        estimated_edge_pct=portfolio_decision.estimated_edge_pct,
+                        edge_source=portfolio_decision.edge_source,
+                        average_confidence=portfolio_decision.average_confidence,
+                    ),
+                    allocation_fallback,
                 )
             )
             pending_decision_selected_assets = list(portfolio_decision.selected_assets)

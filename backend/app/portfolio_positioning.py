@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from app.portfolio_allocation import PortfolioAllocationInput, expand_weights, fit_portfolio_model
+from app.portfolio_allocation import PortfolioAllocationInput, expand_weights, fit_portfolio_model_result
 from app.portfolio_domain import *
 from app.portfolio_forecast import build_strategy_forecast_snapshot
 from app.portfolio_selection import (
@@ -30,7 +30,7 @@ def compute_portfolio_allocation(
     predictor_panel: pd.DataFrame | None,
     selection_contexts: list[dict[str, object]] | None = None,
     predictor_context: dict[str, object] | None = None,
-) -> tuple[list[str], np.ndarray]:
+) -> tuple[list[str], np.ndarray] | tuple[list[str], np.ndarray, dict[str, object]]:
     signal_returns, signal_volumes, signal_bars_per_year = prepare_strategy_signal_data(
         history_returns=history_returns,
         volume_history=volume_history,
@@ -65,7 +65,7 @@ def compute_portfolio_allocation(
         strategy=strategy,
         predictor_context=predictor_context,
     )
-    weights = fit_portfolio_model(
+    allocation_result = fit_portfolio_model_result(
         PortfolioAllocationInput(
             returns=strategy_returns,
             portfolio_model=portfolio_model,
@@ -74,7 +74,8 @@ def compute_portfolio_allocation(
             previous_weights=selected_previous_weights,
             transaction_cost=transaction_cost,
         )
-    ) * max_investment_ratio
+    )
+    weights = allocation_result.weights * max_investment_ratio
     if portfolio_model.model_type != "mean_risk_utility":
         weights = apply_strategy_weight_tilt(
             weights=weights,
@@ -93,6 +94,8 @@ def compute_portfolio_allocation(
         selected_columns=strategy_returns.columns,
         selected_weights=weights,
     )
+    if allocation_result.fallback_metadata is not None:
+        return selected_assets, expanded_weights, allocation_result.fallback_metadata
     return selected_assets, expanded_weights
 
 

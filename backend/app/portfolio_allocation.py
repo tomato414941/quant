@@ -27,6 +27,12 @@ class ForecastAllocationInput:
     transaction_cost: float
 
 
+@dataclass(frozen=True)
+class PortfolioAllocationResult:
+    weights: np.ndarray
+    fallback_metadata: dict[str, object] | None = None
+
+
 def expand_weights(
     universe_columns: pd.Index,
     selected_columns: pd.Index,
@@ -40,10 +46,18 @@ def expand_weights(
 
 
 def fit_portfolio_model(allocation_input: PortfolioAllocationInput) -> np.ndarray:
-    return fit_risk_structure_portfolio_model(allocation_input)
+    return fit_portfolio_model_result(allocation_input).weights
+
+
+def fit_portfolio_model_result(allocation_input: PortfolioAllocationInput) -> PortfolioAllocationResult:
+    return fit_risk_structure_portfolio_model_result(allocation_input)
 
 
 def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInput) -> np.ndarray:
+    return fit_risk_structure_portfolio_model_result(allocation_input).weights
+
+
+def fit_risk_structure_portfolio_model_result(allocation_input: PortfolioAllocationInput) -> PortfolioAllocationResult:
     returns = allocation_input.returns
     portfolio_model = allocation_input.portfolio_model
     asset_count = len(returns.columns)
@@ -56,6 +70,7 @@ def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInpu
 
     if portfolio_model.model_type == "equal_weight":
         weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+        fallback_metadata = None
     elif portfolio_model.model_type == "risk_budgeting":
         try:
             estimator = RiskBudgeting(
@@ -65,8 +80,14 @@ def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInpu
             )
             estimator.fit(returns)
             weights = estimator.weights_
-        except Exception:
+            fallback_metadata = None
+        except Exception as exc:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+            fallback_metadata = build_allocation_fallback_metadata(
+                portfolio_model.model_type,
+                "optimizer_exception",
+                exc,
+            )
     elif portfolio_model.model_type == "minimum_variance":
         try:
             estimator = MeanRisk(
@@ -76,8 +97,14 @@ def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInpu
             )
             estimator.fit(returns)
             weights = estimator.weights_
-        except Exception:
+            fallback_metadata = None
+        except Exception as exc:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+            fallback_metadata = build_allocation_fallback_metadata(
+                portfolio_model.model_type,
+                "optimizer_exception",
+                exc,
+            )
     elif portfolio_model.model_type == "hierarchical_risk_parity":
         if asset_count <= 2:
             try:
@@ -88,8 +115,14 @@ def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInpu
                 )
                 estimator.fit(returns)
                 weights = estimator.weights_
-            except Exception:
+                fallback_metadata = None
+            except Exception as exc:
                 weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+                fallback_metadata = build_allocation_fallback_metadata(
+                    portfolio_model.model_type,
+                    "optimizer_exception",
+                    exc,
+                )
         else:
             try:
                 estimator = HierarchicalRiskParity(
@@ -99,10 +132,20 @@ def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInpu
                 )
                 estimator.fit(returns)
                 weights = estimator.weights_
-            except Exception:
+                fallback_metadata = None
+            except Exception as exc:
                 weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+                fallback_metadata = build_allocation_fallback_metadata(
+                    portfolio_model.model_type,
+                    "optimizer_exception",
+                    exc,
+                )
     elif portfolio_model.model_type in {"mean_risk_utility", "mean_risk_utility_conservative"}:
         weights = build_uncalibrated_forecast_allocator_fallback(asset_count, raw_max_weight)
+        fallback_metadata = build_allocation_fallback_metadata(
+            portfolio_model.model_type,
+            "uncalibrated_forecast",
+        )
     else:
         raise ValueError("Unsupported portfolio model.")
 
@@ -111,8 +154,8 @@ def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInpu
     if weight_sum <= 0:
         raise ValueError("Portfolio model returned invalid weights.")
     if raw_max_weight is not None and weight_sum < 0.999999:
-        return weights
-    return weights / weight_sum
+        return PortfolioAllocationResult(weights=weights, fallback_metadata=fallback_metadata)
+    return PortfolioAllocationResult(weights=weights / weight_sum, fallback_metadata=fallback_metadata)
 
 
 def build_equal_weight_fallback(asset_count: int, raw_max_weight: float | None) -> np.ndarray:
@@ -124,3 +167,19 @@ def build_equal_weight_fallback(asset_count: int, raw_max_weight: float | None) 
 
 def build_uncalibrated_forecast_allocator_fallback(asset_count: int, raw_max_weight: float | None) -> np.ndarray:
     return build_equal_weight_fallback(asset_count, raw_max_weight)
+
+
+def build_allocation_fallback_metadata(
+    model_type: str,
+    reason: str,
+    exception: Exception | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "modelType": model_type,
+        "reason": reason,
+        "fallback": "equal_weight",
+    }
+    if exception is not None:
+        metadata["exceptionType"] = type(exception).__name__
+        metadata["message"] = str(exception)
+    return metadata

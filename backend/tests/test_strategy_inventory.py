@@ -57,11 +57,22 @@ def test_representative_strategy_inventory_entries_are_active(strategy_id: str) 
 def test_generated_strategy_inventory_entries_default_to_backlog_low_priority() -> None:
     entries_by_id = {entry.strategy_id: entry for entry in build_strategy_inventory_entries()}
 
-    entry = entries_by_id["stg-fu-rb"]
+    entry = entries_by_id["stg-fu-momo12-lin025-hrp"]
 
     assert entry.status == "backlog"
     assert entry.priority == "low"
     assert entry.notes.startswith("Generated backlog entry.")
+
+
+@pytest.mark.parametrize("strategy_id", ["stg-fu-rb", "stg-fu-minvar"])
+def test_no_signal_reference_candidates_are_active(strategy_id: str) -> None:
+    entries_by_id = {entry.strategy_id: entry for entry in build_strategy_inventory_entries()}
+
+    entry = entries_by_id[strategy_id]
+
+    assert entry.status == "active"
+    assert entry.family == "baseline"
+    assert entry.role == "reference_candidate"
 
 
 def test_strategy_inventory_payload_filters_entries() -> None:

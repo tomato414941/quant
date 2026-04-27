@@ -427,14 +427,22 @@ def run_portfolio_backtest(
         trade_turnover = 0.0
         trade_cost = 0.0
         phase = "train" if index < split_index else "test"
+        history_before_current = returns.iloc[:index]
         history_through_current = returns.iloc[: index + 1]
-        available_assets = resolve_available_assets(history_through_current)
-        eligible_assets = resolve_eligible_assets(history_through_current, availability_policy)
-        eligible_asset_set = set(eligible_assets)
-        newly_eligible_assets = sorted(eligible_asset_set - previous_eligible_assets)
-        removed_assets = sorted(previous_eligible_assets - eligible_asset_set)
+        if history_before_current.empty:
+            execution_available_assets = [str(asset) for asset in returns.columns]
+            execution_eligible_assets = [str(asset) for asset in returns.columns]
+        else:
+            execution_available_assets = resolve_available_assets(history_before_current)
+            execution_eligible_assets = resolve_eligible_assets(history_before_current, availability_policy)
+        observed_available_assets = resolve_available_assets(history_through_current)
+        observed_eligible_assets = resolve_eligible_assets(history_through_current, availability_policy)
+        execution_eligible_asset_set = set(execution_eligible_assets)
+        observed_eligible_asset_set = set(observed_eligible_assets)
+        newly_eligible_assets = sorted(observed_eligible_asset_set - previous_eligible_assets)
+        removed_assets = sorted(previous_eligible_assets - observed_eligible_asset_set)
 
-        tradable_weights = zero_weights_outside_assets(current_weights, returns.columns, eligible_assets)
+        tradable_weights = zero_weights_outside_assets(current_weights, returns.columns, execution_eligible_assets)
         forced_weight_delta = np.abs(tradable_weights - current_weights)
         if forced_weight_delta.sum() > 0:
             forced_turnover = float(forced_weight_delta.sum())
@@ -451,7 +459,7 @@ def run_portfolio_backtest(
             )
             trade_cost += forced_trade_cost
             current_weights = tradable_weights
-            current_selected_assets = [asset for asset in current_selected_assets if asset in eligible_asset_set]
+            current_selected_assets = [asset for asset in current_selected_assets if asset in execution_eligible_asset_set]
             execution_trace.append(
                 serialize_execution_trace_event(
                     date=str(date),
@@ -459,8 +467,8 @@ def run_portfolio_backtest(
                     phase=phase,
                     universe_columns=returns.columns,
                     max_investment_ratio=max_investment_ratio,
-                    available_asset_count=len(available_assets),
-                    eligible_asset_count=len(eligible_assets),
+                    available_asset_count=len(execution_available_assets),
+                    eligible_asset_count=len(execution_eligible_assets),
                     selected_assets=current_selected_assets,
                     target_weights=tradable_weights,
                     executed_weights=current_weights,
@@ -477,6 +485,16 @@ def run_portfolio_backtest(
         if index == split_index:
             split_history_returns = returns.iloc[:index]
             split_history_volumes = volumes.iloc[:index] if volumes is not None else None
+            split_estimated_trade_cost = compute_trade_cost(
+                weight_delta=np.abs(initial_weights - current_weights),
+                linear_cost_rates=asset_transaction_costs,
+                impact_cost_rates=asset_impact_costs,
+                portfolio_equity=portfolio_equity,
+                price_snapshot=closes.iloc[max(index - 1, 0)],
+                volume_history=split_history_volumes,
+                adv_window_bars=adv_window_bars,
+                min_adv_notional=min_adv_notional,
+            )
             split_decision = build_portfolio_decision(
                 history_returns=split_history_returns,
                 volume_history=split_history_volumes,
@@ -493,6 +511,7 @@ def run_portfolio_backtest(
                 selection_contexts=selection_contexts,
                 predictor_context=predictor_context,
                 availability_policy=availability_policy,
+                estimated_trade_cost=split_estimated_trade_cost,
             )
             decision_events.append(
                 serialize_portfolio_decision_event(
@@ -512,8 +531,8 @@ def run_portfolio_backtest(
                         phase=phase,
                         universe_columns=returns.columns,
                         max_investment_ratio=max_investment_ratio,
-                        available_asset_count=len(available_assets),
-                        eligible_asset_count=len(eligible_assets),
+                        available_asset_count=len(execution_available_assets),
+                        eligible_asset_count=len(execution_eligible_assets),
                         selected_assets=split_decision.selected_assets,
                         target_weights=initial_weights,
                         executed_weights=current_weights,
@@ -535,9 +554,13 @@ def run_portfolio_backtest(
             rebalanced_weights = zero_weights_outside_assets(
                 next_rebalance_weights,
                 returns.columns,
-                eligible_assets,
+                execution_eligible_assets,
             )
-            selected_assets = [asset for asset in (next_rebalance_selected_assets or []) if asset in eligible_asset_set]
+            selected_assets = [
+                asset
+                for asset in (next_rebalance_selected_assets or [])
+                if asset in execution_eligible_asset_set
+            ]
             weight_delta = np.abs(rebalanced_weights - current_weights)
             rebalance_turnover = float(weight_delta.sum())
             trade_turnover += rebalance_turnover
@@ -563,8 +586,8 @@ def run_portfolio_backtest(
                     phase=phase,
                     universe_columns=returns.columns,
                     max_investment_ratio=max_investment_ratio,
-                    available_asset_count=len(available_assets),
-                    eligible_asset_count=len(eligible_assets),
+                    available_asset_count=len(execution_available_assets),
+                    eligible_asset_count=len(execution_eligible_assets),
                     selected_assets=current_selected_assets,
                     target_weights=next_rebalance_weights,
                     executed_weights=current_weights,
@@ -599,13 +622,13 @@ def run_portfolio_backtest(
                 "date": str(date),
                 "portfolioEquity": round(portfolio_equity, 2),
                 "portfolioReturnPct": round(portfolio_return * 100, 2),
-                "availableAssetCount": len(available_assets),
-                "eligibleAssetCount": len(eligible_assets),
+                "availableAssetCount": len(observed_available_assets),
+                "eligibleAssetCount": len(observed_eligible_assets),
                 "newlyEligibleAssets": newly_eligible_assets,
                 "removedAssets": removed_assets,
             }
         )
-        previous_eligible_assets = eligible_asset_set
+        previous_eligible_assets = observed_eligible_asset_set
 
         if index <= split_index or index >= len(returns) - 1:
             continue
@@ -651,6 +674,16 @@ def run_portfolio_backtest(
                 selection_contexts=selection_contexts,
                 predictor_context=predictor_context,
                 availability_policy=availability_policy,
+                estimated_trade_cost=compute_trade_cost(
+                    weight_delta=np.abs(target_weights - current_weights),
+                    linear_cost_rates=asset_transaction_costs,
+                    impact_cost_rates=asset_impact_costs,
+                    portfolio_equity=portfolio_equity,
+                    price_snapshot=closes.iloc[index],
+                    volume_history=volumes.iloc[: index + 1] if volumes is not None else None,
+                    adv_window_bars=adv_window_bars,
+                    min_adv_notional=min_adv_notional,
+                ),
             )
             decision_events.append(
                 serialize_portfolio_decision_event(
@@ -670,8 +703,8 @@ def run_portfolio_backtest(
                         phase=phase,
                         universe_columns=returns.columns,
                         max_investment_ratio=max_investment_ratio,
-                        available_asset_count=len(available_assets),
-                        eligible_asset_count=len(eligible_assets),
+                        available_asset_count=len(observed_available_assets),
+                        eligible_asset_count=len(observed_eligible_assets),
                         selected_assets=portfolio_decision.selected_assets,
                         target_weights=target_weights,
                         executed_weights=current_weights,

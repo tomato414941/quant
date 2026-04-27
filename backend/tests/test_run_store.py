@@ -339,6 +339,27 @@ def test_run_store_compact_record_includes_diagnostic_metrics(tmp_path: Path) ->
     assert compact_records[0]["availabilityWarningCount"] == 3
 
 
+def test_run_store_compact_record_includes_market_data_snapshot_ids(tmp_path: Path) -> None:
+    store = FileRunResultStore(tmp_path)
+    run_spec = make_run_spec(
+        run_kind="strategy_run",
+        strategy_label="snapshot",
+        fingerprint_seed="snapshot",
+    )
+    run_spec["evaluation"]["marketDataContexts"] = [
+        {"timeframe": "1d", "datasetSnapshot": {"snapshotId": "snapshot-alpha"}},
+        {"timeframe": "1wk", "datasetSnapshot": {"snapshotId": "snapshot-beta"}},
+        {"timeframe": "1d", "datasetSnapshot": {"snapshotId": "snapshot-alpha"}},
+    ]
+    store.save(run_spec, {"summary": {"sharpeRatio": 3.0}})
+
+    compact_records = store.list_compact_records(run_kind="strategy_run")
+
+    assert len(compact_records) == 1
+    assert compact_records[0]["datasetSnapshotId"] == "snapshot-alpha"
+    assert compact_records[0]["marketDataSnapshotIds"] == ["snapshot-alpha", "snapshot-beta"]
+
+
 def test_run_store_backfills_diagnostic_metrics_for_existing_compact_index(tmp_path: Path) -> None:
     store = FileRunResultStore(tmp_path)
     run_spec = make_run_spec(

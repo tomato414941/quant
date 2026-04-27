@@ -718,6 +718,8 @@ def test_compare_portfolio_runs_supports_asset_specific_linear_cost() -> None:
         asset_specific_payload[0]["summary"]["totalReturnPct"]
         < flat_payload[0]["summary"]["totalReturnPct"]
     )
+    assert flat_payload[0]["decisionEvents"][0]["estimatedCostPct"] == 0.1
+    assert asset_specific_payload[0]["decisionEvents"][0]["estimatedCostPct"] == 0.3
 
 
 def test_compare_portfolio_runs_tracks_dynamic_asset_eligibility() -> None:
@@ -826,6 +828,7 @@ def test_compare_portfolio_runs_traces_forced_universe_change() -> None:
 
     forced_events = [event for event in run["executionTrace"] if event["eventType"] == "forced_universe_change"]
     assert forced_events
+    assert forced_events[0]["date"].startswith("2025-01-06")
     assert forced_events[0]["decisionReason"] == "asset_unavailable"
     assert forced_events[0]["decisionAction"] == "forced_rebalance"
     assert any(row["asset"] == "GONE" and row["weightPct"] == 0.0 for row in forced_events[0]["executedWeights"])

@@ -168,6 +168,10 @@ class YFinanceMarketDataProvider:
             row_count=len(closes),
             adjustment_policy=DEFAULT_ADJUSTMENT_POLICY,
         )
+        finalize_dataset_snapshot_metadata(
+            metadata,
+            {"closes": closes, "volumes": volumes},
+        )
         return {"closes": closes, "volumes": volumes}, metadata
 
     def _download_ticker(
@@ -331,6 +335,7 @@ def write_market_data_snapshot(
     metadata: dict[str, object],
     storage_dir: Path | str = DEFAULT_MARKET_SNAPSHOT_STORAGE_DIR,
 ) -> Path:
+    finalize_dataset_snapshot_metadata(metadata, bundle)
     snapshot = metadata.get("datasetSnapshot")
     if not isinstance(snapshot, dict):
         raise ValueError("metadata must include datasetSnapshot metadata.")
@@ -349,6 +354,19 @@ def write_market_data_snapshot(
         raise ValueError("bundle must include a volumes DataFrame.")
 
     snapshot_path = Path(storage_dir) / snapshot_id
+    manifest_path = snapshot_path / "manifest.json"
+    if manifest_path.exists():
+        existing_bundle, existing_metadata = read_market_data_snapshot(
+            snapshot_id,
+            storage_dir=storage_dir,
+            expected_snapshot=snapshot,
+        )
+        if build_market_data_content_fingerprint(existing_bundle) != build_market_data_content_fingerprint(bundle):
+            raise ValueError("Existing market data snapshot content does not match requested snapshot.")
+        if existing_metadata.get("datasetSnapshot") != snapshot:
+            raise ValueError("Existing market data snapshot metadata does not match requested snapshot.")
+        return snapshot_path
+
     snapshot_path.mkdir(parents=True, exist_ok=True)
 
     files = {
@@ -370,6 +388,184 @@ def write_market_data_snapshot(
     return snapshot_path
 
 
+def read_market_data_snapshot(
+    snapshot_id: str,
+    storage_dir: Path | str = DEFAULT_MARKET_SNAPSHOT_STORAGE_DIR,
+    *,
+    expected_snapshot: dict[str, object] | None = None,
+) -> tuple[dict[str, pd.DataFrame], dict[str, object]]:
+    if not snapshot_id or snapshot_id != Path(snapshot_id).name:
+        raise ValueError("snapshot_id must be a non-empty single path segment.")
+
+    snapshot_path = Path(storage_dir) / snapshot_id
+    manifest_path = snapshot_path / "manifest.json"
+    if not manifest_path.exists():
+        raise ValueError(f"Market data snapshot manifest not found: {manifest_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schemaVersion") != 1:
+        raise ValueError(f"Unsupported market data snapshot schema: {manifest.get('schemaVersion')}")
+
+    snapshot = manifest.get("datasetSnapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("Market data snapshot manifest must include datasetSnapshot.")
+    if snapshot.get("snapshotId") != snapshot_id:
+        raise ValueError("Market data snapshot manifest snapshotId does not match path.")
+    fingerprint = build_dataset_snapshot_fingerprint(snapshot)
+    if snapshot.get("fingerprint") != fingerprint or snapshot.get("snapshotId") != fingerprint:
+        raise ValueError("Market data snapshot fingerprint does not match manifest content.")
+    if expected_snapshot is not None:
+        validate_dataset_snapshot_matches(snapshot, expected_snapshot)
+
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        raise ValueError("Market data snapshot manifest must include files.")
+    closes_path = snapshot_path / str(files.get("closes", ""))
+    volumes_path = snapshot_path / str(files.get("volumes", ""))
+    if not closes_path.exists():
+        raise ValueError(f"Market data snapshot closes file not found: {closes_path}")
+    if not volumes_path.exists():
+        raise ValueError(f"Market data snapshot volumes file not found: {volumes_path}")
+
+    closes = pd.read_csv(closes_path, index_col="date")
+    volumes = pd.read_csv(volumes_path, index_col="date")
+    closes.index = closes.index.map(str)
+    volumes.index = volumes.index.map(str)
+    closes.index.name = None
+    volumes.index.name = None
+
+    available_tickers = [str(ticker) for ticker in snapshot.get("availableTickers", [])]
+    if list(closes.columns) != available_tickers:
+        raise ValueError("Market data snapshot closes columns do not match availableTickers.")
+    if list(volumes.columns) != available_tickers:
+        raise ValueError("Market data snapshot volumes columns do not match availableTickers.")
+    if int(snapshot.get("rowCount", -1)) != len(closes):
+        raise ValueError("Market data snapshot rowCount does not match closes rows.")
+    if len(volumes) != len(closes):
+        raise ValueError("Market data snapshot volumes rows do not match closes rows.")
+    content_fingerprint = build_market_data_content_fingerprint(
+        {"closes": closes, "volumes": volumes}
+    )
+    if snapshot.get("contentFingerprint") != content_fingerprint:
+        raise ValueError("Market data snapshot contentFingerprint does not match CSV content.")
+
+    metadata = {
+        "tickers": available_tickers,
+        "requested_tickers": [str(ticker) for ticker in snapshot.get("requestedTickers", [])],
+        "failed_tickers": {},
+        "period": snapshot.get("period"),
+        "start_date": snapshot.get("start"),
+        "end_date": snapshot.get("end"),
+        "timeframe": snapshot.get("timeframe"),
+        "source": snapshot.get("source"),
+        "aligned_start_date": str(closes.index[0]) if len(closes) else None,
+        "aligned_end_date": str(closes.index[-1]) if len(closes) else None,
+        "row_count": len(closes),
+        "datasetSnapshot": snapshot,
+    }
+    return {"closes": closes, "volumes": volumes}, metadata
+
+
+def validate_dataset_snapshot_matches(actual: dict[str, object], expected: dict[str, object]) -> None:
+    comparable_keys = (
+        "snapshotId",
+        "fingerprint",
+        "source",
+        "timeframe",
+        "period",
+        "start",
+        "end",
+        "requestedTickers",
+        "availableTickers",
+        "rowCount",
+        "adjustmentPolicy",
+        "contentFingerprint",
+    )
+    for key in comparable_keys:
+        if actual.get(key) != expected.get(key):
+            raise ValueError(f"Market data snapshot {key} does not match expected metadata.")
+
+
+def build_market_snapshot_fetcher(
+    run_spec_payload: dict[str, object],
+    storage_dir: Path | str = DEFAULT_MARKET_SNAPSHOT_STORAGE_DIR,
+):
+    snapshots = collect_dataset_snapshots_from_run_spec_payload(run_spec_payload)
+    snapshots_by_request = {
+        build_dataset_snapshot_request_key(snapshot): snapshot
+        for snapshot in snapshots
+    }
+
+    def fetch_from_snapshot(
+        tickers: list[str],
+        period: str,
+        timeframe: str = "1d",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        **_kwargs,
+    ) -> tuple[dict[str, pd.DataFrame], dict[str, object]]:
+        request_key = (
+            tuple(normalize_tickers(tickers)),
+            period,
+            timeframe,
+            start_date,
+            end_date,
+        )
+        snapshot = snapshots_by_request.get(request_key)
+        if snapshot is None:
+            raise ValueError(
+                "No local market data snapshot metadata matches request: "
+                f"period={period}, timeframe={timeframe}, start={start_date}, end={end_date}"
+            )
+        snapshot_id = snapshot.get("snapshotId")
+        if not isinstance(snapshot_id, str):
+            raise ValueError("Matched market data snapshot metadata does not include snapshotId.")
+        return read_market_data_snapshot(
+            snapshot_id,
+            storage_dir,
+            expected_snapshot=snapshot,
+        )
+
+    return fetch_from_snapshot
+
+
+def collect_dataset_snapshots_from_run_spec_payload(payload: dict[str, object]) -> list[dict[str, object]]:
+    snapshots: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+
+    for snapshot in payload.get("marketDataSnapshots", []) or []:
+        if isinstance(snapshot, dict):
+            snapshot_id = snapshot.get("snapshotId")
+            if isinstance(snapshot_id, str) and snapshot_id not in seen_ids:
+                snapshots.append(snapshot)
+                seen_ids.add(snapshot_id)
+
+    run_spec = payload.get("runSpec")
+    if isinstance(run_spec, dict):
+        evaluation = run_spec.get("evaluation")
+        if isinstance(evaluation, dict):
+            for context in evaluation.get("marketDataContexts", []) or []:
+                if not isinstance(context, dict):
+                    continue
+                snapshot = context.get("datasetSnapshot")
+                if isinstance(snapshot, dict):
+                    snapshot_id = snapshot.get("snapshotId")
+                    if isinstance(snapshot_id, str) and snapshot_id not in seen_ids:
+                        snapshots.append(snapshot)
+                        seen_ids.add(snapshot_id)
+    return snapshots
+
+
+def build_dataset_snapshot_request_key(snapshot: dict[str, object]) -> tuple:
+    return (
+        tuple(str(ticker).upper() for ticker in snapshot.get("requestedTickers", [])),
+        snapshot.get("period"),
+        snapshot.get("timeframe"),
+        snapshot.get("start"),
+        snapshot.get("end"),
+    )
+
+
 def build_dataset_snapshot_fingerprint(snapshot: dict[str, object]) -> str:
     fingerprint_payload = {
         key: value
@@ -382,6 +578,49 @@ def build_dataset_snapshot_fingerprint(snapshot: dict[str, object]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def finalize_dataset_snapshot_metadata(
+    metadata: dict[str, object],
+    bundle: dict[str, pd.DataFrame],
+) -> None:
+    snapshot = metadata.get("datasetSnapshot")
+    if not isinstance(snapshot, dict):
+        return
+    content_fingerprint = build_market_data_content_fingerprint(bundle)
+    snapshot["contentFingerprint"] = content_fingerprint
+    fingerprint = build_dataset_snapshot_fingerprint(snapshot)
+    snapshot["fingerprint"] = fingerprint
+    snapshot["snapshotId"] = fingerprint
+
+
+def build_market_data_content_fingerprint(bundle: dict[str, pd.DataFrame]) -> str:
+    closes = bundle.get("closes")
+    volumes = bundle.get("volumes")
+    if not isinstance(closes, pd.DataFrame):
+        raise ValueError("bundle must include a closes DataFrame.")
+    if not isinstance(volumes, pd.DataFrame):
+        raise ValueError("bundle must include a volumes DataFrame.")
+    payload = {
+        "closes": canonicalize_market_data_frame(closes),
+        "volumes": canonicalize_market_data_frame(volumes),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def canonicalize_market_data_frame(frame: pd.DataFrame) -> dict[str, object]:
+    return {
+        "index": [str(value) for value in frame.index],
+        "columns": [str(value) for value in frame.columns],
+        "values": [
+            [
+                None if pd.isna(value) else float(value)
+                for value in row
+            ]
+            for row in frame.to_numpy(dtype="object")
+        ],
+    }
 
 
 def exclusive_yfinance_end_date(end_date: str | None) -> str | None:

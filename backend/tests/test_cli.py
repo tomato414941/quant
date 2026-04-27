@@ -8,6 +8,7 @@ import pytest
 from app import cli as cli_module
 from app import main as main_module
 from app.comparison_walk_forward import sort_walk_forward_results
+from app.market_data import build_dataset_snapshot_metadata
 
 
 def fake_fetch_market_universe_bundle(
@@ -97,15 +98,34 @@ def fake_fetch_market_universe_bundle(
     return {
         "closes": aligned_closes,
         "volumes": volumes,
-    }, {
-        "tickers": tickers,
-        "period": period,
-        "source": "test",
-        "timeframe": timeframe,
-        "aligned_start_date": aligned_closes.index[0],
-        "aligned_end_date": aligned_closes.index[-1],
-        "row_count": len(aligned_closes),
-    }
+    }, build_fake_market_metadata(
+        tickers=tickers,
+        period=period,
+        source="test",
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
+        aligned_start_date=aligned_closes.index[0],
+        aligned_end_date=aligned_closes.index[-1],
+        row_count=len(aligned_closes),
+    )
+
+
+def build_fake_market_metadata(**metadata):
+    metadata = dict(metadata)
+    metadata["datasetSnapshot"] = build_dataset_snapshot_metadata(
+        source=str(metadata["source"]),
+        timeframe=str(metadata["timeframe"]),
+        period=str(metadata["period"]),
+        start_date=metadata.get("start_date"),
+        end_date=metadata.get("end_date"),
+        requested_tickers=[str(ticker) for ticker in metadata["tickers"]],
+        available_tickers=[str(ticker) for ticker in metadata["tickers"]],
+        row_count=int(metadata["row_count"]),
+        adjustment_policy="test_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    return metadata
 
 
 
@@ -979,6 +999,29 @@ def test_comparison_run_spec_command_json(monkeypatch, tmp_path, capsys) -> None
     assert payload["referenceStrategies"][0]["kind"] == "strategy_definition"
 
 
+def test_comparison_run_spec_command_json_writes_market_data_snapshots(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    snapshot_dir = tmp_path / "market_snapshots"
+
+    exit_code = cli_module.main([
+        "comparison-run-spec",
+        "--write-market-snapshots",
+        "--market-snapshot-dir",
+        str(snapshot_dir),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    snapshots = payload["marketDataSnapshots"]
+    assert exit_code == 0
+    assert snapshots
+    for snapshot in snapshots:
+        snapshot_path = snapshot_dir / snapshot["snapshotId"]
+        assert (snapshot_path / "manifest.json").exists()
+        assert (snapshot_path / "closes.csv").exists()
+        assert (snapshot_path / "volumes.csv").exists()
+
+
 @pytest.mark.slow
 def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
@@ -998,6 +1041,46 @@ def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> No
     assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
     assert len(payload["referenceRuns"]) == len(config.reference_strategies)
     assert payload["runStoreSummary"]["cachedRunCount"] + payload["runStoreSummary"]["computedRunCount"] > 0
+
+
+@pytest.mark.slow
+def test_rerun_comparison_spec_command_json_reads_market_data_snapshots_without_fetching(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    config = configure_cli(monkeypatch, tmp_path)
+    spec_file = tmp_path / "comparison-run-spec.json"
+    snapshot_dir = tmp_path / "market_snapshots"
+
+    exit_code = cli_module.main([
+        "comparison-run-spec",
+        "--write-market-snapshots",
+        "--market-snapshot-dir",
+        str(snapshot_dir),
+        "--json",
+    ])
+    assert exit_code == 0
+    spec_file.write_text(capsys.readouterr().out)
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("live fetch should not be called")
+
+    monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fail_fetch)
+
+    exit_code = cli_module.main([
+        "rerun-comparison-spec",
+        str(spec_file),
+        "--market-snapshot-dir",
+        str(snapshot_dir),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["comparison"]["comparisonId"] == config.comparison_id
+    assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
+    assert len(payload["referenceRuns"]) == len(config.reference_strategies)
 
 
 @pytest.mark.slow

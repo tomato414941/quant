@@ -493,6 +493,7 @@ def build_compact_run_record(record: dict) -> dict:
         evaluation=evaluation,
         existing_metrics=result,
     )
+    market_data_snapshot_ids = collect_market_data_snapshot_ids(evaluation)
 
     return {
         "runKey": record["runKey"],
@@ -524,6 +525,8 @@ def build_compact_run_record(record: dict) -> dict:
         "strategyDefinitionFingerprint": fingerprints.get("strategyDefinition"),
         "evaluationSubjectFingerprint": fingerprints.get("evaluationSubject"),
         "marketDataFingerprint": fingerprints.get("marketData"),
+        "datasetSnapshotId": market_data_snapshot_ids[0] if market_data_snapshot_ids else None,
+        "marketDataSnapshotIds": market_data_snapshot_ids,
         "evaluationFingerprint": fingerprints.get("evaluation"),
         "sharpeRatio": portfolio_summary.get("sharpeRatio"),
         "totalReturnPct": portfolio_summary.get("totalReturnPct"),
@@ -533,6 +536,22 @@ def build_compact_run_record(record: dict) -> dict:
         "diagnosticEventCount": diagnostic_metrics["diagnosticEventCount"],
         "availabilityWarningCount": diagnostic_metrics["availabilityWarningCount"],
     }
+
+
+def collect_market_data_snapshot_ids(evaluation: dict) -> list[str]:
+    snapshot_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for context in evaluation.get("marketDataContexts", []) or []:
+        if not isinstance(context, dict):
+            continue
+        snapshot = context.get("datasetSnapshot")
+        if not isinstance(snapshot, dict):
+            continue
+        snapshot_id = snapshot.get("snapshotId")
+        if isinstance(snapshot_id, str) and snapshot_id not in seen_ids:
+            snapshot_ids.append(snapshot_id)
+            seen_ids.add(snapshot_id)
+    return snapshot_ids
 
 
 def build_compact_predictor_run_record(record: dict) -> dict:

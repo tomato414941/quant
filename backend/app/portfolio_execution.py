@@ -135,10 +135,15 @@ def build_portfolio_decision(
     selection_contexts: list[dict[str, object]] | None,
     predictor_context: dict[str, object] | None,
     availability_policy: dict[str, object],
+    estimated_trade_cost: float | None = None,
 ) -> PortfolioDecision:
     policy = resolve_decision_policy_kind(strategy)
     turnover = float(np.abs(target_weights - current_weights).sum())
-    estimated_cost = turnover * float(transaction_cost)
+    estimated_cost = (
+        float(estimated_trade_cost)
+        if estimated_trade_cost is not None
+        else turnover * float(transaction_cost)
+    )
     if policy == DIRECT_SCORE_DECISION_POLICY:
         return PortfolioDecision(
             selected_assets=list(target_selected_assets),

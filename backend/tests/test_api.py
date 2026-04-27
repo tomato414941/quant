@@ -12,7 +12,7 @@ from app import main as main_module
 from app.comparison_models import ConditionVariant
 from app.comparison_market_context import build_run_result_store
 from app.comparison_serialization import build_availability_diagnostics
-from app.main import DEFAULT_CORS_ALLOW_ORIGINS, app, parse_cors_allow_origins
+from app.main import DEFAULT_CORS_ALLOW_ORIGINS, MAX_RERUN_SPEC_BODY_BYTES, app, parse_cors_allow_origins
 from app.market_data import build_dataset_snapshot_metadata
 from app.portfolio import (
     StrategyDefinition,
@@ -44,6 +44,15 @@ class ASGITestClient:
 
 
 client = ASGITestClient(app)
+
+
+def request_with_client_host(method: str, url: str, host: str, **kwargs) -> httpx.Response:
+    async def run_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, client=(host, 12345))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as async_client:
+            return await async_client.request(method, url, **kwargs)
+
+    return asyncio.run(run_request())
 
 
 def normalize_strategy_definition(strategy):
@@ -110,6 +119,37 @@ def test_availability_diagnostics_classifies_calendar_lifecycle_and_actionable_r
     assert diagnostics["calendarBoundaryWarnings"][0]["kind"] == "aligned_start_after_requested_start"
     assert diagnostics["assetLifecycleWarnings"][0]["asset"] == "ETH-USD"
     assert diagnostics["actionableWarnings"][0]["asset"] == "MISSING"
+
+
+def test_heavy_research_endpoints_reject_non_local_clients(monkeypatch) -> None:
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("heavy endpoint should be rejected before fetching market data")
+
+    monkeypatch.setattr(main_module, "fetch_market_universe_bundle", fail_fetch)
+    endpoints = [
+        ("GET", "/api/comparison"),
+        ("GET", "/api/comparison-run-spec"),
+        ("POST", "/api/comparison-run-spec/rerun"),
+        ("POST", "/api/predictor-runs"),
+        ("POST", "/api/strategy-runs"),
+        ("GET", "/api/condition-sweep"),
+        ("POST", "/api/runs/generate-parameter-sweep"),
+        ("GET", "/api/ranking-evaluation"),
+    ]
+
+    for method, endpoint in endpoints:
+        response = request_with_client_host(method, endpoint, "203.0.113.10", json={})
+        assert response.status_code == 403
+
+
+def test_rerun_comparison_run_spec_rejects_oversized_body() -> None:
+    response = client.post(
+        "/api/comparison-run-spec/rerun",
+        content=b" " * (MAX_RERUN_SPEC_BODY_BYTES + 1),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
 
 
 def test_parse_cors_allow_origins_uses_safe_defaults_for_empty_values() -> None:

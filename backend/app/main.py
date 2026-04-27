@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.comparison_market_context import build_run_result_store
@@ -35,12 +36,51 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://127.0.0.1:3000",
 )
 CORS_ALLOW_ORIGINS_ENV = "QUANT_CORS_ALLOW_ORIGINS"
+MAX_RERUN_SPEC_BODY_BYTES = 2_000_000
+LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+HEAVY_RESEARCH_ENDPOINTS = {
+    "/api/comparison",
+    "/api/comparison-run-spec",
+    "/api/comparison-run-spec/rerun",
+    "/api/predictor-runs",
+    "/api/strategy-runs",
+    "/api/condition-sweep",
+    "/api/runs/generate-parameter-sweep",
+    "/api/ranking-evaluation",
+}
 
 
 def parse_cors_allow_origins(value: str | None) -> list[str]:
     if value is None or not value.strip():
         return list(DEFAULT_CORS_ALLOW_ORIGINS)
     return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
+def require_local_request(request: Request) -> None:
+    client_host = request.client.host if request.client is not None else ""
+    if client_host not in LOCAL_CLIENT_HOSTS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Heavy research endpoints are restricted to local clients.",
+        )
+
+
+def enforce_rerun_spec_body_limit(request: Request) -> None:
+    content_length = request.headers.get("content-length")
+    if content_length is None:
+        return
+    try:
+        body_size = int(content_length)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Content-Length header.",
+        ) from exc
+    if body_size > MAX_RERUN_SPEC_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="comparison-run-spec rerun payload is too large.",
+        )
 
 
 app = FastAPI(title="Quant API", version="0.1.0")
@@ -52,6 +92,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def guard_heavy_research_endpoints(request: Request, call_next):
+    if request.url.path in HEAVY_RESEARCH_ENDPOINTS:
+        client_host = request.client.host if request.client is not None else ""
+        if client_host not in LOCAL_CLIENT_HOSTS:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "Heavy research endpoints are restricted to local clients."},
+            )
+        if request.url.path == "/api/comparison-run-spec/rerun":
+            content_length = request.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    body_size = int(content_length)
+                except ValueError:
+                    return JSONResponse(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        content={"detail": "Invalid Content-Length header."},
+                    )
+                if body_size > MAX_RERUN_SPEC_BODY_BYTES:
+                    return JSONResponse(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        content={"detail": "comparison-run-spec rerun payload is too large."},
+                    )
+    return await call_next(request)
 
 
 @app.get("/api/health")
@@ -82,7 +149,9 @@ async def comparison_run_spec() -> dict:
 
 
 @app.post("/api/comparison-run-spec/rerun")
-async def rerun_comparison_run_spec(payload: dict = Body(...)) -> dict:
+async def rerun_comparison_run_spec(
+    payload: dict = Body(...),
+) -> dict:
     try:
         return build_comparison_payload_from_run_spec_payload(
             payload,

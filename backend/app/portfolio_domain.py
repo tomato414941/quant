@@ -453,7 +453,7 @@ def percent_return(final_value: float, initial_value: float) -> float:
 
 
 def cagr(final_value: float, initial_value: float, periods: int, bars_per_year: float) -> float:
-    years = max((periods - 1) / bars_per_year, 1 / bars_per_year)
+    years = max(periods / bars_per_year, 1 / bars_per_year)
     return (((final_value / initial_value) ** (1 / years)) - 1) * 100
 
 

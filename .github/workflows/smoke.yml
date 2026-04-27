@@ -27,6 +27,10 @@ jobs:
         working-directory: backend
         run: uv sync --dev
 
+      - name: Run lint
+        working-directory: backend
+        run: uv run ruff check .
+
       - name: Run smoke tests
         working-directory: backend
         run: >
@@ -40,3 +44,7 @@ jobs:
           tests/test_dependencies.py
           tests/test_instrument_registry.py
           tests/test_evaluation_profiles.py
+
+      - name: Run full backend tests
+        working-directory: backend
+        run: uv run pytest -q

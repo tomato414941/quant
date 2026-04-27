@@ -20,6 +20,7 @@ from app.comparison_payloads import (
 from app.comparison_walk_forward import build_walk_forward_comparison_payload
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
+from app.market_data import build_market_snapshot_fetcher
 from app.instrument_registry import UNIVERSE_VARIANT_KEYS
 from app.strategy_inventory import (
     STRATEGY_INVENTORY_PRIORITIES,
@@ -211,6 +212,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the canonical comparison run spec for reproducible reruns.",
     )
     comparison_run_spec_parser.add_argument("--json", action="store_true", dest="as_json")
+    comparison_run_spec_parser.add_argument("--write-market-snapshots", action="store_true")
+    comparison_run_spec_parser.add_argument("--market-snapshot-dir")
 
     rerun_comparison_spec_parser = subparsers.add_parser(
         "rerun-comparison-spec",
@@ -219,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     rerun_comparison_spec_parser.add_argument("spec_file")
     rerun_comparison_spec_parser.add_argument("--top", type=int, default=5)
     rerun_comparison_spec_parser.add_argument("--json", action="store_true", dest="as_json")
+    rerun_comparison_spec_parser.add_argument("--market-snapshot-dir")
 
     run_catalog_parser = subparsers.add_parser(
         "run-catalog",
@@ -418,9 +422,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "comparison-run-spec":
+        if args.write_market_snapshots and not args.market_snapshot_dir:
+            parser.error("--write-market-snapshots requires --market-snapshot-dir")
         payload = build_comparison_run_spec_payload(
             DEFAULT_COMPARISON_SPEC,
             fetch_market_universe_bundle=fetch_market_universe_bundle,
+            market_snapshot_dir=args.market_snapshot_dir if args.write_market_snapshots else None,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -430,9 +437,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "rerun-comparison-spec":
         payload = json.loads(Path(args.spec_file).read_text())
+        rerun_fetch_market_universe_bundle = (
+            build_market_snapshot_fetcher(payload, args.market_snapshot_dir)
+            if args.market_snapshot_dir
+            else fetch_market_universe_bundle
+        )
         comparison_payload = build_comparison_payload_from_run_spec_payload(
             payload,
-            fetch_market_universe_bundle=fetch_market_universe_bundle,
+            fetch_market_universe_bundle=rerun_fetch_market_universe_bundle,
         )
         if args.as_json:
             print(json.dumps(comparison_payload, ensure_ascii=False, indent=2))

@@ -6,7 +6,10 @@ import pytest
 from app.market_data import (
     MarketDataRequest,
     YFinanceMarketDataProvider,
+    build_market_data_content_fingerprint,
     build_dataset_snapshot_metadata,
+    finalize_dataset_snapshot_metadata,
+    read_market_data_snapshot,
     write_market_data_snapshot,
 )
 
@@ -252,6 +255,10 @@ def test_write_market_data_snapshot_persists_manifest_and_csv_content(tmp_path) 
     )
     closes.index.name = "date"
     volumes.index.name = "date"
+    finalize_dataset_snapshot_metadata(
+        {"datasetSnapshot": snapshot},
+        {"closes": closes, "volumes": volumes},
+    )
 
     snapshot_path = write_market_data_snapshot(
         bundle={"closes": closes, "volumes": volumes},
@@ -275,3 +282,194 @@ def test_write_market_data_snapshot_persists_manifest_and_csv_content(tmp_path) 
     stored_volumes = pd.read_csv(snapshot_path / "volumes.csv", index_col="date")
     pd.testing.assert_frame_equal(stored_closes, closes)
     pd.testing.assert_frame_equal(stored_volumes, volumes)
+
+
+def test_dataset_snapshot_fingerprint_includes_market_data_content() -> None:
+    base_snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date="2025-01-01",
+        end_date="2025-01-02",
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame(
+        {"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    changed_closes = pd.DataFrame(
+        {"SPY": [100.0, 101.5], "QQQ": [200.0, 202.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    volumes = pd.DataFrame(
+        {"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    changed_volumes = pd.DataFrame(
+        {"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2300.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    first_snapshot = dict(base_snapshot)
+    second_snapshot = dict(base_snapshot)
+    third_snapshot = dict(base_snapshot)
+
+    finalize_dataset_snapshot_metadata(
+        {"datasetSnapshot": first_snapshot},
+        {"closes": closes, "volumes": volumes},
+    )
+    finalize_dataset_snapshot_metadata(
+        {"datasetSnapshot": second_snapshot},
+        {"closes": changed_closes, "volumes": volumes},
+    )
+    finalize_dataset_snapshot_metadata(
+        {"datasetSnapshot": third_snapshot},
+        {"closes": closes, "volumes": changed_volumes},
+    )
+
+    assert first_snapshot["contentFingerprint"] != second_snapshot["contentFingerprint"]
+    assert first_snapshot["snapshotId"] != second_snapshot["snapshotId"]
+    assert first_snapshot["contentFingerprint"] != third_snapshot["contentFingerprint"]
+    assert first_snapshot["snapshotId"] != third_snapshot["snapshotId"]
+
+
+def test_read_market_data_snapshot_loads_manifest_and_csv_content(tmp_path) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date="2025-01-01",
+        end_date="2025-01-02",
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame(
+        {"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    volumes = pd.DataFrame(
+        {"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+
+    write_market_data_snapshot(
+        bundle={"closes": closes, "volumes": volumes},
+        metadata={"datasetSnapshot": snapshot},
+        storage_dir=tmp_path,
+    )
+
+    bundle, metadata = read_market_data_snapshot(
+        str(snapshot["snapshotId"]),
+        storage_dir=tmp_path,
+        expected_snapshot=snapshot,
+    )
+
+    pd.testing.assert_frame_equal(bundle["closes"], closes)
+    pd.testing.assert_frame_equal(bundle["volumes"], volumes)
+    assert metadata["datasetSnapshot"] == snapshot
+    assert metadata["tickers"] == ["SPY", "QQQ"]
+    assert metadata["requested_tickers"] == ["SPY", "QQQ"]
+    assert metadata["period"] == "toy_period"
+    assert metadata["timeframe"] == "1d"
+    assert metadata["aligned_start_date"] == "2025-01-01"
+    assert metadata["aligned_end_date"] == "2025-01-02"
+
+
+def test_read_market_data_snapshot_rejects_fingerprint_mismatch(tmp_path) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame(
+        {"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    volumes = pd.DataFrame(
+        {"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    snapshot_path = write_market_data_snapshot(
+        bundle={"closes": closes, "volumes": volumes},
+        metadata={"datasetSnapshot": snapshot},
+        storage_dir=tmp_path,
+    )
+    manifest_path = snapshot_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["datasetSnapshot"]["rowCount"] = 3
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="fingerprint"):
+        read_market_data_snapshot(str(snapshot["snapshotId"]), storage_dir=tmp_path)
+
+
+def test_read_market_data_snapshot_rejects_csv_content_mismatch(tmp_path) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame(
+        {"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    volumes = pd.DataFrame(
+        {"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]},
+        index=["2025-01-01", "2025-01-02"],
+    )
+    snapshot_path = write_market_data_snapshot(
+        bundle={"closes": closes, "volumes": volumes},
+        metadata={"datasetSnapshot": snapshot},
+        storage_dir=tmp_path,
+    )
+    changed_closes = closes.copy()
+    changed_closes.loc["2025-01-02", "SPY"] = 999.0
+    changed_closes.to_csv(snapshot_path / "closes.csv", index_label="date")
+
+    with pytest.raises(ValueError, match="contentFingerprint"):
+        read_market_data_snapshot(str(snapshot["snapshotId"]), storage_dir=tmp_path)
+
+
+def test_write_market_data_snapshot_is_idempotent_for_same_content(tmp_path) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame({"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]})
+    volumes = pd.DataFrame({"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]})
+    bundle = {"closes": closes, "volumes": volumes}
+    metadata = {"datasetSnapshot": snapshot}
+
+    first_path = write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path)
+    second_path = write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path)
+
+    assert first_path == second_path
+    assert build_market_data_content_fingerprint(bundle) == snapshot["contentFingerprint"]

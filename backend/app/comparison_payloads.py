@@ -50,6 +50,7 @@ from app.comparison_models import (
     scale_cost_model_spec,
 )
 from app.run_store import FileRunResultStore, RunStoreSummary, build_run_fingerprint, build_run_spec
+from app.market_data import write_market_data_snapshot
 from app.diagnostics_service import build_evaluation_diagnostic_events
 from app.instrument_registry import build_instrument_diagnostics
 from app.timeframe_models import (
@@ -96,13 +97,14 @@ def build_comparison_run_spec_payload(
     comparison: ComparisonSpec,
     *,
     fetch_market_universe_bundle,
+    market_snapshot_dir: str | Path | None = None,
 ) -> dict:
     original_candidate_definitions = list(comparison.candidate_strategies)
     original_reference_definitions = list(comparison.reference_strategies)
     strategy_definitions = original_candidate_definitions + original_reference_definitions
     predictor_specs = collect_strategy_predictor_specs(strategy_definitions)
     (
-        _market_bundles_by_timeframe,
+        market_bundles_by_timeframe,
         metadata_by_timeframe,
         _comparison_tickers,
         comparison_timeframes,
@@ -148,6 +150,33 @@ def build_comparison_run_spec_payload(
         "runSpecFingerprint": build_run_fingerprint(run_spec),
         "runSpec": run_spec,
     }
+    if market_snapshot_dir is not None:
+        payload["marketDataSnapshots"] = write_comparison_market_snapshots(
+            market_bundles_by_timeframe=market_bundles_by_timeframe,
+            metadata_by_timeframe=metadata_by_timeframe,
+            storage_dir=market_snapshot_dir,
+        )
+        for sanity_period in comparison.run_spec.market_slice.sanity_periods:
+            (
+                sanity_market_bundles_by_timeframe,
+                sanity_metadata_by_timeframe,
+                _sanity_tickers,
+                _sanity_timeframes,
+            ) = fetch_market_data_by_timeframe(
+                comparison,
+                period=sanity_period,
+                predictor_specs=predictor_specs,
+                strategy_definitions=strategy_definitions,
+                fetch_market_universe_bundle=fetch_market_universe_bundle,
+            )
+            payload["marketDataSnapshots"].extend(
+                write_comparison_market_snapshots(
+                    market_bundles_by_timeframe=sanity_market_bundles_by_timeframe,
+                    metadata_by_timeframe=sanity_metadata_by_timeframe,
+                    storage_dir=market_snapshot_dir,
+                )
+            )
+    payload["runSpecFingerprint"] = build_run_fingerprint(payload["runSpec"])
     payload["comparisonFingerprint"] = build_run_fingerprint(
         {
             "comparisonId": payload["comparisonId"],
@@ -159,6 +188,30 @@ def build_comparison_run_spec_payload(
         }
     )
     return payload
+
+
+def write_comparison_market_snapshots(
+    *,
+    market_bundles_by_timeframe: dict[str, dict],
+    metadata_by_timeframe: dict[str, dict[str, object]],
+    storage_dir: str | Path,
+) -> list[dict[str, object]]:
+    snapshots: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for timeframe_key, metadata in metadata_by_timeframe.items():
+        snapshot = metadata.get("datasetSnapshot")
+        if not isinstance(snapshot, dict):
+            continue
+        write_market_data_snapshot(
+            market_bundles_by_timeframe[timeframe_key],
+            metadata,
+            storage_dir=storage_dir,
+        )
+        snapshot_id = snapshot.get("snapshotId")
+        if isinstance(snapshot_id, str) and snapshot_id not in seen_ids:
+            snapshots.append(snapshot)
+            seen_ids.add(snapshot_id)
+    return snapshots
 
 
 def build_comparison_payload_from_run_spec_payload(

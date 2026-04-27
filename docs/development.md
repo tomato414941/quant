@@ -20,7 +20,16 @@ dependency imports, instrument registry, and evaluation profile definitions.
 
 ```bash
 cd backend
-uv run pytest -q tests/test_api.py::test_healthcheck tests/test_api.py::test_strategy_inventory_api tests/test_dependencies.py tests/test_instrument_registry.py tests/test_evaluation_profiles.py
+uv run pytest -q \
+  tests/test_api.py::test_healthcheck \
+  tests/test_api.py::test_parse_cors_allow_origins_uses_safe_defaults_for_empty_values \
+  tests/test_api.py::test_parse_cors_allow_origins_trims_comma_separated_values \
+  tests/test_api.py::test_cors_allows_default_localhost_origin \
+  tests/test_api.py::test_cors_rejects_unlisted_origin \
+  tests/test_api.py::test_strategy_inventory_api \
+  tests/test_dependencies.py \
+  tests/test_instrument_registry.py \
+  tests/test_evaluation_profiles.py
 ```
 
 ## Full Test
@@ -30,6 +39,7 @@ entire backend test suite and is expected to be slower than the smoke test.
 
 ```bash
 cd backend
+uv run ruff check .
 uv run pytest -q
 ```
 
@@ -58,6 +68,11 @@ The API uses an explicit CORS allowlist. By default it allows common local
 frontend origins only: `http://localhost:5173`, `http://127.0.0.1:5173`,
 `http://localhost:3000`, and `http://127.0.0.1:3000`.
 
+Heavy research endpoints that trigger market data fetches, backtests, run
+generation, or reruns are local-client only by default. CORS is not treated as
+authentication; expose these endpoints only behind an explicit trusted access
+boundary.
+
 For remote previews, set exact origins explicitly.
 
 ```bash
@@ -78,3 +93,17 @@ Web UI やリモート確認が必要な場合は、利用環境ごとの手順�
 - `app.comparison_service` は移行期間の互換 facade として扱い、新規実装先にしない。
 - 新しい portfolio selection / forecast / execution / availability 処理は用途別の `portfolio_*` module に追加する。
 - `app.portfolio` は移行期間の互換 facade として扱い、新規実装先にしない。
+
+Portfolio module responsibilities:
+
+- `portfolio_availability`: asset availability, eligibility, and universe scoping.
+- `portfolio_allocation`: portfolio model allocation.
+- `portfolio_costs`: linear, asset-specific, and impact cost calculations.
+- `portfolio_execution`: decision policy, no-trade decisions, and decision event serialization.
+- `portfolio_forecast`: forecast snapshots used by decision policy.
+- `portfolio_metrics`: return, CAGR, drawdown, turnover, and diagnostics summaries.
+- `portfolio_runs`: orchestration of backtest execution; avoid adding domain primitives here.
+- `portfolio_state`: initial/current portfolio state normalization.
+- `portfolio_tilt` / `portfolio_positioning`: tilt and positioning helpers.
+
+既存互換 import は段階移行中として許容するが、新規 app code は上記の focused module から import する。

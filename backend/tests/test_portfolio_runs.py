@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from app.portfolio import (
     COST_AWARE_NO_TRADE_DECISION_POLICY,
@@ -71,7 +72,10 @@ from app.portfolio import (
     select_assets,
     should_rebalance,
 )
-from app.portfolio_runs import compare_portfolio_runs as compare_portfolio_runs_with_dynamic_allocation
+from app.portfolio_runs import (
+    compare_portfolio_runs as compare_portfolio_runs_with_dynamic_allocation,
+    compute_row_portfolio_return,
+)
 from app.strategy_definition_builder import (
     ExecutionVariantDefinition,
     PortfolioModelVariantDefinition,
@@ -346,6 +350,76 @@ def test_compare_portfolio_runs_does_not_apply_test_initial_weights_to_train() -
 
     assert run["splitAnalysis"]["train"]["portfolio"]["totalReturnPct"] == 0.0
     assert run["summary"] == run["splitAnalysis"]["test"]["portfolio"]
+
+
+def test_compare_portfolio_runs_rejects_missing_return_for_held_asset_by_default() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100.0, np.nan, 100.0, 101.0, 102.0, 103.0, 104.0],
+            "BBB": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="missing_return_universe",
+            label="Missing return universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    with pytest.raises(ValueError, match="Missing return for held assets.*AAA"):
+        compare_portfolio_runs(
+            closes=closes,
+            volumes=None,
+            strategies=[strategy],
+            initial_capital=1000.0,
+            split_ratio=0.5,
+            transaction_cost=0.0,
+            portfolio_state=build_portfolio_state(current_weights={"AAA": 1.0}, cash_weight=0.0),
+        )
+
+
+def test_compare_portfolio_runs_allows_missing_return_zero_policy_when_explicit() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100.0, np.nan, 100.0, 101.0, 102.0, 103.0, 104.0],
+            "BBB": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="missing_return_zero_policy_universe",
+            label="Missing return zero policy universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    runs = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        portfolio_state=build_portfolio_state(current_weights={"AAA": 1.0}, cash_weight=0.0),
+        availability_policy={
+            "kind": "asset_availability_policy",
+            "minHistoryBars": 1,
+            "maxStaleBars": 5,
+            "delistedAssetPolicy": "liquidate_to_cash",
+            "missingReturnPolicy": "zero",
+        },
+    )
+
+    assert runs[0]["series"][0]["portfolioReturnPct"] == 0.0
 
 
 def test_compare_portfolio_runs_adds_allocation_fallback_only_to_decision_trace() -> None:
@@ -823,6 +897,7 @@ def test_compare_portfolio_runs_traces_forced_universe_change() -> None:
             "minHistoryBars": 1,
             "maxStaleBars": 1,
             "delistedAssetPolicy": "liquidate_to_cash",
+            "missingReturnPolicy": "zero",
         },
     )[0]
 
@@ -832,3 +907,33 @@ def test_compare_portfolio_runs_traces_forced_universe_change() -> None:
     assert forced_events[0]["decisionReason"] == "asset_unavailable"
     assert forced_events[0]["decisionAction"] == "forced_rebalance"
     assert any(row["asset"] == "GONE" and row["weightPct"] == 0.0 for row in forced_events[0]["executedWeights"])
+
+
+def test_compute_row_portfolio_return_zero_policy_documents_masked_missing_held_return() -> None:
+    row = pd.Series({"HELD": np.nan, "CASHLIKE": 0.0})
+    weights = np.asarray([1.0, 0.0], dtype="float64")
+
+    portfolio_return = compute_row_portfolio_return(
+        row=row,
+        universe_columns=pd.Index(["HELD", "CASHLIKE"]),
+        current_weights=weights,
+        date="2025-01-03",
+        missing_return_policy="zero",
+    )
+
+    assert pd.isna(row["HELD"])
+    assert portfolio_return == 0.0
+
+
+def test_compute_row_portfolio_return_checks_interval_start_holdings() -> None:
+    row = pd.Series({"SOLD": np.nan, "BOUGHT": np.nan})
+
+    with pytest.raises(ValueError, match="SOLD"):
+        compute_row_portfolio_return(
+            row=row,
+            universe_columns=pd.Index(["SOLD", "BOUGHT"]),
+            current_weights=np.asarray([0.0, 1.0], dtype="float64"),
+            held_weights=np.asarray([1.0, 0.0], dtype="float64"),
+            date="2025-01-03",
+            missing_return_policy="reject_if_held",
+        )

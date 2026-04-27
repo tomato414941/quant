@@ -3,6 +3,7 @@ import json
 import pandas as pd
 import pytest
 
+from app import market_data as market_data_module
 from app.market_data import (
     MarketDataRequest,
     YFinanceMarketDataProvider,
@@ -465,6 +466,8 @@ def test_write_market_data_snapshot_is_idempotent_for_same_content(tmp_path) -> 
     )
     closes = pd.DataFrame({"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]})
     volumes = pd.DataFrame({"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]})
+    closes.index.name = "date"
+    volumes.index.name = "date"
     bundle = {"closes": closes, "volumes": volumes}
     metadata = {"datasetSnapshot": snapshot}
 
@@ -473,3 +476,150 @@ def test_write_market_data_snapshot_is_idempotent_for_same_content(tmp_path) -> 
 
     assert first_path == second_path
     assert build_market_data_content_fingerprint(bundle) == snapshot["contentFingerprint"]
+
+
+def test_write_market_data_snapshot_does_not_publish_partial_directory_on_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame({"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]})
+    volumes = pd.DataFrame({"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]})
+    closes.index.name = "date"
+    volumes.index.name = "date"
+    bundle = {"closes": closes, "volumes": volumes}
+    metadata = {"datasetSnapshot": snapshot}
+    finalize_dataset_snapshot_metadata(metadata, bundle)
+    snapshot_id = str(snapshot["snapshotId"])
+    original_to_csv = pd.DataFrame.to_csv
+
+    def fail_on_volumes(frame, path_or_buf=None, *args, **kwargs):
+        if frame is volumes:
+            raise OSError("simulated write failure")
+        return original_to_csv(frame, path_or_buf, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "to_csv", fail_on_volumes)
+
+    with pytest.raises(OSError, match="simulated write failure"):
+        write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path)
+
+    assert not (tmp_path / snapshot_id).exists()
+
+
+def test_write_market_data_snapshot_rejects_existing_snapshot_with_mismatched_content(
+    tmp_path,
+) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame({"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]})
+    volumes = pd.DataFrame({"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]})
+    bundle = {"closes": closes, "volumes": volumes}
+    metadata = {"datasetSnapshot": snapshot}
+    snapshot_path = write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path)
+    changed_closes = closes.copy()
+    changed_closes.loc[1, "SPY"] = 999.0
+    changed_closes.to_csv(snapshot_path / "closes.csv", index_label="date")
+
+    with pytest.raises(ValueError, match="contentFingerprint"):
+        write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path)
+
+
+def test_write_market_data_snapshot_replaces_manifestless_partial_directory(
+    tmp_path,
+) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame({"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]})
+    volumes = pd.DataFrame({"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]})
+    bundle = {"closes": closes, "volumes": volumes}
+    metadata = {"datasetSnapshot": snapshot}
+    finalize_dataset_snapshot_metadata(metadata, bundle)
+    partial_path = tmp_path / str(snapshot["snapshotId"])
+    partial_path.mkdir(parents=True)
+    (partial_path / "closes.csv").write_text("date,SPY,QQQ\n2025-01-01,0,0\n", encoding="utf-8")
+
+    snapshot_path = write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path)
+
+    assert snapshot_path == partial_path
+    assert (snapshot_path / "manifest.json").exists()
+    stored_closes = pd.read_csv(snapshot_path / "closes.csv", index_col="date")
+    pd.testing.assert_frame_equal(stored_closes, closes, check_names=False)
+
+
+def test_write_market_data_snapshot_reuses_concurrently_published_snapshot(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    snapshot = build_dataset_snapshot_metadata(
+        source="toy",
+        timeframe="1d",
+        period="toy_period",
+        start_date=None,
+        end_date=None,
+        requested_tickers=["SPY", "QQQ"],
+        available_tickers=["SPY", "QQQ"],
+        row_count=2,
+        adjustment_policy="toy_adjusted",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    closes = pd.DataFrame({"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]})
+    volumes = pd.DataFrame({"SPY": [1000.0, 1100.0], "QQQ": [2000.0, 2200.0]})
+    bundle = {"closes": closes, "volumes": volumes}
+    metadata = {"datasetSnapshot": snapshot}
+    finalize_dataset_snapshot_metadata(metadata, bundle)
+    snapshot_id = str(snapshot["snapshotId"])
+    snapshot_path = tmp_path / snapshot_id
+    original_replace = type(snapshot_path).replace
+
+    def publish_existing_before_replace(path, target):
+        if path.name.endswith(".tmp") and target == snapshot_path:
+            snapshot_path.mkdir()
+            market_data_module.write_market_data_csv(snapshot_path / "closes.csv", closes)
+            market_data_module.write_market_data_csv(snapshot_path / "volumes.csv", volumes)
+            market_data_module.write_market_data_manifest(
+                snapshot_path / "manifest.json",
+                {
+                    "schemaVersion": 1,
+                    "datasetSnapshot": snapshot,
+                    "files": {"closes": "closes.csv", "volumes": "volumes.csv"},
+                },
+            )
+            raise OSError("simulated concurrent publish")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(type(snapshot_path), "replace", publish_existing_before_replace)
+
+    assert write_market_data_snapshot(bundle, metadata, storage_dir=tmp_path) == snapshot_path
+    assert (snapshot_path / "manifest.json").exists()
+    assert not list(tmp_path.glob(f".{snapshot_id}.*.tmp"))

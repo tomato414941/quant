@@ -38,6 +38,8 @@ from app.portfolio_state import resolve_initial_weights
 
 
 AllocationReturn = tuple[list[str], np.ndarray] | tuple[list[str], np.ndarray, dict[str, object]]
+MISSING_RETURN_POLICY_REJECT_IF_HELD = "reject_if_held"
+MISSING_RETURN_POLICY_ZERO = "zero"
 
 
 def compute_dynamic_portfolio_allocation(**kwargs) -> AllocationReturn:
@@ -62,6 +64,39 @@ def append_allocation_fallback(
     if metadata is not None:
         event["allocationFallback"] = dict(metadata)
     return event
+
+
+def resolve_missing_return_policy(availability_policy: dict[str, object]) -> str:
+    policy = str(availability_policy.get("missingReturnPolicy", MISSING_RETURN_POLICY_REJECT_IF_HELD))
+    if policy not in {MISSING_RETURN_POLICY_REJECT_IF_HELD, MISSING_RETURN_POLICY_ZERO}:
+        raise ValueError(f"Unsupported missing return policy: {policy}")
+    return policy
+
+
+def compute_row_portfolio_return(
+    *,
+    row: pd.Series,
+    universe_columns: pd.Index,
+    current_weights: np.ndarray,
+    date: object,
+    missing_return_policy: str,
+    held_weights: np.ndarray | None = None,
+) -> float:
+    aligned_returns = row.reindex(universe_columns)
+    missing_check_weights = current_weights if held_weights is None else held_weights
+    missing_held_assets = [
+        str(asset)
+        for asset, asset_return, weight in zip(universe_columns, aligned_returns, missing_check_weights, strict=True)
+        if pd.isna(asset_return) and abs(float(weight)) > 1e-12
+    ]
+    if missing_held_assets and missing_return_policy == MISSING_RETURN_POLICY_REJECT_IF_HELD:
+        raise ValueError(
+            "Missing return for held assets on "
+            f"{date}: {', '.join(missing_held_assets)}. "
+            "Set missingReturnPolicy='zero' only for explicitly accepted zero-fill research runs."
+        )
+    row_returns = aligned_returns.fillna(0.0).to_numpy(dtype="float64")
+    return float(np.dot(row_returns, current_weights))
 
 
 def compare_portfolio_runs(
@@ -321,6 +356,7 @@ def compare_portfolio_models(
     transaction_cost: float,
     bars_per_year: float = 252.0,
     portfolio_state: PortfolioState | None = None,
+    availability_policy: dict[str, object] | None = None,
     dynamic_allocation_fn: Callable[..., AllocationReturn] | None = None,
 ) -> list[dict]:
     return compare_portfolio_runs(
@@ -364,6 +400,7 @@ def compare_portfolio_models(
         },
         transaction_cost=transaction_cost,
         portfolio_state=portfolio_state,
+        availability_policy=availability_policy,
         dynamic_allocation_fn=dynamic_allocation_fn,
     )
 
@@ -399,6 +436,7 @@ def run_portfolio_backtest(
 ) -> dict:
     if availability_policy is None:
         availability_policy = build_default_availability_policy()
+    missing_return_policy = resolve_missing_return_policy(availability_policy)
     if dynamic_allocation_fn is None:
         dynamic_allocation_fn = compute_dynamic_portfolio_allocation
 
@@ -427,6 +465,7 @@ def run_portfolio_backtest(
         trade_turnover = 0.0
         trade_cost = 0.0
         phase = "train" if index < split_index else "test"
+        interval_start_weights = current_weights.copy()
         history_before_current = returns.iloc[:index]
         history_through_current = returns.iloc[: index + 1]
         if history_before_current.empty:
@@ -603,8 +642,14 @@ def run_portfolio_backtest(
             next_rebalance_weights = None
             next_rebalance_selected_assets = None
 
-        row_returns = row.reindex(returns.columns).fillna(0.0).to_numpy(dtype="float64")
-        portfolio_return = float(np.dot(row_returns, current_weights))
+        portfolio_return = compute_row_portfolio_return(
+            row=row,
+            universe_columns=returns.columns,
+            current_weights=current_weights,
+            date=date,
+            missing_return_policy=missing_return_policy,
+            held_weights=interval_start_weights,
+        )
         portfolio_return -= trade_cost
 
         portfolio_equity *= 1 + portfolio_return

@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
 import time
 from typing import Protocol
+import uuid
 
 import pandas as pd
 import yfinance as yf
@@ -356,36 +359,105 @@ def write_market_data_snapshot(
     snapshot_path = Path(storage_dir) / snapshot_id
     manifest_path = snapshot_path / "manifest.json"
     if manifest_path.exists():
-        existing_bundle, existing_metadata = read_market_data_snapshot(
-            snapshot_id,
+        validate_existing_market_data_snapshot(
+            snapshot_id=snapshot_id,
+            snapshot=snapshot,
+            bundle=bundle,
             storage_dir=storage_dir,
-            expected_snapshot=snapshot,
         )
-        if build_market_data_content_fingerprint(existing_bundle) != build_market_data_content_fingerprint(bundle):
-            raise ValueError("Existing market data snapshot content does not match requested snapshot.")
-        if existing_metadata.get("datasetSnapshot") != snapshot:
-            raise ValueError("Existing market data snapshot metadata does not match requested snapshot.")
         return snapshot_path
-
-    snapshot_path.mkdir(parents=True, exist_ok=True)
 
     files = {
         "closes": "closes.csv",
         "volumes": "volumes.csv",
     }
-    closes.to_csv(snapshot_path / files["closes"], index_label="date")
-    volumes.to_csv(snapshot_path / files["volumes"], index_label="date")
-
     manifest = {
         "schemaVersion": 1,
         "datasetSnapshot": snapshot,
         "files": files,
     }
-    with (snapshot_path / "manifest.json").open("w", encoding="utf-8") as manifest_file:
-        json.dump(manifest, manifest_file, indent=2, sort_keys=True)
-        manifest_file.write("\n")
+    storage_path = Path(storage_dir)
+    storage_path.mkdir(parents=True, exist_ok=True)
+    temp_path = storage_path / f".{snapshot_id}.{uuid.uuid4().hex}.tmp"
+    try:
+        temp_path.mkdir()
+        write_market_data_csv(temp_path / files["closes"], closes)
+        write_market_data_csv(temp_path / files["volumes"], volumes)
+        write_market_data_manifest(temp_path / "manifest.json", manifest)
+        fsync_directory(temp_path)
+        try:
+            temp_path.replace(snapshot_path)
+        except OSError:
+            if manifest_path.exists():
+                validate_existing_market_data_snapshot(
+                    snapshot_id=snapshot_id,
+                    snapshot=snapshot,
+                    bundle=bundle,
+                    storage_dir=storage_dir,
+                )
+            elif snapshot_path.exists():
+                partial_path = storage_path / f".{snapshot_id}.{uuid.uuid4().hex}.partial"
+                snapshot_path.replace(partial_path)
+                try:
+                    temp_path.replace(snapshot_path)
+                finally:
+                    shutil.rmtree(partial_path, ignore_errors=True)
+            else:
+                raise
+        fsync_directory(storage_path)
+    except Exception:
+        shutil.rmtree(temp_path, ignore_errors=True)
+        raise
+    else:
+        shutil.rmtree(temp_path, ignore_errors=True)
 
     return snapshot_path
+
+
+def validate_existing_market_data_snapshot(
+    *,
+    snapshot_id: str,
+    snapshot: dict[str, object],
+    bundle: dict[str, pd.DataFrame],
+    storage_dir: Path | str,
+) -> None:
+    existing_bundle, existing_metadata = read_market_data_snapshot(
+        snapshot_id,
+        storage_dir=storage_dir,
+        expected_snapshot=snapshot,
+    )
+    if build_market_data_content_fingerprint(existing_bundle) != build_market_data_content_fingerprint(bundle):
+        raise ValueError("Existing market data snapshot content does not match requested snapshot.")
+    if existing_metadata.get("datasetSnapshot") != snapshot:
+        raise ValueError("Existing market data snapshot metadata does not match requested snapshot.")
+
+
+def write_market_data_csv(path: Path, frame: pd.DataFrame) -> None:
+    with path.open("w", encoding="utf-8", newline="") as csv_file:
+        frame.to_csv(csv_file, index_label="date")
+        csv_file.flush()
+        os.fsync(csv_file.fileno())
+
+
+def write_market_data_manifest(path: Path, manifest: dict[str, object]) -> None:
+    with path.open("w", encoding="utf-8") as manifest_file:
+        json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+        manifest_file.write("\n")
+        manifest_file.flush()
+        os.fsync(manifest_file.fileno())
+
+
+def fsync_directory(path: Path) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def read_market_data_snapshot(

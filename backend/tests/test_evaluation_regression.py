@@ -11,6 +11,7 @@ REGRESSION_AVAILABILITY_POLICY = {
     "minHistoryBars": 2,
     "maxStaleBars": 2,
     "delistedAssetPolicy": "liquidate_to_cash",
+    "missingReturnPolicy": "zero",
 }
 
 

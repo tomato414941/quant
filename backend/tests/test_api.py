@@ -444,6 +444,8 @@ def test_comparison_run_spec_endpoint(monkeypatch, tmp_path) -> None:
     assert payload["candidateStrategies"][0]["kind"] == "strategy_definition"
     assert payload["referenceStrategies"][0]["kind"] == "strategy_definition"
     assert payload["conditionVariants"][0]["key"]
+    market_data_contexts = payload["runSpec"]["evaluation"]["marketDataContexts"]
+    assert all("datasetSnapshot" in context for context in market_data_contexts)
 
 
 def test_rerun_comparison_run_spec_endpoint_rejects_mismatched_fingerprint(monkeypatch, tmp_path) -> None:

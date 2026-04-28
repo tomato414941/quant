@@ -5,6 +5,8 @@ from pathlib import Path
 
 import app.comparison_service as comparison_service
 import app.portfolio as portfolio
+import app.portfolio_domain as portfolio_domain
+import app.portfolio_serialization as portfolio_serialization
 
 
 def _module_tree(module: object) -> ast.Module:
@@ -55,3 +57,17 @@ def test_portfolio_facade_only_defines_compatibility_wrappers() -> None:
         "evaluate_strategy_run",
         "run_portfolio_backtest",
     }
+
+
+def test_portfolio_serialization_keeps_domain_and_facade_compatibility() -> None:
+    serializer_names = (
+        "serialize_asset_ranking_spec",
+        "serialize_evaluator_strategy_spec",
+        "serialize_strategy_definition",
+        "serialize_strategy_signal_spec",
+    )
+
+    for serializer_name in serializer_names:
+        serializer = getattr(portfolio_serialization, serializer_name)
+        assert getattr(portfolio_domain, serializer_name) is serializer
+        assert getattr(portfolio, serializer_name) is serializer

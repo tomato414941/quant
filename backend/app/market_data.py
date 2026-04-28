@@ -628,7 +628,7 @@ def validate_existing_market_data_snapshot(
 
 def write_market_data_csv(path: Path, frame: pd.DataFrame) -> None:
     with path.open("w", encoding="utf-8", newline="") as csv_file:
-        frame.to_csv(csv_file, index_label="date")
+        frame.to_csv(csv_file, index_label="date", float_format="%.17g")
         csv_file.flush()
         os.fsync(csv_file.fileno())
 
@@ -928,7 +928,7 @@ def canonicalize_market_data_frame(frame: pd.DataFrame) -> dict[str, object]:
         "columns": [str(value) for value in frame.columns],
         "values": [
             [
-                None if pd.isna(value) else float(value)
+                None if pd.isna(value) else round(float(value), 12)
                 for value in row
             ]
             for row in frame.to_numpy(dtype="object")

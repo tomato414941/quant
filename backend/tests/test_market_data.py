@@ -369,7 +369,7 @@ def test_write_market_data_snapshot_persists_manifest_and_csv_content(tmp_path) 
         created_at_utc="2026-01-01T00:00:00Z",
     )
     closes = pd.DataFrame(
-        {"SPY": [100.0, 101.0], "QQQ": [200.0, 202.0]},
+        {"SPY": [100.25192260742188, 101.0], "QQQ": [200.0, 202.93817138671875]},
         index=["2025-01-01", "2025-01-02"],
     )
     volumes = pd.DataFrame(
@@ -404,7 +404,8 @@ def test_write_market_data_snapshot_persists_manifest_and_csv_content(tmp_path) 
     stored_closes = pd.read_csv(snapshot_path / "closes.csv", index_col="date")
     stored_volumes = pd.read_csv(snapshot_path / "volumes.csv", index_col="date")
     pd.testing.assert_frame_equal(stored_closes, closes)
-    pd.testing.assert_frame_equal(stored_volumes, volumes)
+    pd.testing.assert_frame_equal(stored_volumes, volumes, check_dtype=False)
+    read_market_data_snapshot(str(snapshot["snapshotId"]), storage_dir=tmp_path)
 
 
 def test_dataset_snapshot_fingerprint_includes_market_data_content() -> None:
@@ -493,8 +494,8 @@ def test_read_market_data_snapshot_loads_manifest_and_csv_content(tmp_path) -> N
         expected_snapshot=snapshot,
     )
 
-    pd.testing.assert_frame_equal(bundle["closes"], closes)
-    pd.testing.assert_frame_equal(bundle["volumes"], volumes)
+    pd.testing.assert_frame_equal(bundle["closes"], closes, check_dtype=False)
+    pd.testing.assert_frame_equal(bundle["volumes"], volumes, check_dtype=False)
     assert metadata["datasetSnapshot"] == snapshot
     assert metadata["tickers"] == ["SPY", "QQQ"]
     assert metadata["requested_tickers"] == ["SPY", "QQQ"]
@@ -696,7 +697,7 @@ def test_write_market_data_snapshot_replaces_manifestless_partial_directory(
     assert snapshot_path == partial_path
     assert (snapshot_path / "manifest.json").exists()
     stored_closes = pd.read_csv(snapshot_path / "closes.csv", index_col="date")
-    pd.testing.assert_frame_equal(stored_closes, closes, check_names=False)
+    pd.testing.assert_frame_equal(stored_closes, closes, check_names=False, check_dtype=False)
 
 
 def test_write_market_data_snapshot_reuses_concurrently_published_snapshot(

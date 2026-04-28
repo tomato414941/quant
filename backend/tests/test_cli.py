@@ -181,11 +181,27 @@ def configure_cli(monkeypatch, tmp_path):
     return config
 
 
+def test_comparison_summary_requires_explicit_market_data_source(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("live fetch should not be called")
+
+    monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fail_fetch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.main(["comparison-summary", "--top", "1"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "no longer fetches live market data by default" in captured.err
+
+
 @pytest.mark.slow
 def test_comparison_summary_command(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
-    exit_code = cli_module.main(["comparison-summary", "--top", "2"])
+    exit_code = cli_module.main(["comparison-summary", "--refresh-market-data", "--top", "2"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -200,6 +216,7 @@ def test_comparison_summary_command_strategy_key_filter(monkeypatch, tmp_path, c
 
     exit_code = cli_module.main([
         "comparison-summary",
+        "--refresh-market-data",
         "--top",
         "2",
         "--strategy-key",
@@ -229,7 +246,7 @@ def test_strategy_inventory_command_json(capsys) -> None:
 @pytest.mark.slow
 def test_strategy_inventory_command_with_latest_runs_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
-    cli_module.main(["comparison-summary", "--top", "1"])
+    cli_module.main(["comparison-summary", "--refresh-market-data", "--top", "1"])
     capsys.readouterr()
 
     exit_code = cli_module.main([
@@ -250,7 +267,7 @@ def test_strategy_inventory_command_with_latest_runs_json(monkeypatch, tmp_path,
 @pytest.mark.slow
 def test_strategy_inventory_command_with_evaluation_matrix_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
-    cli_module.main(["comparison-summary", "--top", "1"])
+    cli_module.main(["comparison-summary", "--refresh-market-data", "--top", "1"])
     capsys.readouterr()
 
     exit_code = cli_module.main([
@@ -305,6 +322,7 @@ def test_comparison_summary_walk_forward_command(monkeypatch, tmp_path, capsys) 
 
     exit_code = cli_module.main([
         "comparison-summary",
+        "--refresh-market-data",
         "--walk-forward",
         "--walk-forward-start-year",
         "2020",
@@ -333,6 +351,7 @@ def test_comparison_summary_walk_forward_command_json(monkeypatch, tmp_path, cap
 
     exit_code = cli_module.main([
         "comparison-summary",
+        "--refresh-market-data",
         "--walk-forward",
         "--walk-forward-start-year",
         "2020",
@@ -364,6 +383,7 @@ def test_comparison_summary_walk_forward_command_strategy_key_filter(
 
     exit_code = cli_module.main([
         "comparison-summary",
+        "--refresh-market-data",
         "--walk-forward",
         "--walk-forward-start-year",
         "2020",
@@ -548,6 +568,7 @@ def test_comparison_summary_walk_forward_respects_universe_variant(monkeypatch, 
 
     exit_code = cli_module.main([
         "comparison-summary",
+        "--refresh-market-data",
         "--walk-forward",
         "--walk-forward-start-year",
         "2020",
@@ -925,7 +946,7 @@ def test_apply_comparison_universe_variant_btc_only_is_noop_for_etf_strategies()
 def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
     config = configure_cli(monkeypatch, tmp_path)
 
-    cli_module.main(["comparison-summary", "--top", "1"])
+    cli_module.main(["comparison-summary", "--refresh-market-data", "--top", "1"])
     capsys.readouterr()
 
     exit_code = cli_module.main(["run-catalog", "--limit", "3", "--json"])
@@ -968,7 +989,7 @@ def test_run_catalog_command_json(monkeypatch, tmp_path, capsys) -> None:
 def test_rebuild_run_index_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
 
-    cli_module.main(["comparison-summary", "--top", "1"])
+    cli_module.main(["comparison-summary", "--refresh-market-data", "--top", "1"])
     capsys.readouterr()
 
     exit_code = cli_module.main(["rebuild-run-index", "--json"])
@@ -1020,6 +1041,47 @@ def test_comparison_run_spec_command_json_writes_market_data_snapshots(monkeypat
         assert (snapshot_path / "manifest.json").exists()
         assert (snapshot_path / "closes.csv").exists()
         assert (snapshot_path / "volumes.csv").exists()
+
+
+@pytest.mark.slow
+def test_comparison_summary_command_reads_market_data_snapshots_without_fetching(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    config = configure_cli(monkeypatch, tmp_path)
+    spec_file = tmp_path / "comparison-run-spec.json"
+    snapshot_dir = tmp_path / "market_snapshots"
+
+    exit_code = cli_module.main([
+        "comparison-run-spec",
+        "--write-market-snapshots",
+        "--market-snapshot-dir",
+        str(snapshot_dir),
+        "--json",
+    ])
+    assert exit_code == 0
+    spec_file.write_text(capsys.readouterr().out)
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("live fetch should not be called")
+
+    monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fail_fetch)
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--snapshot-spec-file",
+        str(spec_file),
+        "--market-snapshot-dir",
+        str(snapshot_dir),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["comparison"]["comparisonId"] == config.comparison_id
+    assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
+    assert len(payload["referenceRuns"]) == len(config.reference_strategies)
 
 
 @pytest.mark.slow
@@ -1087,7 +1149,7 @@ def test_rerun_comparison_spec_command_json_reads_market_data_snapshots_without_
 def test_latest_run_command_json(monkeypatch, tmp_path, capsys) -> None:
     configure_cli(monkeypatch, tmp_path)
 
-    cli_module.main(["comparison-summary", "--top", "1"])
+    cli_module.main(["comparison-summary", "--refresh-market-data", "--top", "1"])
     capsys.readouterr()
 
     cli_module.main(["run-catalog", "--limit", "1", "--json"])

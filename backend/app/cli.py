@@ -86,9 +86,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the comparison against a fixed universe variant.",
     )
     comparison_parser.add_argument("--json", action="store_true", dest="as_json")
+    comparison_parser.add_argument(
+        "--refresh-market-data",
+        action="store_true",
+        help="Fetch live market data for this ad-hoc comparison run.",
+    )
     comparison_parser.add_argument("--walk-forward", action="store_true")
     comparison_parser.add_argument("--walk-forward-start-year", type=int, default=2020)
     comparison_parser.add_argument("--walk-forward-end-year", type=int, default=2025)
+    comparison_parser.add_argument(
+        "--snapshot-spec-file",
+        help="Read market data snapshot metadata from a comparison-run-spec JSON payload.",
+    )
+    comparison_parser.add_argument(
+        "--market-snapshot-dir",
+        help="Read market data snapshot CSV files from this directory.",
+    )
     comparison_parser.add_argument(
         "--strategy-key",
         action="append",
@@ -289,6 +302,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.command == "comparison-summary":
+        if args.refresh_market_data and (args.snapshot_spec_file or args.market_snapshot_dir):
+            parser.error("--refresh-market-data cannot be combined with snapshot options")
+        if bool(args.snapshot_spec_file) != bool(args.market_snapshot_dir):
+            parser.error("--snapshot-spec-file and --market-snapshot-dir must be provided together")
+        if not args.refresh_market_data and not args.snapshot_spec_file:
+            parser.error(
+                "comparison-summary no longer fetches live market data by default. "
+                "Use --snapshot-spec-file with --market-snapshot-dir for reproducible evaluations, "
+                "or pass --refresh-market-data for an ad-hoc live-data run."
+            )
+        comparison_fetch_market_universe_bundle = fetch_market_universe_bundle
+        if args.snapshot_spec_file:
+            snapshot_payload = json.loads(Path(args.snapshot_spec_file).read_text())
+            comparison_fetch_market_universe_bundle = build_market_snapshot_fetcher(
+                snapshot_payload,
+                args.market_snapshot_dir,
+            )
         comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
         comparison_spec = filter_comparison_strategies(
             comparison_spec,
@@ -297,7 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.walk_forward:
             payload = build_walk_forward_comparison_payload(
                 comparison_spec,
-                fetch_market_universe_bundle=fetch_market_universe_bundle,
+                fetch_market_universe_bundle=comparison_fetch_market_universe_bundle,
                 start_year=args.walk_forward_start_year,
                 end_year=args.walk_forward_end_year,
             )
@@ -309,7 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         payload = build_comparison_payload(
             comparison_spec,
-            fetch_market_universe_bundle=fetch_market_universe_bundle,
+            fetch_market_universe_bundle=comparison_fetch_market_universe_bundle,
         )
         if args.as_json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))

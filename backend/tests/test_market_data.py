@@ -6,11 +6,15 @@ import pytest
 from app import market_data as market_data_module
 from app.market_data import (
     MarketDataRequest,
+    StooqMarketDataProvider,
     YFinanceMarketDataProvider,
+    build_default_market_data_provider,
     build_market_data_content_fingerprint,
     build_dataset_snapshot_metadata,
     finalize_dataset_snapshot_metadata,
+    map_ticker_to_stooq_symbol,
     read_market_data_snapshot,
+    resolve_relative_period_start_date,
     write_market_data_snapshot,
 )
 
@@ -24,6 +28,20 @@ def build_download_frame(values: list[float]) -> pd.DataFrame:
         },
         index=index,
     )
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self) -> bytes:
+        return self.payload.encode("utf-8")
 
 
 def test_yfinance_provider_allows_partial_failures(monkeypatch) -> None:
@@ -200,6 +218,61 @@ def test_yfinance_provider_keeps_rows_before_late_asset_starts(monkeypatch) -> N
     assert float(bundle["closes"].loc["2025-01-03", "ETH-USD"]) == 300.0
     assert metadata["assetAvailability"]["ETH-USD"]["firstValidDate"] == "2025-01-03"
     assert metadata["aligned_start_date"] == "2025-01-01"
+
+
+def test_stooq_provider_fetches_csv_payloads() -> None:
+    payloads = {
+        "spy.us": "Date,Open,High,Low,Close,Volume\n2025-01-02,100,101,99,100.5,1000\n2025-01-03,101,102,100,101.5,1100\n2025-01-06,102,103,101,102.5,1200\n",
+        "qqq.us": "Date,Open,High,Low,Close,Volume\n2025-01-02,200,201,199,200.5,2000\n2025-01-03,201,202,200,202.5,2100\n2025-01-06,202,203,201,204.5,2200\n",
+    }
+    requested_urls: list[str] = []
+
+    def fake_urlopen(url, timeout):
+        requested_urls.append(url)
+        symbol = url.split("s=", 1)[1].split("&", 1)[0]
+        return FakeHttpResponse(payloads[symbol])
+
+    provider = StooqMarketDataProvider(api_key="test-key", urlopen_func=fake_urlopen)
+
+    bundle, metadata = provider.fetch_bundle(
+        MarketDataRequest(
+            tickers=("SPY", "QQQ"),
+            period="2015_2025",
+            timeframe="1d",
+            start_date="2025-01-01",
+            end_date="2025-01-10",
+        )
+    )
+
+    assert list(bundle["closes"].columns) == ["SPY", "QQQ"]
+    assert bundle["closes"].loc["2025-01-03", "QQQ"] == 202.5
+    assert bundle["volumes"].loc["2025-01-06", "SPY"] == 1200.0
+    assert metadata["source"] == "Stooq"
+    assert metadata["datasetSnapshot"]["source"] == "Stooq"
+    assert metadata["datasetSnapshot"]["adjustmentPolicy"] == "stooq_adjusted_close"
+    assert all("apikey=test-key" in url for url in requested_urls)
+
+
+def test_stooq_provider_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("STOOQ_API_KEY", raising=False)
+    provider = StooqMarketDataProvider()
+
+    with pytest.raises(ValueError, match="STOOQ_API_KEY"):
+        provider.fetch_bundle(MarketDataRequest(tickers=("SPY", "QQQ"), period="1y"))
+
+
+def test_market_data_provider_can_be_selected_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("QUANT_MARKET_DATA_PROVIDER", "stooq")
+    monkeypatch.setenv("STOOQ_API_KEY", "test-key")
+
+    assert isinstance(build_default_market_data_provider(), StooqMarketDataProvider)
+
+
+def test_stooq_symbol_and_period_helpers() -> None:
+    assert map_ticker_to_stooq_symbol("SPY") == "spy.us"
+    assert map_ticker_to_stooq_symbol("BTC-USD") == "btc-usd"
+    assert resolve_relative_period_start_date("3y", "2026-04-28") == "2023-04-26"
+    assert resolve_relative_period_start_date("6mo", "2026-04-28") == "2025-10-24"
 
 
 def test_dataset_snapshot_fingerprint_excludes_created_at_utc() -> None:

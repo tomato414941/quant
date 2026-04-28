@@ -47,14 +47,24 @@ uv run pytest -q
 
 ```bash
 cd backend
-uv run quant comparison-summary --top 1
+uv run quant comparison-summary \
+  --snapshot-spec-file tests/fixtures/golden_market/comparison-run-spec.json \
+  --market-snapshot-dir tests/fixtures/golden_market/market_snapshots \
+  --universe only_etf \
+  --strategy-key stg-fu-eq \
+  --top 1
 uv run quant signal-diagnostics --help
 ```
 
-互換入口として次も使える。
+Live market data runs are ad-hoc only and must opt in explicitly. The default
+provider is yfinance. To use Stooq instead, set `QUANT_MARKET_DATA_PROVIDER=stooq`
+and `STOOQ_API_KEY`.
 
 ```bash
-uv run python -m app comparison-summary --top 1
+QUANT_MARKET_DATA_PROVIDER=stooq STOOQ_API_KEY=... uv run quant comparison-run-spec \
+  --write-market-snapshots \
+  --market-snapshot-dir data/market_snapshots \
+  --json > data/comparison-run-spec.json
 ```
 
 ## API

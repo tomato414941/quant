@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+from io import StringIO
 import json
 import os
 from pathlib import Path
 import shutil
 import time
 from typing import Protocol
+from urllib.parse import urlencode
+from urllib.request import urlopen
 import uuid
 
 import pandas as pd
@@ -20,6 +23,9 @@ DEFAULT_ADJUSTMENT_POLICY = "auto_adjust"
 DEFAULT_MARKET_SNAPSHOT_STORAGE_DIR = (
     Path(__file__).resolve().parents[1] / "data" / "market_snapshots"
 )
+STOOQ_DAILY_INTERVAL = "d"
+STOOQ_WEEKLY_INTERVAL = "w"
+STOOQ_MONTHLY_INTERVAL = "m"
 
 
 @dataclass(frozen=True)
@@ -114,68 +120,15 @@ class YFinanceMarketDataProvider:
                 dtype="float64",
             )
 
-        if len(close_series_by_ticker) < 2:
-            failed_details = ", ".join(
-                f"{ticker}: {reason}" for ticker, reason in failed_tickers.items()
-            ) or "unknown"
-            raise ValueError(
-                "At least two tickers with valid market data are required. "
-                f"Failures: {failed_details}"
-            )
-
-        aligned_index = build_union_market_index(close_series_by_ticker.values())
-        closes = pd.concat(
-            [
-                align_series_to_index(series, aligned_index, limit=request.max_stale_bars)
-                for series in close_series_by_ticker.values()
-            ],
-            axis=1,
-        ).sort_index()
-        closes = closes.dropna(how="all")
-        if len(closes) < 3:
-            raise ValueError(
-                "At least 3 aligned rows are required for a portfolio backtest after "
-                f"provider filtering. Available tickers: {list(close_series_by_ticker)}"
-            )
-        volumes = pd.concat(
-            [
-                series.reindex(closes.index)
-                for series in volume_series_by_ticker.values()
-            ],
-            axis=1,
-        ).sort_index()
-        volumes = volumes.reindex(closes.index).fillna(0.0)
-
-        metadata = {
-            "tickers": list(closes.columns),
-            "requested_tickers": unique_tickers,
-            "failed_tickers": failed_tickers,
-            "assetAvailability": asset_availability,
-            "period": request.period,
-            "start_date": request.start_date,
-            "end_date": request.end_date,
-            "timeframe": request.timeframe,
-            "source": self.source_label,
-            "aligned_start_date": str(closes.index[0]),
-            "aligned_end_date": str(closes.index[-1]),
-            "row_count": len(closes),
-        }
-        metadata["datasetSnapshot"] = build_dataset_snapshot_metadata(
-            source=self.source_label,
-            timeframe=request.timeframe,
-            period=request.period,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            requested_tickers=unique_tickers,
-            available_tickers=list(closes.columns),
-            row_count=len(closes),
+        return build_market_data_bundle_from_series(
+            request=request,
+            close_series_by_ticker=close_series_by_ticker,
+            volume_series_by_ticker=volume_series_by_ticker,
+            failed_tickers=failed_tickers,
+            asset_availability=asset_availability,
+            source_label=self.source_label,
             adjustment_policy=DEFAULT_ADJUSTMENT_POLICY,
         )
-        finalize_dataset_snapshot_metadata(
-            metadata,
-            {"closes": closes, "volumes": volumes},
-        )
-        return {"closes": closes, "volumes": volumes}, metadata
 
     def _download_ticker(
         self,
@@ -240,7 +193,171 @@ class YFinanceMarketDataProvider:
         return normalized, None
 
 
-DEFAULT_MARKET_DATA_PROVIDER: MarketDataProvider = YFinanceMarketDataProvider()
+class StooqMarketDataProvider:
+    source_label = "Stooq"
+    base_url = "https://stooq.com/q/d/l/"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        urlopen_func=urlopen,
+    ) -> None:
+        self.api_key = api_key or os.environ.get("STOOQ_API_KEY")
+        self.urlopen_func = urlopen_func
+
+    def fetch_bundle(
+        self,
+        request: MarketDataRequest,
+    ) -> tuple[dict[str, pd.DataFrame], dict[str, object]]:
+        if not self.api_key:
+            raise ValueError("STOOQ_API_KEY is required for the Stooq market data provider.")
+
+        unique_tickers = normalize_tickers(request.tickers)
+        close_series_by_ticker: dict[str, pd.Series] = {}
+        volume_series_by_ticker: dict[str, pd.Series] = {}
+        failed_tickers: dict[str, str] = {}
+        asset_availability: dict[str, dict[str, object]] = {}
+
+        start_date, end_date = resolve_provider_date_range(
+            period=request.period,
+            start_date=request.start_date,
+            end_date=request.end_date,
+        )
+        stooq_interval = map_timeframe_to_stooq_interval(request.timeframe)
+
+        for ticker in unique_tickers:
+            data, failure_reason = self._download_ticker(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                interval=stooq_interval,
+            )
+            if data is None:
+                failed_reason = failure_reason or "unknown_download_failure"
+                failed_tickers[ticker] = failed_reason
+                asset_availability[ticker] = {
+                    "requested": True,
+                    "available": False,
+                    "failedReason": failed_reason,
+                    "firstValidDate": None,
+                    "lastValidDate": None,
+                    "validRowCount": 0,
+                }
+                continue
+
+            clean_close_data = data["Close"].dropna()
+            if clean_close_data.empty:
+                failed_tickers[ticker] = "empty_close_series"
+                asset_availability[ticker] = {
+                    "requested": True,
+                    "available": False,
+                    "failedReason": "empty_close_series",
+                    "firstValidDate": None,
+                    "lastValidDate": None,
+                    "validRowCount": 0,
+                }
+                continue
+            close_series = pd.Series(
+                data=[float(value) for value in clean_close_data.values],
+                index=[format_market_date(index) for index in clean_close_data.index],
+                name=ticker,
+                dtype="float64",
+            )
+            close_series_by_ticker[ticker] = close_series
+            asset_availability[ticker] = {
+                "requested": True,
+                "available": True,
+                "failedReason": None,
+                "firstValidDate": str(close_series.index[0]),
+                "lastValidDate": str(close_series.index[-1]),
+                "validRowCount": int(close_series.count()),
+            }
+            volume_series_by_ticker[ticker] = pd.Series(
+                data=[
+                    float(value)
+                    for value in data["Volume"].reindex(clean_close_data.index).fillna(0.0).values
+                ],
+                index=[format_market_date(index) for index in clean_close_data.index],
+                name=ticker,
+                dtype="float64",
+            )
+
+        return build_market_data_bundle_from_series(
+            request=request,
+            close_series_by_ticker=close_series_by_ticker,
+            volume_series_by_ticker=volume_series_by_ticker,
+            failed_tickers=failed_tickers,
+            asset_availability=asset_availability,
+            source_label=self.source_label,
+            adjustment_policy="stooq_adjusted_close",
+        )
+
+    def _download_ticker(
+        self,
+        *,
+        ticker: str,
+        start_date: str,
+        end_date: str,
+        interval: str,
+    ) -> tuple[pd.DataFrame | None, str | None]:
+        stooq_symbol = map_ticker_to_stooq_symbol(ticker)
+        query = urlencode(
+            {
+                "s": stooq_symbol,
+                "i": interval,
+                "d1": start_date.replace("-", ""),
+                "d2": end_date.replace("-", ""),
+                "apikey": self.api_key,
+            }
+        )
+        try:
+            with self.urlopen_func(f"{self.base_url}?{query}", timeout=15) as response:
+                raw_payload = response.read().decode("utf-8")
+        except Exception as exc:
+            return None, f"download_exception:{type(exc).__name__}"
+
+        try:
+            data = pd.read_csv(StringIO(raw_payload))
+        except Exception as exc:
+            return None, f"csv_parse_exception:{type(exc).__name__}"
+        return self._normalize_download_frame(data)
+
+    def _normalize_download_frame(
+        self,
+        data: pd.DataFrame,
+    ) -> tuple[pd.DataFrame | None, str | None]:
+        if data.empty:
+            return None, "empty_frame"
+        required_columns = {"Date", "Close"}
+        if not required_columns.issubset(data.columns):
+            return None, "missing_required_columns"
+        dates = pd.to_datetime(data["Date"], errors="coerce")
+        if dates.isna().all():
+            return None, "invalid_dates"
+        volume = data["Volume"] if "Volume" in data.columns else pd.Series(0.0, index=data.index)
+        normalized = pd.DataFrame(
+            {
+                "Close": pd.to_numeric(data["Close"], errors="coerce").to_numpy(),
+                "Volume": pd.to_numeric(volume, errors="coerce").fillna(0.0).to_numpy(),
+            },
+            index=dates.to_numpy(),
+        ).dropna(subset=["Close"])
+        if normalized.empty:
+            return None, "empty_close_series"
+        return normalized, None
+
+
+def build_default_market_data_provider() -> MarketDataProvider:
+    provider_key = os.environ.get("QUANT_MARKET_DATA_PROVIDER", "yfinance").strip().lower()
+    if provider_key in {"yfinance", "yahoo", "yahoo_finance"}:
+        return YFinanceMarketDataProvider()
+    if provider_key == "stooq":
+        return StooqMarketDataProvider()
+    raise ValueError(f"Unsupported market data provider: {provider_key}")
+
+
+DEFAULT_MARKET_DATA_PROVIDER: MarketDataProvider = build_default_market_data_provider()
 
 
 def normalize_tickers(tickers: tuple[str, ...] | list[str]) -> list[str]:
@@ -249,6 +366,81 @@ def normalize_tickers(tickers: tuple[str, ...] | list[str]) -> list[str]:
     if not unique_tickers:
         raise ValueError("At least one ticker is required.")
     return unique_tickers
+
+
+def build_market_data_bundle_from_series(
+    *,
+    request: MarketDataRequest,
+    close_series_by_ticker: dict[str, pd.Series],
+    volume_series_by_ticker: dict[str, pd.Series],
+    failed_tickers: dict[str, str],
+    asset_availability: dict[str, dict[str, object]],
+    source_label: str,
+    adjustment_policy: str,
+) -> tuple[dict[str, pd.DataFrame], dict[str, object]]:
+    unique_tickers = normalize_tickers(request.tickers)
+    if len(close_series_by_ticker) < 2:
+        failed_details = ", ".join(
+            f"{ticker}: {reason}" for ticker, reason in failed_tickers.items()
+        ) or "unknown"
+        raise ValueError(
+            "At least two tickers with valid market data are required. "
+            f"Failures: {failed_details}"
+        )
+
+    aligned_index = build_union_market_index(close_series_by_ticker.values())
+    closes = pd.concat(
+        [
+            align_series_to_index(series, aligned_index, limit=request.max_stale_bars)
+            for series in close_series_by_ticker.values()
+        ],
+        axis=1,
+    ).sort_index()
+    closes = closes.dropna(how="all")
+    if len(closes) < 3:
+        raise ValueError(
+            "At least 3 aligned rows are required for a portfolio backtest after "
+            f"provider filtering. Available tickers: {list(close_series_by_ticker)}"
+        )
+    volumes = pd.concat(
+        [
+            series.reindex(closes.index)
+            for series in volume_series_by_ticker.values()
+        ],
+        axis=1,
+    ).sort_index()
+    volumes = volumes.reindex(closes.index).fillna(0.0)
+
+    metadata = {
+        "tickers": list(closes.columns),
+        "requested_tickers": unique_tickers,
+        "failed_tickers": failed_tickers,
+        "assetAvailability": asset_availability,
+        "period": request.period,
+        "start_date": request.start_date,
+        "end_date": request.end_date,
+        "timeframe": request.timeframe,
+        "source": source_label,
+        "aligned_start_date": str(closes.index[0]),
+        "aligned_end_date": str(closes.index[-1]),
+        "row_count": len(closes),
+    }
+    metadata["datasetSnapshot"] = build_dataset_snapshot_metadata(
+        source=source_label,
+        timeframe=request.timeframe,
+        period=request.period,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        requested_tickers=unique_tickers,
+        available_tickers=list(closes.columns),
+        row_count=len(closes),
+        adjustment_policy=adjustment_policy,
+    )
+    finalize_dataset_snapshot_metadata(
+        metadata,
+        {"closes": closes, "volumes": volumes},
+    )
+    return {"closes": closes, "volumes": volumes}, metadata
 
 
 def build_union_market_index(series_values) -> pd.Index:
@@ -556,6 +748,53 @@ def validate_dataset_snapshot_matches(actual: dict[str, object], expected: dict[
     for key in comparable_keys:
         if actual.get(key) != expected.get(key):
             raise ValueError(f"Market data snapshot {key} does not match expected metadata.")
+
+
+def map_ticker_to_stooq_symbol(ticker: str) -> str:
+    normalized = ticker.strip().lower()
+    if "-" in normalized:
+        return normalized
+    if "." in normalized:
+        return normalized
+    return f"{normalized}.us"
+
+
+def map_timeframe_to_stooq_interval(timeframe: str) -> str:
+    if timeframe == "1d":
+        return STOOQ_DAILY_INTERVAL
+    if timeframe == "1wk":
+        return STOOQ_WEEKLY_INTERVAL
+    if timeframe == "1mo":
+        return STOOQ_MONTHLY_INTERVAL
+    raise ValueError(f"Unsupported Stooq timeframe: {timeframe}")
+
+
+def resolve_provider_date_range(
+    *,
+    period: str,
+    start_date: str | None,
+    end_date: str | None,
+) -> tuple[str, str]:
+    if start_date is not None or end_date is not None:
+        resolved_end = end_date or datetime.now(timezone.utc).date().isoformat()
+        return start_date or resolve_relative_period_start_date(period, resolved_end), resolved_end
+    resolved_end = datetime.now(timezone.utc).date().isoformat()
+    return resolve_relative_period_start_date(period, resolved_end), resolved_end
+
+
+def resolve_relative_period_start_date(period: str, end_date: str) -> str:
+    end = datetime.fromisoformat(end_date).date()
+    normalized = period.strip().lower()
+    if normalized.endswith("mo"):
+        months = int(normalized[:-2])
+        return (end - timedelta(days=months * 31)).isoformat()
+    if normalized.endswith("y"):
+        years = int(normalized[:-1])
+        return (end - timedelta(days=years * 366)).isoformat()
+    if "_" in normalized:
+        start_year = int(normalized.split("_", 1)[0])
+        return f"{start_year:04d}-01-01"
+    raise ValueError(f"Unsupported relative market data period: {period}")
 
 
 def build_market_snapshot_fetcher(

@@ -77,7 +77,7 @@ Evaluation ContextはStrategy定義を上書きしない。Universe、rebalance 
 
 ## Data Snapshot Contract
 
-Evaluation run specs include `marketDataContexts[].datasetSnapshot` as metadata-only provenance for the market data used by the run.
+Evaluation run specs include `marketDataContexts[].datasetSnapshot` as the fixed market data contract for a run. Provider APIs are used to create local snapshots; reproducible evaluations read those snapshots and validate their metadata/content fingerprints instead of fetching provider data.
 
 The v1 contract records:
 
@@ -89,6 +89,9 @@ The v1 contract records:
 - `availableTickers`: symbols with usable rows after provider filtering.
 - `rowCount`: aligned market data row count.
 - `adjustmentPolicy`: price adjustment policy used by the provider.
+- `contentFingerprint`: stable identifier derived from `closes.csv` and `volumes.csv`.
 - `fingerprint` and `snapshotId`: stable identifiers derived from the snapshot metadata excluding `createdAtUtc`.
 
-The snapshot does not store raw prices, volumes, or downloaded provider payloads. Raw market data remains local/generated data and must not be committed.
+Provider-backed snapshot creation writes `manifest.json`, `closes.csv`, and `volumes.csv` under the local snapshot directory. Evaluation and rerun commands resolve market data by `snapshotId` and reject mismatched metadata or CSV content. Live provider fetches are for creating/updating snapshots or explicit ad-hoc runs, not the intended reproducible evaluation path.
+
+Committed fixtures may include small generated/golden snapshots for tests. Full provider downloads remain local generated data and must not be committed.

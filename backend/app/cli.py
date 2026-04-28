@@ -228,6 +228,34 @@ def build_parser() -> argparse.ArgumentParser:
     comparison_run_spec_parser.add_argument("--write-market-snapshots", action="store_true")
     comparison_run_spec_parser.add_argument("--market-snapshot-dir")
 
+    market_snapshot_parser = subparsers.add_parser(
+        "market-snapshot-create",
+        help="Fetch provider data once, write immutable market snapshots, and print the run spec.",
+    )
+    market_snapshot_parser.add_argument(
+        "--provider",
+        default=None,
+        help="Market data provider key. Defaults to QUANT_MARKET_DATA_PROVIDER or yfinance.",
+    )
+    market_snapshot_parser.add_argument(
+        "--market-snapshot-dir",
+        required=True,
+        help="Directory where market snapshot files will be written.",
+    )
+    market_snapshot_parser.add_argument(
+        "--universe",
+        choices=UNIVERSE_VARIANT_KEYS,
+        default="crypto_included",
+        help="Create snapshots for a fixed universe variant.",
+    )
+    market_snapshot_parser.add_argument(
+        "--strategy-key",
+        action="append",
+        dest="strategy_keys",
+        help="Restrict snapshot creation to a strategy key. Can be repeated.",
+    )
+    market_snapshot_parser.add_argument("--json", action="store_true", dest="as_json")
+
     rerun_comparison_spec_parser = subparsers.add_parser(
         "rerun-comparison-spec",
         help="Rerun a saved comparison-run-spec JSON payload.",
@@ -236,6 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
     rerun_comparison_spec_parser.add_argument("--top", type=int, default=5)
     rerun_comparison_spec_parser.add_argument("--json", action="store_true", dest="as_json")
     rerun_comparison_spec_parser.add_argument("--market-snapshot-dir")
+    rerun_comparison_spec_parser.add_argument(
+        "--refresh-market-data",
+        action="store_true",
+        help="Fetch live market data for this ad-hoc rerun instead of reading snapshots.",
+    )
 
     run_catalog_parser = subparsers.add_parser(
         "run-catalog",
@@ -465,7 +498,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_comparison_run_spec(payload))
         return 0
 
+    if args.command == "market-snapshot-create":
+        comparison_spec = apply_comparison_universe_variant(DEFAULT_COMPARISON_SPEC, args.universe)
+        comparison_spec = filter_comparison_strategies(
+            comparison_spec,
+            tuple(args.strategy_keys) if args.strategy_keys else None,
+        )
+
+        def fetch_with_selected_provider(*fetch_args, **fetch_kwargs):
+            return fetch_market_universe_bundle(
+                *fetch_args,
+                provider_key=args.provider,
+                **fetch_kwargs,
+            )
+
+        payload = build_comparison_run_spec_payload(
+            comparison_spec,
+            fetch_market_universe_bundle=fetch_with_selected_provider,
+            market_snapshot_dir=args.market_snapshot_dir,
+        )
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_comparison_run_spec(payload))
+        return 0
+
     if args.command == "rerun-comparison-spec":
+        if args.refresh_market_data and args.market_snapshot_dir:
+            parser.error("--refresh-market-data cannot be combined with --market-snapshot-dir")
+        if not args.refresh_market_data and not args.market_snapshot_dir:
+            parser.error(
+                "rerun-comparison-spec requires --market-snapshot-dir for reproducible evaluations, "
+                "or --refresh-market-data for an ad-hoc live-data rerun."
+            )
         payload = json.loads(Path(args.spec_file).read_text())
         rerun_fetch_market_universe_bundle = (
             build_market_snapshot_fetcher(payload, args.market_snapshot_dir)

@@ -9,9 +9,11 @@ from app.market_data import (
     StooqMarketDataProvider,
     YFinanceMarketDataProvider,
     build_default_market_data_provider,
+    build_market_data_provider,
     build_market_data_content_fingerprint,
     build_dataset_snapshot_metadata,
     finalize_dataset_snapshot_metadata,
+    fetch_market_universe_bundle,
     map_ticker_to_stooq_symbol,
     read_market_data_snapshot,
     resolve_relative_period_start_date,
@@ -266,6 +268,53 @@ def test_market_data_provider_can_be_selected_from_environment(monkeypatch) -> N
     monkeypatch.setenv("STOOQ_API_KEY", "test-key")
 
     assert isinstance(build_default_market_data_provider(), StooqMarketDataProvider)
+
+    monkeypatch.delenv("QUANT_MARKET_DATA_PROVIDER", raising=False)
+    assert isinstance(build_default_market_data_provider(), YFinanceMarketDataProvider)
+    assert isinstance(build_market_data_provider("yahoo"), YFinanceMarketDataProvider)
+    assert isinstance(build_market_data_provider("yahoo_finance"), YFinanceMarketDataProvider)
+    with pytest.raises(ValueError, match="Unsupported market data provider"):
+        build_market_data_provider("unknown")
+
+
+def test_fetch_market_universe_bundle_uses_selected_provider(monkeypatch) -> None:
+    captured_requests: list[MarketDataRequest] = []
+
+    class FakeProvider:
+        def fetch_bundle(self, request: MarketDataRequest):
+            captured_requests.append(request)
+            return {"closes": pd.DataFrame(), "volumes": pd.DataFrame()}, {"source": "fake"}
+
+    def fake_provider(provider_key: str | None = None):
+        assert provider_key == "stooq"
+        return FakeProvider()
+
+    monkeypatch.setattr(market_data_module, "build_market_data_provider", fake_provider)
+
+    bundle, metadata = fetch_market_universe_bundle(
+        tickers=["SPY", "QQQ"],
+        period="3y",
+        timeframe="1wk",
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        max_stale_bars=2,
+        provider_key="stooq",
+    )
+
+    assert set(bundle) == {"closes", "volumes"}
+    assert bundle["closes"].empty
+    assert bundle["volumes"].empty
+    assert metadata == {"source": "fake"}
+    assert captured_requests == [
+        MarketDataRequest(
+            tickers=("SPY", "QQQ"),
+            period="3y",
+            timeframe="1wk",
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+            max_stale_bars=2,
+        )
+    ]
 
 
 def test_stooq_symbol_and_period_helpers() -> None:

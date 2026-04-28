@@ -1044,6 +1044,41 @@ def test_comparison_run_spec_command_json_writes_market_data_snapshots(monkeypat
         assert (snapshot_path / "volumes.csv").exists()
 
 
+def test_market_snapshot_create_command_writes_market_data_snapshots(monkeypatch, tmp_path, capsys) -> None:
+    config = configure_cli(monkeypatch, tmp_path)
+    snapshot_dir = tmp_path / "market_snapshots"
+    requested_provider_keys: list[str | None] = []
+
+    def fake_fetch_with_provider(*args, **kwargs):
+        requested_provider_keys.append(kwargs.pop("provider_key", None))
+        return fake_fetch_market_universe_bundle(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fake_fetch_with_provider)
+
+    exit_code = cli_module.main([
+        "market-snapshot-create",
+        "--provider",
+        "stooq",
+        "--market-snapshot-dir",
+        str(snapshot_dir),
+        "--universe",
+        "only_etf",
+        "--strategy-key",
+        "stg-fu-eq",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["comparisonId"].endswith("__strategies_stg-fu-eq")
+    assert payload["marketDataSnapshots"]
+    assert requested_provider_keys
+    assert set(requested_provider_keys) == {"stooq"}
+    assert len(payload["candidateStrategies"]) == 1
+    assert payload["candidateStrategies"][0]["strategyId"] == "stg-fu-eq"
+    assert payload["resultStoreDir"] == config.result_store_dir
+
+
 @pytest.mark.slow
 def test_comparison_summary_command_reads_market_data_snapshots_without_fetching(
     monkeypatch,
@@ -1134,7 +1169,7 @@ def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> No
     assert exit_code == 0
     spec_file.write_text(captured.out)
 
-    exit_code = cli_module.main(["rerun-comparison-spec", str(spec_file), "--json"])
+    exit_code = cli_module.main(["rerun-comparison-spec", str(spec_file), "--refresh-market-data", "--json"])
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
@@ -1143,6 +1178,22 @@ def test_rerun_comparison_spec_command_json(monkeypatch, tmp_path, capsys) -> No
     assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
     assert len(payload["referenceRuns"]) == len(config.reference_strategies)
     assert payload["runStoreSummary"]["cachedRunCount"] + payload["runStoreSummary"]["computedRunCount"] > 0
+
+
+def test_rerun_comparison_spec_requires_explicit_market_data_source(monkeypatch, tmp_path, capsys) -> None:
+    configure_cli(monkeypatch, tmp_path)
+    spec_file = tmp_path / "comparison-run-spec.json"
+
+    exit_code = cli_module.main(["comparison-run-spec", "--json"])
+    assert exit_code == 0
+    spec_file.write_text(capsys.readouterr().out)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_module.main(["rerun-comparison-spec", str(spec_file), "--json"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "requires --market-snapshot-dir" in captured.err
 
 
 @pytest.mark.slow
@@ -1236,7 +1287,7 @@ def test_rerun_comparison_spec_command_rejects_mismatched_fingerprint(monkeypatc
     spec_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
     try:
-        cli_module.main(["rerun-comparison-spec", str(spec_file), "--json"])
+        cli_module.main(["rerun-comparison-spec", str(spec_file), "--refresh-market-data", "--json"])
     except ValueError as exc:
         assert "runSpecFingerprint does not match" in str(exc)
     else:

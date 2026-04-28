@@ -57,14 +57,19 @@ uv run quant signal-diagnostics --help
 ```
 
 Live market data runs are ad-hoc only and must opt in explicitly. The default
-provider is yfinance. To use Stooq instead, set `QUANT_MARKET_DATA_PROVIDER=stooq`
-and `STOOQ_API_KEY`.
+provider is yfinance. Normal evaluation should first create market snapshots,
+then read those snapshots for comparison runs.
 
 ```bash
-QUANT_MARKET_DATA_PROVIDER=stooq STOOQ_API_KEY=... uv run quant comparison-run-spec \
-  --write-market-snapshots \
+STOOQ_API_KEY=... uv run quant market-snapshot-create \
+  --provider stooq \
   --market-snapshot-dir data/market_snapshots \
   --json > data/comparison-run-spec.json
+
+uv run quant comparison-summary \
+  --snapshot-spec-file data/comparison-run-spec.json \
+  --market-snapshot-dir data/market_snapshots \
+  --top 5
 ```
 
 ## API

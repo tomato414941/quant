@@ -348,8 +348,8 @@ class StooqMarketDataProvider:
         return normalized, None
 
 
-def build_default_market_data_provider() -> MarketDataProvider:
-    provider_key = os.environ.get("QUANT_MARKET_DATA_PROVIDER", "yfinance").strip().lower()
+def build_market_data_provider(provider_key: str | None = None) -> MarketDataProvider:
+    provider_key = (provider_key or os.environ.get("QUANT_MARKET_DATA_PROVIDER", "yfinance")).strip().lower()
     if provider_key in {"yfinance", "yahoo", "yahoo_finance"}:
         return YFinanceMarketDataProvider()
     if provider_key == "stooq":
@@ -357,8 +357,8 @@ def build_default_market_data_provider() -> MarketDataProvider:
     raise ValueError(f"Unsupported market data provider: {provider_key}")
 
 
-DEFAULT_MARKET_DATA_PROVIDER: MarketDataProvider = build_default_market_data_provider()
-
+def build_default_market_data_provider() -> MarketDataProvider:
+    return build_market_data_provider()
 
 def normalize_tickers(tickers: tuple[str, ...] | list[str]) -> list[str]:
     normalized_tickers = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
@@ -481,6 +481,7 @@ def fetch_market_universe_bundle(
     start_date: str | None = None,
     end_date: str | None = None,
     max_stale_bars: int = DEFAULT_MAX_STALE_BARS,
+    provider_key: str | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, object]]:
     request = MarketDataRequest(
         tickers=tuple(tickers),
@@ -490,7 +491,8 @@ def fetch_market_universe_bundle(
         end_date=end_date,
         max_stale_bars=max_stale_bars,
     )
-    return DEFAULT_MARKET_DATA_PROVIDER.fetch_bundle(request)
+    provider = build_market_data_provider(provider_key)
+    return provider.fetch_bundle(request)
 
 
 def build_dataset_snapshot_metadata(

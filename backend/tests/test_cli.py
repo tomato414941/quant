@@ -1,6 +1,7 @@
 import copy
 import json
 import math
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -1082,6 +1083,45 @@ def test_comparison_summary_command_reads_market_data_snapshots_without_fetching
     assert payload["comparison"]["comparisonId"] == config.comparison_id
     assert len(payload["candidateRuns"]) == len(config.candidate_strategies)
     assert len(payload["referenceRuns"]) == len(config.reference_strategies)
+
+
+@pytest.mark.slow
+def test_comparison_summary_command_runs_committed_golden_snapshot_without_fetching(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    fixture_dir = Path(__file__).parent / "fixtures" / "golden_market"
+    spec_payload = json.loads((fixture_dir / "comparison-run-spec.json").read_text())
+    spec_payload["resultStoreDir"] = str(tmp_path / "run_results")
+    spec_file = tmp_path / "comparison-run-spec.json"
+    spec_file.write_text(json.dumps(spec_payload))
+
+    def fail_fetch(*_args, **_kwargs):
+        raise AssertionError("live fetch should not be called")
+
+    monkeypatch.setattr(cli_module, "fetch_market_universe_bundle", fail_fetch)
+
+    exit_code = cli_module.main([
+        "comparison-summary",
+        "--snapshot-spec-file",
+        str(spec_file),
+        "--market-snapshot-dir",
+        str(fixture_dir / "market_snapshots"),
+        "--universe",
+        "only_etf",
+        "--strategy-key",
+        "stg-fu-eq",
+        "--top",
+        "1",
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["comparison"]["comparisonId"].endswith("__strategies_stg-fu-eq")
+    assert [run["strategy"]["strategyId"] for run in payload["candidateRuns"]] == ["stg-fu-eq"]
+    assert payload["candidateRuns"][0]["summary"]["totalReturnPct"] == 3.06
 
 
 @pytest.mark.slow

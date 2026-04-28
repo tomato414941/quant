@@ -1,0 +1,945 @@
+{
+  "kind": "comparison_run_spec_payload",
+  "schemaVersion": "v1",
+  "comparisonId": "etf_portfolio_models_2015_2025__strategies_stg-fu-eq",
+  "title": "有望Strategyの探索",
+  "question": "共通の評価前提で Strategy を比較し、現時点で最も有望な構成を見つける",
+  "resultStoreDir": "backend/data/run_results",
+  "selectionPolicy": {
+    "primaryMetric": "sharpe_ratio",
+    "secondaryMetric": "total_return",
+    "tertiaryMetric": "max_drawdown"
+  },
+  "candidateStrategyCount": 1,
+  "referenceStrategyCount": 0,
+  "candidateStrategies": [
+    {
+      "kind": "strategy_definition",
+      "schemaVersion": "v1",
+      "strategyId": "stg-fu-eq",
+      "version": "v1",
+      "label": "全資産",
+      "hypothesis": null,
+      "description": "全ETFを候補にして配分する",
+      "components": {
+        "core": {
+          "investmentUniverse": {
+            "key": "etf",
+            "label": "ETF",
+            "assetCount": 18,
+            "tickers": [
+              "SPY",
+              "QQQ",
+              "IWM",
+              "EFA",
+              "EEM",
+              "EWJ",
+              "EWZ",
+              "VNQ",
+              "TLT",
+              "IEF",
+              "LQD",
+              "HYG",
+              "TIP",
+              "GLD",
+              "SLV",
+              "DBC",
+              "USO",
+              "UUP"
+            ]
+          },
+          "portfolioModel": {
+            "key": "equal_weight",
+            "modelType": "equal_weight",
+            "label": "等金額配分",
+            "description": "全ETFを同じ比率で持つ"
+          },
+          "executionPlan": {
+            "key": "execution_plan__year_end",
+            "label": "年次",
+            "decisionSchedule": "year_end",
+            "rebalanceSchedule": "year_end"
+          }
+        },
+        "optional": {
+          "signals": [
+            {
+              "key": "signal__stg-fu-eq__selection",
+              "label": "全資産",
+              "description": "全ETFを候補にして配分する",
+              "sourceKind": "selection_signal",
+              "weight": 1.0,
+              "predictorKey": null,
+              "signalParameters": {
+                "fallbackRuleKey": "none",
+                "featureInputs": [
+                  "close"
+                ],
+                "filterRuleKeys": {},
+                "scoreModelKind": "none",
+                "scoreParameters": {},
+                "selectionKey": "full_universe",
+                "strategyType": "full_universe",
+                "universePolicyKey": "all_assets"
+              },
+              "observationSpec": {
+                "kind": "observation_spec",
+                "schemaVersion": "v1",
+                "key": "observation__stg-fu-eq__selection",
+                "label": "全資産 observation",
+                "assetCount": 18,
+                "tickers": [
+                  "SPY",
+                  "QQQ",
+                  "IWM",
+                  "EFA",
+                  "EEM",
+                  "EWJ",
+                  "EWZ",
+                  "VNQ",
+                  "TLT",
+                  "IEF",
+                  "LQD",
+                  "HYG",
+                  "TIP",
+                  "GLD",
+                  "SLV",
+                  "DBC",
+                  "USO",
+                  "UUP"
+                ],
+                "fields": [
+                  "close"
+                ]
+              },
+              "dataSource": {
+                "key": "data_source__signal__stg-fu-eq__selection",
+                "label": "全資産 data source",
+                "kind": "market_observation",
+                "observationSpec": {
+                  "kind": "observation_spec",
+                  "schemaVersion": "v1",
+                  "key": "observation__stg-fu-eq__selection",
+                  "label": "全資産 observation",
+                  "assetCount": 18,
+                  "tickers": [
+                    "SPY",
+                    "QQQ",
+                    "IWM",
+                    "EFA",
+                    "EEM",
+                    "EWJ",
+                    "EWZ",
+                    "VNQ",
+                    "TLT",
+                    "IEF",
+                    "LQD",
+                    "HYG",
+                    "TIP",
+                    "GLD",
+                    "SLV",
+                    "DBC",
+                    "USO",
+                    "UUP"
+                  ],
+                  "fields": [
+                    "close"
+                  ]
+                }
+              },
+              "featureDefinition": {
+                "key": "feature_definition__signal__stg-fu-eq__selection",
+                "label": "全資産 features",
+                "sourceFieldKeys": [
+                  "close"
+                ],
+                "derivedFeatureKeys": []
+              },
+              "alignmentPolicy": null,
+              "dataTimeframe": {
+                "key": "1d",
+                "label": "日次",
+                "yfinanceInterval": "1d",
+                "barsPerYear": 252.0,
+                "barSeconds": 86400
+              },
+              "signalTimeframe": {
+                "key": "1d",
+                "label": "日次",
+                "yfinanceInterval": "1d",
+                "barsPerYear": 252.0,
+                "barSeconds": 86400
+              }
+            }
+          ],
+          "riskControls": {
+            "maxInvestmentPct": 100.0,
+            "maxWeightPct": 45.0
+          }
+        }
+      },
+      "executionSupport": {
+        "directExecutionCompatible": true,
+        "directExecutionIssues": []
+      },
+      "extensions": {}
+    }
+  ],
+  "referenceStrategies": [],
+  "conditionVariants": [
+    {
+      "key": "cost_x1_0__invest_100__no_cap",
+      "label": "コスト x1.0 / 投資 100% / CASH 0% / 上限なし",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x1_0__invest_100__cap_45",
+      "label": "コスト x1.0 / 投資 100% / CASH 0% / 45%上限",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x1_0__invest_100__cap_35",
+      "label": "コスト x1.0 / 投資 100% / CASH 0% / 35%上限",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x1_0__invest_90__no_cap",
+      "label": "コスト x1.0 / 投資 90% / CASH 10% / 上限なし",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x1_0__invest_90__cap_45",
+      "label": "コスト x1.0 / 投資 90% / CASH 10% / 45%上限",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x1_0__invest_90__cap_35",
+      "label": "コスト x1.0 / 投資 90% / CASH 10% / 35%上限",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x1_0__invest_80__no_cap",
+      "label": "コスト x1.0 / 投資 80% / CASH 20% / 上限なし",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x1_0__invest_80__cap_45",
+      "label": "コスト x1.0 / 投資 80% / CASH 20% / 45%上限",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x1_0__invest_80__cap_35",
+      "label": "コスト x1.0 / 投資 80% / CASH 20% / 35%上限",
+      "costMultiplier": 1.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x2_0__invest_100__no_cap",
+      "label": "コスト x2.0 / 投資 100% / CASH 0% / 上限なし",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x2_0__invest_100__cap_45",
+      "label": "コスト x2.0 / 投資 100% / CASH 0% / 45%上限",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x2_0__invest_100__cap_35",
+      "label": "コスト x2.0 / 投資 100% / CASH 0% / 35%上限",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x2_0__invest_90__no_cap",
+      "label": "コスト x2.0 / 投資 90% / CASH 10% / 上限なし",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x2_0__invest_90__cap_45",
+      "label": "コスト x2.0 / 投資 90% / CASH 10% / 45%上限",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x2_0__invest_90__cap_35",
+      "label": "コスト x2.0 / 投資 90% / CASH 10% / 35%上限",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x2_0__invest_80__no_cap",
+      "label": "コスト x2.0 / 投資 80% / CASH 20% / 上限なし",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x2_0__invest_80__cap_45",
+      "label": "コスト x2.0 / 投資 80% / CASH 20% / 45%上限",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x2_0__invest_80__cap_35",
+      "label": "コスト x2.0 / 投資 80% / CASH 20% / 35%上限",
+      "costMultiplier": 2.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x3_0__invest_100__no_cap",
+      "label": "コスト x3.0 / 投資 100% / CASH 0% / 上限なし",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x3_0__invest_100__cap_45",
+      "label": "コスト x3.0 / 投資 100% / CASH 0% / 45%上限",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x3_0__invest_100__cap_35",
+      "label": "コスト x3.0 / 投資 100% / CASH 0% / 35%上限",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 100.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x3_0__invest_90__no_cap",
+      "label": "コスト x3.0 / 投資 90% / CASH 10% / 上限なし",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x3_0__invest_90__cap_45",
+      "label": "コスト x3.0 / 投資 90% / CASH 10% / 45%上限",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x3_0__invest_90__cap_35",
+      "label": "コスト x3.0 / 投資 90% / CASH 10% / 35%上限",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 90.0,
+      "maxWeightPct": 35.0
+    },
+    {
+      "key": "cost_x3_0__invest_80__no_cap",
+      "label": "コスト x3.0 / 投資 80% / CASH 20% / 上限なし",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": null
+    },
+    {
+      "key": "cost_x3_0__invest_80__cap_45",
+      "label": "コスト x3.0 / 投資 80% / CASH 20% / 45%上限",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": 45.0
+    },
+    {
+      "key": "cost_x3_0__invest_80__cap_35",
+      "label": "コスト x3.0 / 投資 80% / CASH 20% / 35%上限",
+      "costMultiplier": 3.0,
+      "maxInvestmentPct": 80.0,
+      "maxWeightPct": 35.0
+    }
+  ],
+  "runSpecFingerprint": "d65cdbd8f11ebfd862ba3d100fed82b6dc53a8944b31e27884415f20584f9096",
+  "runSpec": {
+    "kind": "comparison_run_spec",
+    "schemaVersion": "v1",
+    "marketSlice": {
+      "period": "2015_2025",
+      "sanityPeriods": [
+        "3y"
+      ],
+      "timeframes": [
+        {
+          "key": "1d",
+          "label": "日次",
+          "barsPerYear": 252.0,
+          "barSeconds": 86400
+        }
+      ],
+      "fields": [
+        "close",
+        "volume"
+      ],
+      "startDate": "2015-01-01",
+      "endDate": "2025-12-31"
+    },
+    "portfolioState": {
+      "weights": [
+        {
+          "asset": "CASH",
+          "weightPct": 15.0
+        },
+        {
+          "asset": "SPY",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "QQQ",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "IWM",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "EFA",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "EEM",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "EWJ",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "EWZ",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "VNQ",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "TLT",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "IEF",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "LQD",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "HYG",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "TIP",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "GLD",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "SLV",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "DBC",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "USO",
+          "weightPct": 4.72
+        },
+        {
+          "asset": "UUP",
+          "weightPct": 4.72
+        }
+      ]
+    },
+    "capitalBase": 10000,
+    "executionAssumptions": {
+      "kind": "close_execution_assumptions",
+      "label": "終値約定",
+      "parameters": {
+        "fillPrice": "close",
+        "costProfileKey": "retail_multi_asset_default"
+      },
+      "costModel": {
+        "kind": "asset_specific_adv_cost",
+        "parameters": {
+          "commissionPct": 0.05,
+          "slippagePct": 0.02,
+          "impactCoefficientPct": 0.08,
+          "advWindowBars": 20.0,
+          "minAdvNotional": 1000000.0
+        },
+        "perAssetOverrides": {
+          "SPY": {
+            "commissionPct": 0.02,
+            "slippagePct": 0.01,
+            "impactCoefficientPct": 0.02
+          },
+          "QQQ": {
+            "commissionPct": 0.02,
+            "slippagePct": 0.01,
+            "impactCoefficientPct": 0.02
+          },
+          "IWM": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.04
+          },
+          "EFA": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.03
+          },
+          "EEM": {
+            "commissionPct": 0.04,
+            "slippagePct": 0.03,
+            "impactCoefficientPct": 0.06
+          },
+          "EWJ": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.03
+          },
+          "EWZ": {
+            "commissionPct": 0.05,
+            "slippagePct": 0.05,
+            "impactCoefficientPct": 0.1
+          },
+          "VNQ": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.04
+          },
+          "TLT": {
+            "commissionPct": 0.02,
+            "slippagePct": 0.01,
+            "impactCoefficientPct": 0.02
+          },
+          "IEF": {
+            "commissionPct": 0.02,
+            "slippagePct": 0.01,
+            "impactCoefficientPct": 0.02
+          },
+          "LQD": {
+            "commissionPct": 0.02,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.03
+          },
+          "HYG": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.03,
+            "impactCoefficientPct": 0.05
+          },
+          "TIP": {
+            "commissionPct": 0.02,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.03
+          },
+          "GLD": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.03,
+            "impactCoefficientPct": 0.04
+          },
+          "SLV": {
+            "commissionPct": 0.04,
+            "slippagePct": 0.04,
+            "impactCoefficientPct": 0.07
+          },
+          "DBC": {
+            "commissionPct": 0.05,
+            "slippagePct": 0.05,
+            "impactCoefficientPct": 0.1
+          },
+          "USO": {
+            "commissionPct": 0.06,
+            "slippagePct": 0.06,
+            "impactCoefficientPct": 0.12
+          },
+          "UUP": {
+            "commissionPct": 0.03,
+            "slippagePct": 0.02,
+            "impactCoefficientPct": 0.03
+          },
+          "BTC-USD": {
+            "commissionPct": 0.1,
+            "slippagePct": 0.15,
+            "impactCoefficientPct": 0.25
+          },
+          "ETH-USD": {
+            "commissionPct": 0.1,
+            "slippagePct": 0.15,
+            "impactCoefficientPct": 0.25
+          }
+        }
+      }
+    },
+    "evaluation": {
+      "kind": "evaluation_spec",
+      "schemaVersion": "v1",
+      "availabilityPolicy": {
+        "kind": "asset_availability_policy",
+        "minHistoryBars": 252,
+        "maxStaleBars": 5,
+        "delistedAssetPolicy": "liquidate_to_cash"
+      },
+      "availabilitySummary": {
+        "timeframes": [
+          {
+            "timeframe": "1d",
+            "requestedAssetCount": 18,
+            "availableAssetCount": 18,
+            "unavailableAssetCount": 0
+          }
+        ],
+        "minAvailableAssetCount": 18,
+        "maxAvailableAssetCount": 18
+      },
+      "availabilityDiagnostics": {
+        "warningCount": 2,
+        "actionableWarningCount": 2,
+        "calendarBoundaryWarningCount": 0,
+        "assetLifecycleWarningCount": 0,
+        "actionableWarnings": [
+          {
+            "kind": "aligned_start_after_requested_start",
+            "timeframe": "1d",
+            "requestedStartDate": "2015-01-01",
+            "alignedStartDate": "2025-01-01",
+            "message": "1d data starts at 2025-01-01, after requested start 2015-01-01."
+          },
+          {
+            "kind": "aligned_end_before_requested_end",
+            "timeframe": "1d",
+            "requestedEndDate": "2025-12-31",
+            "alignedEndDate": "2025-01-07",
+            "message": "1d data ends at 2025-01-07, before requested end 2025-12-31."
+          }
+        ],
+        "calendarBoundaryWarnings": [],
+        "assetLifecycleWarnings": []
+      },
+      "instrumentDiagnostics": {
+        "costProfileKey": "retail_multi_asset_default",
+        "assetClassCounts": {
+          "bond_etf": 5,
+          "commodity_etf": 4,
+          "currency_etf": 1,
+          "equity_etf": 7,
+          "real_estate_etf": 1
+        },
+        "marketCalendars": {
+          "nyse": 18
+        },
+        "mixedMarketCalendar": false,
+        "unknownSymbols": []
+      },
+      "diagnosticEvents": [
+        {
+          "kind": "aligned_start_after_requested_start",
+          "category": "availability",
+          "severity": "invalidating",
+          "scope": "market_data",
+          "reason": "1d data starts at 2025-01-01, after requested start 2015-01-01.",
+          "evidence": {
+            "kind": "aligned_start_after_requested_start",
+            "timeframe": "1d",
+            "requestedStartDate": "2015-01-01",
+            "alignedStartDate": "2025-01-01",
+            "message": "1d data starts at 2025-01-01, after requested start 2015-01-01."
+          },
+          "timeframe": "1d",
+          "dates": {
+            "requestedStartDate": "2015-01-01",
+            "alignedStartDate": "2025-01-01"
+          }
+        },
+        {
+          "kind": "aligned_end_before_requested_end",
+          "category": "availability",
+          "severity": "invalidating",
+          "scope": "market_data",
+          "reason": "1d data ends at 2025-01-07, before requested end 2025-12-31.",
+          "evidence": {
+            "kind": "aligned_end_before_requested_end",
+            "timeframe": "1d",
+            "requestedEndDate": "2025-12-31",
+            "alignedEndDate": "2025-01-07",
+            "message": "1d data ends at 2025-01-07, before requested end 2025-12-31."
+          },
+          "timeframe": "1d",
+          "dates": {
+            "requestedEndDate": "2025-12-31",
+            "alignedEndDate": "2025-01-07"
+          }
+        }
+      ],
+      "marketDataContexts": [
+        {
+          "period": "2015_2025",
+          "sanityPeriods": [
+            "3y"
+          ],
+          "timeframe": {
+            "key": "1d",
+            "label": "日次",
+            "barsPerYear": 252.0,
+            "barSeconds": 86400
+          },
+          "fields": [
+            "close",
+            "volume"
+          ],
+          "source": "test",
+          "alignedStartDate": "2025-01-01",
+          "alignedEndDate": "2025-01-07",
+          "rowCount": 7,
+          "startDate": "2015-01-01",
+          "endDate": "2025-12-31",
+          "datasetSnapshot": {
+            "source": "test",
+            "createdAtUtc": "2026-01-01T00:00:00Z",
+            "timeframe": "1d",
+            "period": "2015_2025",
+            "start": "2015-01-01",
+            "end": "2025-12-31",
+            "requestedTickers": [
+              "SPY",
+              "QQQ",
+              "IWM",
+              "EFA",
+              "EEM",
+              "EWJ",
+              "EWZ",
+              "VNQ",
+              "TLT",
+              "IEF",
+              "LQD",
+              "HYG",
+              "TIP",
+              "GLD",
+              "SLV",
+              "DBC",
+              "USO",
+              "UUP"
+            ],
+            "availableTickers": [
+              "SPY",
+              "QQQ",
+              "IWM",
+              "EFA",
+              "EEM",
+              "EWJ",
+              "EWZ",
+              "VNQ",
+              "TLT",
+              "IEF",
+              "LQD",
+              "HYG",
+              "TIP",
+              "GLD",
+              "SLV",
+              "DBC",
+              "USO",
+              "UUP"
+            ],
+            "rowCount": 7,
+            "adjustmentPolicy": "test_adjusted",
+            "fingerprint": "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
+            "snapshotId": "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
+            "contentFingerprint": "2d763f4b56159931719ce5d58d866d3870fb16aba7b4f3e15ac34a48b651ed21"
+          }
+        }
+      ],
+      "evaluationSettings": {
+        "splitRatioPct": 70.0
+      },
+      "signalMarketDataContexts": [
+        {
+          "strategyId": "stg-fu-eq",
+          "signalKey": "signal__stg-fu-eq__selection",
+          "signalLabel": "全資産",
+          "sourceKind": "selection_signal",
+          "fields": [
+            "close"
+          ],
+          "dataTimeframe": {
+            "key": "1d",
+            "label": "日次",
+            "barsPerYear": 252.0,
+            "barSeconds": 86400
+          },
+          "signalTimeframe": {
+            "key": "1d",
+            "label": "日次",
+            "barsPerYear": 252.0,
+            "barSeconds": 86400
+          },
+          "period": "2015_2025",
+          "sanityPeriods": [
+            "3y"
+          ],
+          "source": "test",
+          "alignedStartDate": "2025-01-01",
+          "alignedEndDate": "2025-01-07",
+          "rowCount": 7,
+          "startDate": "2015-01-01",
+          "endDate": "2025-12-31"
+        }
+      ],
+      "warnings": [
+        {
+          "kind": "aligned_start_after_requested_start",
+          "timeframe": "1d",
+          "requestedStartDate": "2015-01-01",
+          "alignedStartDate": "2025-01-01",
+          "message": "1d data starts at 2025-01-01, after requested start 2015-01-01."
+        },
+        {
+          "kind": "aligned_end_before_requested_end",
+          "timeframe": "1d",
+          "requestedEndDate": "2025-12-31",
+          "alignedEndDate": "2025-01-07",
+          "message": "1d data ends at 2025-01-07, before requested end 2025-12-31."
+        }
+      ]
+    }
+  },
+  "marketDataSnapshots": [
+    {
+      "source": "test",
+      "createdAtUtc": "2026-01-01T00:00:00Z",
+      "timeframe": "1d",
+      "period": "2015_2025",
+      "start": "2015-01-01",
+      "end": "2025-12-31",
+      "requestedTickers": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+        "VNQ",
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP"
+      ],
+      "availableTickers": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+        "VNQ",
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP"
+      ],
+      "rowCount": 7,
+      "adjustmentPolicy": "test_adjusted",
+      "fingerprint": "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
+      "snapshotId": "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
+      "contentFingerprint": "2d763f4b56159931719ce5d58d866d3870fb16aba7b4f3e15ac34a48b651ed21"
+    },
+    {
+      "source": "test",
+      "createdAtUtc": "2026-01-01T00:00:00Z",
+      "timeframe": "1d",
+      "period": "3y",
+      "start": null,
+      "end": null,
+      "requestedTickers": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+        "VNQ",
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP"
+      ],
+      "availableTickers": [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "EFA",
+        "EEM",
+        "EWJ",
+        "EWZ",
+        "VNQ",
+        "TLT",
+        "IEF",
+        "LQD",
+        "HYG",
+        "TIP",
+        "GLD",
+        "SLV",
+        "DBC",
+        "USO",
+        "UUP"
+      ],
+      "rowCount": 7,
+      "adjustmentPolicy": "test_adjusted",
+      "fingerprint": "45e5d8bba3ae99e88fad122e53d50a6c0eda649bb5cfc84a92f38e790a51f297",
+      "snapshotId": "45e5d8bba3ae99e88fad122e53d50a6c0eda649bb5cfc84a92f38e790a51f297",
+      "contentFingerprint": "0ec6d4f606c9a5f4f79774e0e4d9c3c6e09c9dbd788fe37b168ad3be308fe54a"
+    }
+  ],
+  "comparisonFingerprint": "d7f52840b7b5e894198f462fde6ce5a95cd7902e4ecb7620bbe6131afa9cf485"
+}

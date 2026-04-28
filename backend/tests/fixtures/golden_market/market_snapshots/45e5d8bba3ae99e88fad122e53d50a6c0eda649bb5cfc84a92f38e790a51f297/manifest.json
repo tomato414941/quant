@@ -1,0 +1,60 @@
+{
+  "datasetSnapshot": {
+    "adjustmentPolicy": "test_adjusted",
+    "availableTickers": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "EFA",
+      "EEM",
+      "EWJ",
+      "EWZ",
+      "VNQ",
+      "TLT",
+      "IEF",
+      "LQD",
+      "HYG",
+      "TIP",
+      "GLD",
+      "SLV",
+      "DBC",
+      "USO",
+      "UUP"
+    ],
+    "contentFingerprint": "0ec6d4f606c9a5f4f79774e0e4d9c3c6e09c9dbd788fe37b168ad3be308fe54a",
+    "createdAtUtc": "2026-01-01T00:00:00Z",
+    "end": null,
+    "fingerprint": "45e5d8bba3ae99e88fad122e53d50a6c0eda649bb5cfc84a92f38e790a51f297",
+    "period": "3y",
+    "requestedTickers": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "EFA",
+      "EEM",
+      "EWJ",
+      "EWZ",
+      "VNQ",
+      "TLT",
+      "IEF",
+      "LQD",
+      "HYG",
+      "TIP",
+      "GLD",
+      "SLV",
+      "DBC",
+      "USO",
+      "UUP"
+    ],
+    "rowCount": 7,
+    "snapshotId": "45e5d8bba3ae99e88fad122e53d50a6c0eda649bb5cfc84a92f38e790a51f297",
+    "source": "test",
+    "start": null,
+    "timeframe": "1d"
+  },
+  "files": {
+    "closes": "closes.csv",
+    "volumes": "volumes.csv"
+  },
+  "schemaVersion": 1
+}

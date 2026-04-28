@@ -34,6 +34,18 @@ This is the smoke test: it is intended as a quick sanity check for setup,
 inventory, dependencies, and evaluation profile wiring. The full test suite is
 heavier and is described in [docs/development.md](docs/development.md).
 
+Run the committed golden snapshot evaluation without live market data:
+
+```bash
+cd backend
+uv run quant comparison-summary \
+  --snapshot-spec-file tests/fixtures/golden_market/comparison-run-spec.json \
+  --market-snapshot-dir tests/fixtures/golden_market/market_snapshots \
+  --universe only_etf \
+  --strategy-key stg-fu-eq \
+  --top 1
+```
+
 ## What To Read First
 
 Start here if you are viewing the repository for the first time:
@@ -52,6 +64,7 @@ human-maintained snapshot of selected evaluated runs.
 Local data, run results, environment files, credentials, and private keys must not be committed. Generated run data belongs under ignored data directories such as `backend/data/`.
 
 Market data snapshots are metadata-only. Commit snapshot contracts, fingerprints, and provenance fields, but do not commit raw prices, volumes, provider downloads, or generated market data panels.
+Tiny synthetic CSV fixtures under `backend/tests/fixtures/` are the exception; they are not provider data and exist only to keep the CLI evaluation path reproducible in tests.
 
 Use ignored directories such as `private/` for local research notes or evaluation notes that should not be published.
 

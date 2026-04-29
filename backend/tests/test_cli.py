@@ -1141,7 +1141,13 @@ def test_backtest_strategy_command_runs_stg_fu_eq_golden_snapshot(capsys) -> Non
     assert payload["result"]["kind"] == "full_period_backtest"
     assert payload["result"]["strategyKey"] == "stg-fu-eq"
     assert payload["result"]["firstInvestedDate"] == "2025-01-02"
-    assert payload["result"]["summary"]["totalReturnPct"] > 0.0
+    assert payload["result"]["summary"] == {
+        "totalReturnPct": 4.66,
+        "cagrPct": 578.07,
+        "sharpeRatio": 36.8,
+        "maxDrawdownPct": 0.0,
+        "turnoverPct": 100.0,
+    }
     assert payload["result"]["seriesCount"] == 6
     assert payload["result"]["eventCount"] == 1
 

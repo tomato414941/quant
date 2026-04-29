@@ -271,6 +271,20 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_equal_weight_parser.add_argument("--include-series", action="store_true")
     backtest_equal_weight_parser.add_argument("--include-events", action="store_true")
 
+    backtest_strategy_parser = subparsers.add_parser(
+        "backtest-strategy",
+        help="Run a full-period strategy backtest from a fixed market snapshot.",
+    )
+    backtest_strategy_parser.add_argument("--strategy-key", required=True)
+    backtest_strategy_parser.add_argument("--snapshot-id", required=True)
+    backtest_strategy_parser.add_argument("--market-snapshot-dir", required=True)
+    backtest_strategy_parser.add_argument("--initial-capital", type=float, default=10_000.0)
+    backtest_strategy_parser.add_argument("--transaction-cost", type=float, default=0.0)
+    backtest_strategy_parser.add_argument("--bars-per-year", type=float, default=252.0)
+    backtest_strategy_parser.add_argument("--rebalance-schedule", default="hold")
+    backtest_strategy_parser.add_argument("--include-series", action="store_true")
+    backtest_strategy_parser.add_argument("--include-events", action="store_true")
+
     rerun_comparison_spec_parser = subparsers.add_parser(
         "rerun-comparison-spec",
         help="Rerun a saved comparison-run-spec JSON payload.",
@@ -335,6 +349,59 @@ def build_parser() -> argparse.ArgumentParser:
     strategy_inventory_parser.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
+
+
+def build_equal_weight_backtest_payload(
+    *,
+    snapshot_id: str,
+    market_snapshot_dir: str,
+    initial_capital: float,
+    transaction_cost: float,
+    bars_per_year: float,
+    rebalance_schedule: str,
+    include_series: bool,
+    include_events: bool,
+    payload_kind: str,
+    strategy_key: str,
+) -> dict[str, object]:
+    bundle, metadata = read_market_data_snapshot(
+        snapshot_id,
+        storage_dir=market_snapshot_dir,
+    )
+    result = run_equal_weight_full_period_backtest(
+        closes=bundle["closes"],
+        volumes=bundle["volumes"],
+        initial_capital=initial_capital,
+        transaction_cost=transaction_cost,
+        bars_per_year=bars_per_year,
+        rebalance_schedule=rebalance_schedule,
+    )
+    payload = {
+        "kind": payload_kind,
+        "snapshot": {
+            "snapshotId": snapshot_id,
+            "source": metadata["source"],
+            "timeframe": metadata["timeframe"],
+            "startDate": metadata["aligned_start_date"],
+            "endDate": metadata["aligned_end_date"],
+            "rowCount": metadata["row_count"],
+            "tickers": metadata["tickers"],
+        },
+        "result": {
+            "kind": result["kind"],
+            "strategyKey": strategy_key,
+            "summary": result["summary"],
+            "firstInvestedDate": result["firstInvestedDate"],
+            "finalWeights": result["weights"],
+            "seriesCount": len(result["series"]),
+            "eventCount": len(result["events"]),
+        },
+    }
+    if include_series:
+        payload["result"]["series"] = result["series"]
+    if include_events:
+        payload["result"]["events"] = result["events"]
+    return payload
 
 
 
@@ -539,43 +606,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "backtest-equal-weight":
-        bundle, metadata = read_market_data_snapshot(
-            args.snapshot_id,
-            storage_dir=args.market_snapshot_dir,
-        )
-        result = run_equal_weight_full_period_backtest(
-            closes=bundle["closes"],
-            volumes=bundle["volumes"],
+        payload = build_equal_weight_backtest_payload(
+            snapshot_id=args.snapshot_id,
+            market_snapshot_dir=args.market_snapshot_dir,
             initial_capital=args.initial_capital,
             transaction_cost=args.transaction_cost,
             bars_per_year=args.bars_per_year,
             rebalance_schedule=args.rebalance_schedule,
+            include_series=args.include_series,
+            include_events=args.include_events,
+            payload_kind="backtest_equal_weight_result",
+            strategy_key="equal_weight",
         )
-        payload = {
-            "kind": "backtest_equal_weight_result",
-            "snapshot": {
-                "snapshotId": args.snapshot_id,
-                "source": metadata["source"],
-                "timeframe": metadata["timeframe"],
-                "startDate": metadata["aligned_start_date"],
-                "endDate": metadata["aligned_end_date"],
-                "rowCount": metadata["row_count"],
-                "tickers": metadata["tickers"],
-            },
-            "result": {
-                "kind": result["kind"],
-                "strategyKey": result["strategyKey"],
-                "summary": result["summary"],
-                "firstInvestedDate": result["firstInvestedDate"],
-                "finalWeights": result["weights"],
-                "seriesCount": len(result["series"]),
-                "eventCount": len(result["events"]),
-            },
-        }
-        if args.include_series:
-            payload["result"]["series"] = result["series"]
-        if args.include_events:
-            payload["result"]["events"] = result["events"]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "backtest-strategy":
+        if args.strategy_key != "stg-fu-eq":
+            parser.error("Unsupported strategy for full-period backtest: " + args.strategy_key)
+        payload = build_equal_weight_backtest_payload(
+            snapshot_id=args.snapshot_id,
+            market_snapshot_dir=args.market_snapshot_dir,
+            initial_capital=args.initial_capital,
+            transaction_cost=args.transaction_cost,
+            bars_per_year=args.bars_per_year,
+            rebalance_schedule=args.rebalance_schedule,
+            include_series=args.include_series,
+            include_events=args.include_events,
+            payload_kind="backtest_strategy_result",
+            strategy_key=args.strategy_key,
+        )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 

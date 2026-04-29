@@ -420,6 +420,89 @@ def test_compare_portfolio_runs_allows_missing_return_zero_policy_when_explicit(
     )
 
     assert runs[0]["series"][0]["portfolioReturnPct"] == 0.0
+    accounting_events = [
+        event for event in runs[0]["executionTrace"] if event["eventType"] == "missing_return_accounting"
+    ]
+    assert [event["date"] for event in accounting_events] == [
+        "2025-01-02 00:00:00",
+        "2025-01-03 00:00:00",
+    ]
+    assert all(event["missingReturnPolicy"] == "zero" for event in accounting_events)
+    assert all(event["affectedAssets"] == ["AAA"] for event in accounting_events)
+    assert all(event["resolution"] == "zero_fill" for event in accounting_events)
+
+
+def test_compare_portfolio_runs_ignores_missing_return_for_unheld_asset_by_default() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0],
+            "BBB": [100.0, np.nan, 100.0, 101.0, 102.0, 103.0, 104.0],
+        },
+        index=pd.date_range("2025-01-01", periods=7, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="missing_unheld_return_universe",
+            label="Missing unheld return universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    runs = compare_portfolio_runs(
+        closes=closes,
+        volumes=None,
+        strategies=[strategy],
+        initial_capital=1000.0,
+        split_ratio=0.5,
+        transaction_cost=0.0,
+        portfolio_state=build_portfolio_state(current_weights={"AAA": 1.0}, cash_weight=0.0),
+    )
+
+    assert runs[0]["series"][0]["portfolioReturnPct"] == 1.0
+    assert runs[0]["availabilityPolicy"]["missingReturnPolicy"] == "reject_if_held"
+    assert not [
+        event for event in runs[0]["executionTrace"] if event["eventType"] == "missing_return_accounting"
+    ]
+
+
+def test_compare_portfolio_runs_rejects_unsupported_missing_return_policy() -> None:
+    closes = pd.DataFrame(
+        {
+            "AAA": [100.0, 101.0, 102.0, 103.0],
+            "BBB": [100.0, 101.0, 102.0, 103.0],
+        },
+        index=pd.date_range("2025-01-01", periods=4, freq="D"),
+    )
+    strategy = build_evaluator_strategy_spec(
+        investment_universe=build_investment_universe_spec(
+            tickers=list(closes.columns),
+            key="unsupported_missing_return_policy_universe",
+            label="Unsupported missing return policy universe",
+        ),
+        selection=build_selection_spec("full_universe"),
+        portfolio_model=build_portfolio_model_spec("equal_weight"),
+        risk_controls=build_risk_controls_spec(max_investment_ratio=1.0),
+    )
+
+    with pytest.raises(ValueError, match="Unsupported missing return policy: drop_row"):
+        compare_portfolio_runs(
+            closes=closes,
+            volumes=None,
+            strategies=[strategy],
+            initial_capital=1000.0,
+            split_ratio=0.5,
+            transaction_cost=0.0,
+            availability_policy={
+                "kind": "asset_availability_policy",
+                "minHistoryBars": 1,
+                "maxStaleBars": 5,
+                "delistedAssetPolicy": "liquidate_to_cash",
+                "missingReturnPolicy": "drop_row",
+            },
+        )
 
 
 def test_compare_portfolio_runs_adds_allocation_fallback_only_to_decision_trace() -> None:

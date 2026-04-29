@@ -14,6 +14,7 @@ def build_default_availability_policy() -> dict[str, object]:
         "minHistoryBars": 252,
         "maxStaleBars": 5,
         "delistedAssetPolicy": "liquidate_to_cash",
+        "missingReturnPolicy": "reject_if_held",
     }
 
 

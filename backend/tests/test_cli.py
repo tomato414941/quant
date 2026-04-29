@@ -1109,6 +1109,14 @@ def test_backtest_equal_weight_command_runs_golden_snapshot(capsys) -> None:
     assert "events" not in payload["result"]
 
 
+def test_backtest_equal_weight_help_points_to_strategy_entrypoint() -> None:
+    help_text = cli_module.build_parser().format_help()
+
+    assert "backtest-equal-weight" in help_text
+    assert "Prefer backtest-strategy --strategy-" in help_text
+    assert "key stg-fu-eq for strategy-level runs." in help_text
+
+
 def test_backtest_strategy_command_runs_stg_fu_eq_golden_snapshot(capsys) -> None:
     fixture_dir = Path(__file__).parent / "fixtures" / "golden_market"
 

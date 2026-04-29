@@ -53,6 +53,10 @@ entrypoints:
 - `backtest-strategy` runs a full-period backtest from one fixed market
   snapshot. It currently supports `stg-fu-eq` only.
 
+Use `backtest-strategy` as the strategy-level full-period backtest entrypoint.
+`backtest-equal-weight` is a lower-level compatibility/debugging command for the
+equal-weight engine; do not add one top-level CLI per strategy.
+
 ```bash
 cd backend
 uv run quant comparison-summary \

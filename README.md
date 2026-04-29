@@ -51,6 +51,11 @@ There are two evaluation entrypoints with different meanings:
 - `comparison-summary`: strategy comparison on the existing comparison/run plumbing. Use this for the current holdout-style research comparison workflow.
 - `backtest-strategy`: full-period backtest from a fixed market snapshot. Use this when you want to ask "what happened over the whole snapshot period?" for a supported strategy.
 
+Use `backtest-strategy` for strategy-level full-period backtests. The lower-level
+`backtest-equal-weight` command is kept as a compatibility/debugging entrypoint
+for the equal-weight engine and should not be expanded into one CLI per
+strategy.
+
 Currently `backtest-strategy` supports `stg-fu-eq` only:
 
 ```bash

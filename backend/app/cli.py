@@ -260,7 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     backtest_equal_weight_parser = subparsers.add_parser(
         "backtest-equal-weight",
-        help="Run a full-period equal-weight backtest from a fixed market snapshot.",
+        help=(
+            "Run a full-period equal-weight backtest from a fixed market snapshot. "
+            "Prefer backtest-strategy --strategy-key stg-fu-eq for strategy-level runs."
+        ),
     )
     backtest_equal_weight_parser.add_argument("--snapshot-id", required=True)
     backtest_equal_weight_parser.add_argument("--market-snapshot-dir", required=True)

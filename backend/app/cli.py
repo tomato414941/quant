@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -23,6 +24,9 @@ from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
 from app.market_data import build_market_snapshot_fetcher
 from app.market_data import read_market_data_snapshot
+from app.research_job_api import DEFAULT_RESEARCH_JOB_STORE_DIR, RESEARCH_JOB_STORE_DIR_ENV
+from app.research_job_runner import ResearchJobRunner
+from app.research_job_store import ResearchJobStore
 from app.instrument_registry import UNIVERSE_VARIANT_KEYS
 from app.strategy_inventory import (
     STRATEGY_INVENTORY_PRIORITIES,
@@ -330,6 +334,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rebuild the local run store index file.",
     )
     rebuild_index_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    worker_parser = subparsers.add_parser(
+        "worker",
+        help="Run queued research jobs outside the API process.",
+    )
+    worker_mode = worker_parser.add_mutually_exclusive_group(required=True)
+    worker_mode.add_argument("--once", action="store_true")
+    worker_mode.add_argument("--poll", action="store_true")
+    worker_parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
+    worker_parser.add_argument("--job-store-dir", default=None)
+    worker_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    run_job_parser = subparsers.add_parser(
+        "run-job",
+        help="Run one research job outside the API process.",
+    )
+    run_job_parser.add_argument("job_id")
+    run_job_parser.add_argument("--job-store-dir", default=None)
+    run_job_parser.add_argument("--json", action="store_true", dest="as_json")
 
     benchmark_parser = subparsers.add_parser(
         "benchmark-decomposition",
@@ -705,5 +728,46 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Rebuilt run store index: {payload['entryCount']} entries")
         return 0
 
+    if args.command == "run-job":
+        store = ResearchJobStore(resolve_research_job_store_dir(args.job_store_dir))
+        record = ResearchJobRunner(store).run_job(args.job_id)
+        payload = record.to_public_payload()
+        if args.as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"{payload['jobId']} {payload['status']}")
+        return 0
+
+    if args.command == "worker":
+        store = ResearchJobStore(resolve_research_job_store_dir(args.job_store_dir))
+        runner = ResearchJobRunner(store)
+        if args.once:
+            record = runner.run_next_queued()
+            payload = {"kind": "research_worker_once", "job": record.to_public_payload() if record else None}
+            if args.as_json:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            elif record is not None:
+                print(f"{record.job_id} {record.status.value}")
+            else:
+                print("No queued research jobs.")
+            return 0
+
+        while True:
+            record = runner.run_next_queued()
+            if record is not None:
+                if args.as_json:
+                    print(json.dumps(record.to_public_payload(), ensure_ascii=False), flush=True)
+                else:
+                    print(f"{record.job_id} {record.status.value}", flush=True)
+            time.sleep(max(args.poll_interval_seconds, 0.1))
+
     parser.error(f"Unknown command: {args.command}")
     return 2
+
+
+def resolve_research_job_store_dir(value: str | None) -> Path:
+    if value:
+        return Path(value)
+    import os
+
+    return Path(os.getenv(RESEARCH_JOB_STORE_DIR_ENV, str(DEFAULT_RESEARCH_JOB_STORE_DIR)))

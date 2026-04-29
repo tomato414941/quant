@@ -10,6 +10,8 @@ from app import cli as cli_module
 from app import main as main_module
 from app.comparison_walk_forward import sort_walk_forward_results
 from app.market_data import build_dataset_snapshot_metadata
+from app.research_job_store import ResearchJobStore
+from app.research_jobs import ResearchJobSpec
 
 
 def fake_fetch_market_universe_bundle(
@@ -1384,3 +1386,40 @@ def test_rerun_comparison_spec_command_rejects_mismatched_fingerprint(monkeypatc
         assert "runSpecFingerprint does not match" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_worker_once_command_runs_one_queued_research_job(tmp_path, capsys) -> None:
+    store = ResearchJobStore(tmp_path)
+    record = store.create_or_get(ResearchJobSpec(jobType="comparison_run_spec_rerun", payload={}))
+
+    exit_code = cli_module.main([
+        "worker",
+        "--once",
+        "--job-store-dir",
+        str(tmp_path),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kind"] == "research_worker_once"
+    assert payload["job"]["jobId"] == record.job_id
+    assert payload["job"]["status"] in {"succeeded", "failed"}
+
+
+def test_run_job_command_runs_requested_research_job(tmp_path, capsys) -> None:
+    store = ResearchJobStore(tmp_path)
+    record = store.create_or_get(ResearchJobSpec(jobType="comparison_run_spec_rerun", payload={}))
+
+    exit_code = cli_module.main([
+        "run-job",
+        record.job_id,
+        "--job-store-dir",
+        str(tmp_path),
+        "--json",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["jobId"] == record.job_id
+    assert payload["status"] == "failed"

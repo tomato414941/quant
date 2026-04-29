@@ -6,6 +6,7 @@ from fastapi import Body, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.body_size_limit import BodySizeLimitMiddleware
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.comparison_market_context import build_run_result_store
 from app.comparison_payloads import (
@@ -26,6 +27,7 @@ from app.comparison_payloads import (
 )
 from app.predictor_registry import REGISTERED_PREDICTOR_SPECS
 from app.market_data import fetch_market_universe_bundle
+from app.research_job_api import router as research_job_router
 from app.strategy_inventory import build_strategy_inventory_payload
 
 
@@ -37,6 +39,8 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
 )
 CORS_ALLOW_ORIGINS_ENV = "QUANT_CORS_ALLOW_ORIGINS"
 MAX_RERUN_SPEC_BODY_BYTES = 2_000_000
+MAX_JOB_BODY_BYTES_ENV = "QUANT_MAX_JOB_BODY_BYTES"
+ALLOW_INLINE_RESEARCH_ENV = "QUANT_ALLOW_INLINE_RESEARCH"
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 HEAVY_RESEARCH_ENDPOINTS = {
     "/api/comparison",
@@ -47,6 +51,10 @@ HEAVY_RESEARCH_ENDPOINTS = {
     "/api/condition-sweep",
     "/api/runs/generate-parameter-sweep",
     "/api/ranking-evaluation",
+}
+RESEARCH_JOB_BODY_LIMIT_ENDPOINTS = {
+    "/api/research-jobs",
+    "/api/comparison-run-spec/rerun",
 }
 
 
@@ -83,7 +91,30 @@ def enforce_rerun_spec_body_limit(request: Request) -> None:
         )
 
 
+def allow_inline_research() -> bool:
+    value = os.getenv(ALLOW_INLINE_RESEARCH_ENV)
+    if value is None:
+        return True
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def inline_research_disabled_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "detail": "Inline research execution is disabled. Submit a research job instead.",
+            "jobEndpoint": "/api/research-jobs",
+        },
+    )
+
+
 app = FastAPI(title="Quant API", version="0.1.0")
+
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    max_body_bytes=int(os.getenv(MAX_JOB_BODY_BYTES_ENV, str(MAX_RERUN_SPEC_BODY_BYTES))),
+    paths=RESEARCH_JOB_BODY_LIMIT_ENDPOINTS,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -118,7 +149,12 @@ async def guard_heavy_research_endpoints(request: Request, call_next):
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         content={"detail": "comparison-run-spec rerun payload is too large."},
                     )
+        if not allow_inline_research():
+            return inline_research_disabled_response()
     return await call_next(request)
+
+
+app.include_router(research_job_router)
 
 
 @app.get("/api/health")

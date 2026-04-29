@@ -44,6 +44,19 @@ Tickers:
 
 Output summary:
 
+Source fields in the `backtest-strategy` JSON payload:
+
+| Metric | JSON field |
+| --- | --- |
+| First invested date | `result.firstInvestedDate` |
+| Total return | `result.summary.totalReturnPct` |
+| CAGR | `result.summary.cagrPct` |
+| Sharpe | `result.summary.sharpeRatio` |
+| Max drawdown | `result.summary.maxDrawdownPct` |
+| Turnover | `result.summary.turnoverPct` |
+| Series count | `result.seriesCount` |
+| Event count | `result.eventCount` |
+
 | Metric | Value |
 | --- | ---: |
 | First invested date | `2015-01-05` |

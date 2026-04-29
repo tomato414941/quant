@@ -53,8 +53,8 @@ There are two evaluation entrypoints with different meanings:
 
 Use `backtest-strategy` for strategy-level full-period backtests. The lower-level
 `backtest-equal-weight` command is kept as a compatibility/debugging entrypoint
-for the equal-weight engine and should not be expanded into one CLI per
-strategy.
+for the equal-weight engine. Prefer the shared `backtest-strategy` entrypoint
+instead of adding one top-level CLI per strategy.
 
 Currently `backtest-strategy` supports `stg-fu-eq` only:
 
@@ -75,7 +75,8 @@ Start here if you are viewing the repository for the first time:
 3. [Evaluation Contexts](docs/evaluation-contexts.md): measurement conditions used to evaluate strategies.
 4. [Evaluation Plan](docs/evaluation-plan.md): current strategy set and context selected for evaluation.
 5. [Full-Period Backtest Results](docs/backtest-results.md): reproducible fixed-snapshot backtest records.
-6. [Leaderboard](docs/leaderboard.md): manual snapshots for comparing evaluated runs.
+6. [Full-Period Backtest Plan](docs/backtest-plan.md): short-term plan for extending `backtest-strategy`.
+7. [Leaderboard](docs/leaderboard.md): manual snapshots for comparing evaluated runs.
 
 The leaderboard is not an automatically generated ranking. It is a concise,
 human-maintained snapshot of selected evaluated runs.

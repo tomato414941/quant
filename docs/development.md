@@ -55,7 +55,8 @@ entrypoints:
 
 Use `backtest-strategy` as the strategy-level full-period backtest entrypoint.
 `backtest-equal-weight` is a lower-level compatibility/debugging command for the
-equal-weight engine; do not add one top-level CLI per strategy.
+equal-weight engine. Prefer the shared entrypoint over one top-level CLI per
+strategy.
 
 ```bash
 cd backend

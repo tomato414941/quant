@@ -74,7 +74,8 @@ Start here if you are viewing the repository for the first time:
 2. [Strategy Catalog](docs/strategy-catalog.md): strategy definitions and review status.
 3. [Evaluation Contexts](docs/evaluation-contexts.md): measurement conditions used to evaluate strategies.
 4. [Evaluation Plan](docs/evaluation-plan.md): current strategy set and context selected for evaluation.
-5. [Leaderboard](docs/leaderboard.md): manual snapshots for comparing evaluated runs.
+5. [Full-Period Backtest Results](docs/backtest-results.md): reproducible fixed-snapshot backtest records.
+6. [Leaderboard](docs/leaderboard.md): manual snapshots for comparing evaluated runs.
 
 The leaderboard is not an automatically generated ranking. It is a concise,
 human-maintained snapshot of selected evaluated runs.

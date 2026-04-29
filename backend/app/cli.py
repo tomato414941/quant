@@ -9,6 +9,7 @@ from typing import Sequence
 from app import edge_attribution_service
 from app import robustness_service
 from app import signal_diagnostics_service
+from app.backtest import run_equal_weight_full_period_backtest
 from app.comparison_market_context import build_run_result_store
 from app.comparison_payloads import (
     build_comparison_payload,
@@ -21,6 +22,7 @@ from app.comparison_walk_forward import build_walk_forward_comparison_payload
 from app.default_comparison import DEFAULT_COMPARISON_SPEC
 from app.market_data import fetch_market_universe_bundle
 from app.market_data import build_market_snapshot_fetcher
+from app.market_data import read_market_data_snapshot
 from app.instrument_registry import UNIVERSE_VARIANT_KEYS
 from app.strategy_inventory import (
     STRATEGY_INVENTORY_PRIORITIES,
@@ -255,6 +257,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restrict snapshot creation to a strategy key. Can be repeated.",
     )
     market_snapshot_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    backtest_equal_weight_parser = subparsers.add_parser(
+        "backtest-equal-weight",
+        help="Run a full-period equal-weight backtest from a fixed market snapshot.",
+    )
+    backtest_equal_weight_parser.add_argument("--snapshot-id", required=True)
+    backtest_equal_weight_parser.add_argument("--market-snapshot-dir", required=True)
+    backtest_equal_weight_parser.add_argument("--initial-capital", type=float, default=10_000.0)
+    backtest_equal_weight_parser.add_argument("--transaction-cost", type=float, default=0.0)
+    backtest_equal_weight_parser.add_argument("--bars-per-year", type=float, default=252.0)
+    backtest_equal_weight_parser.add_argument("--rebalance-schedule", default="hold")
+    backtest_equal_weight_parser.add_argument("--include-series", action="store_true")
+    backtest_equal_weight_parser.add_argument("--include-events", action="store_true")
 
     rerun_comparison_spec_parser = subparsers.add_parser(
         "rerun-comparison-spec",
@@ -521,6 +536,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             print(render_comparison_run_spec(payload))
+        return 0
+
+    if args.command == "backtest-equal-weight":
+        bundle, metadata = read_market_data_snapshot(
+            args.snapshot_id,
+            storage_dir=args.market_snapshot_dir,
+        )
+        result = run_equal_weight_full_period_backtest(
+            closes=bundle["closes"],
+            volumes=bundle["volumes"],
+            initial_capital=args.initial_capital,
+            transaction_cost=args.transaction_cost,
+            bars_per_year=args.bars_per_year,
+            rebalance_schedule=args.rebalance_schedule,
+        )
+        payload = {
+            "kind": "backtest_equal_weight_result",
+            "snapshot": {
+                "snapshotId": args.snapshot_id,
+                "source": metadata["source"],
+                "timeframe": metadata["timeframe"],
+                "startDate": metadata["aligned_start_date"],
+                "endDate": metadata["aligned_end_date"],
+                "rowCount": metadata["row_count"],
+                "tickers": metadata["tickers"],
+            },
+            "result": {
+                "kind": result["kind"],
+                "strategyKey": result["strategyKey"],
+                "summary": result["summary"],
+                "firstInvestedDate": result["firstInvestedDate"],
+                "finalWeights": result["weights"],
+                "seriesCount": len(result["series"]),
+                "eventCount": len(result["events"]),
+            },
+        }
+        if args.include_series:
+            payload["result"]["series"] = result["series"]
+        if args.include_events:
+            payload["result"]["events"] = result["events"]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "rerun-comparison-spec":

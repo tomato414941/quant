@@ -1079,6 +1079,36 @@ def test_market_snapshot_create_command_writes_market_data_snapshots(monkeypatch
     assert payload["resultStoreDir"] == config.result_store_dir
 
 
+def test_backtest_equal_weight_command_runs_golden_snapshot(capsys) -> None:
+    fixture_dir = Path(__file__).parent / "fixtures" / "golden_market"
+
+    exit_code = cli_module.main([
+        "backtest-equal-weight",
+        "--snapshot-id",
+        "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
+        "--market-snapshot-dir",
+        str(fixture_dir / "market_snapshots"),
+        "--rebalance-schedule",
+        "hold",
+        "--transaction-cost",
+        "0",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["kind"] == "backtest_equal_weight_result"
+    assert payload["snapshot"]["snapshotId"] == "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88"
+    assert payload["snapshot"]["rowCount"] == 7
+    assert payload["result"]["kind"] == "full_period_backtest"
+    assert payload["result"]["strategyKey"] == "equal_weight"
+    assert payload["result"]["firstInvestedDate"] == "2025-01-02"
+    assert payload["result"]["summary"]["totalReturnPct"] > 0.0
+    assert payload["result"]["seriesCount"] == 6
+    assert payload["result"]["eventCount"] == 1
+    assert "series" not in payload["result"]
+    assert "events" not in payload["result"]
+
+
 @pytest.mark.slow
 def test_comparison_summary_command_reads_market_data_snapshots_without_fetching(
     monkeypatch,

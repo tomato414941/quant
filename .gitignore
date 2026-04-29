@@ -6,6 +6,7 @@
 **/__pycache__/
 backend/data/
 private/
+AGENTS.override.md
 .env
 .env.*
 !.env.example

@@ -45,6 +45,14 @@ uv run pytest -q
 
 ## CLI
 
+`comparison-summary` and `backtest-strategy` are intentionally different
+entrypoints:
+
+- `comparison-summary` runs the existing strategy comparison workflow. Treat it
+  as comparison/run plumbing, not as a plain full-period backtest.
+- `backtest-strategy` runs a full-period backtest from one fixed market
+  snapshot. It currently supports `stg-fu-eq` only.
+
 ```bash
 cd backend
 uv run quant comparison-summary \
@@ -53,12 +61,18 @@ uv run quant comparison-summary \
   --universe only_etf \
   --strategy-key stg-fu-eq \
   --top 1
+
+uv run quant backtest-strategy \
+  --strategy-key stg-fu-eq \
+  --snapshot-id 0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88 \
+  --market-snapshot-dir tests/fixtures/golden_market/market_snapshots
+
 uv run quant signal-diagnostics --help
 ```
 
 Live market data runs are ad-hoc only and must opt in explicitly. The default
 provider is yfinance. Normal evaluation should first create market snapshots,
-then read those snapshots for comparison runs.
+then read those snapshots for comparison runs or full-period backtests.
 
 ```bash
 STOOQ_API_KEY=... uv run quant market-snapshot-create \
@@ -70,6 +84,11 @@ uv run quant comparison-summary \
   --snapshot-spec-file data/comparison-run-spec.json \
   --market-snapshot-dir data/market_snapshots \
   --top 5
+
+uv run quant backtest-strategy \
+  --strategy-key stg-fu-eq \
+  --snapshot-id <snapshot-id-from-run-spec> \
+  --market-snapshot-dir data/market_snapshots
 ```
 
 ## API

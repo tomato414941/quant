@@ -46,6 +46,21 @@ uv run quant comparison-summary \
   --top 1
 ```
 
+There are two evaluation entrypoints with different meanings:
+
+- `comparison-summary`: strategy comparison on the existing comparison/run plumbing. Use this for the current holdout-style research comparison workflow.
+- `backtest-strategy`: full-period backtest from a fixed market snapshot. Use this when you want to ask "what happened over the whole snapshot period?" for a supported strategy.
+
+Currently `backtest-strategy` supports `stg-fu-eq` only:
+
+```bash
+cd backend
+uv run quant backtest-strategy \
+  --strategy-key stg-fu-eq \
+  --snapshot-id 0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88 \
+  --market-snapshot-dir tests/fixtures/golden_market/market_snapshots
+```
+
 ## What To Read First
 
 Start here if you are viewing the repository for the first time:

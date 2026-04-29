@@ -79,6 +79,15 @@ Evaluation ContextはStrategy定義を上書きしない。Universe、rebalance 
 
 Evaluation run specs include `marketDataContexts[].datasetSnapshot` as the fixed market data contract for a run. Provider APIs are used to create local snapshots; reproducible evaluations read those snapshots and validate their metadata/content fingerprints instead of fetching provider data.
 
+Two code paths consume these snapshots today:
+
+- `comparison-summary`: existing strategy comparison/run plumbing. It is useful
+  for comparing strategy definitions under the current research workflow, but
+  should not be described as a plain full-period backtest.
+- `backtest-strategy`: full-period backtest over one fixed market snapshot. This
+  is the simpler entrypoint for asking how a supported strategy behaved across
+  the whole snapshot period. It currently supports `stg-fu-eq`.
+
 The v1 contract records:
 
 - `source`: data provider label.

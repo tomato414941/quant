@@ -51,7 +51,8 @@ entrypoints:
 - `comparison-summary` runs the existing strategy comparison workflow. Treat it
   as comparison/run plumbing, not as a plain full-period backtest.
 - `backtest-strategy` runs a full-period backtest from one fixed market
-  snapshot. It currently supports `stg-fu-eq` only.
+  snapshot. It currently supports 16 full-universe ETF variants: four portfolio
+  models across annual, monthly, weekly, and daily rebalance schedules.
 
 Use `backtest-strategy` as the strategy-level full-period backtest entrypoint.
 `backtest-equal-weight` is a lower-level compatibility/debugging command for the
@@ -72,7 +73,26 @@ uv run quant backtest-strategy \
   --snapshot-id 0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88 \
   --market-snapshot-dir tests/fixtures/golden_market/market_snapshots
 
+uv run quant backtest-strategy \
+  --strategy-key stg-fu-hrp-day \
+  --snapshot-id 0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88 \
+  --market-snapshot-dir tests/fixtures/golden_market/market_snapshots
+
 uv run quant signal-diagnostics --help
+```
+
+Run the ad-hoc 16-strategy full-period matrix when you need a local comparison
+table for one fixed snapshot. This helper is intentionally a script, not a
+stable top-level CLI. Write outputs under `backend/data/`; they are ignored and
+can be regenerated.
+
+```bash
+cd backend
+uv run python ../scripts/backtest_matrix.py \
+  --snapshot-id <snapshot-id> \
+  --market-snapshot-dir data/market_snapshots_yfinance_only_etf \
+  --transaction-cost 0.001 \
+  --output data/backtest-matrix-yfinance-only-etf.md
 ```
 
 Live market data runs are ad-hoc only and must opt in explicitly. The default
@@ -91,7 +111,7 @@ uv run quant comparison-summary \
   --top 5
 
 uv run quant backtest-strategy \
-  --strategy-key stg-fu-eq \
+  --strategy-key stg-fu-hrp \
   --snapshot-id <snapshot-id-from-run-spec> \
   --market-snapshot-dir data/market_snapshots
 ```

@@ -27,17 +27,22 @@
 
 | Field | Value |
 | --- | --- |
-| Evaluation Set ID | `no_signal_allocation_v1` |
+| Evaluation Set ID | `no_signal_allocation` |
 | Purpose | signalなしのETF配分モデルを比較する |
 | Strategies | `stg-fu-eq`, `stg-fu-rb`, `stg-fu-minvar`, `stg-fu-hrp` |
 | Evaluation Contexts | `2015_2025` |
-| Status | planned |
+| Status | primary and conservative candidates selected |
+
+Generated outputs are not tracked in this document. Local matrix files and raw
+helper outputs belong under ignored paths such as `backend/data/`; selected
+reproducibility records go to [Full-Period Backtest Results](./backtest-results.md),
+and comparison summaries go to [Leaderboard](./leaderboard.md).
 
 ## Next Evaluation Order
 
-1. `no_signal_allocation_v1` を `2015_2025` で評価する。
-2. 結果を [Leaderboard](./leaderboard.md) に手動スナップショットとして記録する。
-3. 必要になったらcost sensitivityやwalk-forwardをEvaluation Context候補から正式化する。
+1. Primary candidateを `stg-fu-rb-week` として扱う。
+2. Conservative candidateを `stg-fu-rb-month` として扱う。
+3. 追加の採用判断が必要になった場合だけ、walk-forward stabilityを正式化する。
 
 Leaderboardへの記録は手動で行う。評価runの保存やhelper出力が存在しても、
 この文書で選んだEvaluation SetとContextだけを混ぜずに転記する。

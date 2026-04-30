@@ -31,7 +31,7 @@ PORTFOLIO_MODEL_LABELS = {
     "mean_risk_utility": "MeanRisk効用最大化",
     "mean_risk_utility_conservative": "MeanRisk効用最大化 弱",
 }
-SUPPORTED_REBALANCE_SCHEDULES = {"hold", "every_bar", "month_end", "quarter_end", "year_end"}
+SUPPORTED_REBALANCE_SCHEDULES = {"hold", "every_bar", "week_end", "month_end", "quarter_end", "year_end"}
 DIRECT_EXECUTION_MULTI_SELECTION_STRATEGY_TYPES = {
     "full_universe_momentum_tilt",
     "full_universe_momentum_low_vol_tilt",

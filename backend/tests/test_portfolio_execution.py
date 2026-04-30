@@ -595,3 +595,8 @@ def test_compute_trade_cost_increases_when_liquidity_is_lower() -> None:
 def test_should_rebalance_supports_every_bar_schedule() -> None:
     assert should_rebalance("2025-01-01", "2025-01-02", "every_bar") is True
     assert should_rebalance("2025-01-01", "2025-01-01", "every_bar") is False
+
+
+def test_should_rebalance_supports_week_end_schedule() -> None:
+    assert should_rebalance("2025-01-03", "2025-01-06", "week_end") is True
+    assert should_rebalance("2025-01-02", "2025-01-03", "week_end") is False

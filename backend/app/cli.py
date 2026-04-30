@@ -10,7 +10,7 @@ from typing import Sequence
 from app import edge_attribution_service
 from app import robustness_service
 from app import signal_diagnostics_service
-from app.backtest import run_equal_weight_full_period_backtest
+from app.backtest import run_equal_weight_full_period_backtest, run_portfolio_model_full_period_backtest
 from app.comparison_market_context import build_run_result_store
 from app.comparison_payloads import (
     build_comparison_payload,
@@ -27,6 +27,7 @@ from app.market_data import read_market_data_snapshot
 from app.research_job_api import DEFAULT_RESEARCH_JOB_STORE_DIR, RESEARCH_JOB_STORE_DIR_ENV
 from app.research_job_runner import ResearchJobRunner
 from app.research_job_store import ResearchJobStore
+from app.strategy_presets import HIERARCHICAL_RISK_PARITY, MINIMUM_VARIANCE, RISK_BUDGETING
 from app.instrument_registry import UNIVERSE_VARIANT_KEYS
 from app.strategy_inventory import (
     STRATEGY_INVENTORY_PRIORITIES,
@@ -288,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_strategy_parser.add_argument("--initial-capital", type=float, default=10_000.0)
     backtest_strategy_parser.add_argument("--transaction-cost", type=float, default=0.0)
     backtest_strategy_parser.add_argument("--bars-per-year", type=float, default=252.0)
-    backtest_strategy_parser.add_argument("--rebalance-schedule", default="hold")
+    backtest_strategy_parser.add_argument("--rebalance-schedule")
     backtest_strategy_parser.add_argument("--include-series", action="store_true")
     backtest_strategy_parser.add_argument("--include-events", action="store_true")
 
@@ -428,6 +429,95 @@ def build_equal_weight_backtest_payload(
     if include_events:
         payload["result"]["events"] = result["events"]
     return payload
+
+
+BACKTEST_STRATEGY_BASE_MODELS = {
+    "stg-fu-rb": RISK_BUDGETING,
+    "stg-fu-minvar": MINIMUM_VARIANCE,
+    "stg-fu-hrp": HIERARCHICAL_RISK_PARITY,
+}
+BACKTEST_STRATEGY_SCHEDULE_SUFFIXES = {
+    "": "year_end",
+    "-month": "month_end",
+    "-week": "week_end",
+    "-day": "every_bar",
+}
+BACKTEST_PORTFOLIO_MODELS = {
+    base_key + suffix: portfolio_model
+    for base_key, portfolio_model in BACKTEST_STRATEGY_BASE_MODELS.items()
+    for suffix in BACKTEST_STRATEGY_SCHEDULE_SUFFIXES
+}
+BACKTEST_STRATEGY_REBALANCE_SCHEDULES = {
+    base_key + suffix: schedule
+    for base_key in ("stg-fu-eq", *BACKTEST_STRATEGY_BASE_MODELS)
+    for suffix, schedule in BACKTEST_STRATEGY_SCHEDULE_SUFFIXES.items()
+}
+
+
+def build_portfolio_model_backtest_payload(
+    *,
+    snapshot_id: str,
+    market_snapshot_dir: str,
+    initial_capital: float,
+    transaction_cost: float,
+    bars_per_year: float,
+    rebalance_schedule: str,
+    include_series: bool,
+    include_events: bool,
+    payload_kind: str,
+    strategy_key: str,
+) -> dict[str, object]:
+    portfolio_model = BACKTEST_PORTFOLIO_MODELS.get(strategy_key)
+    if portfolio_model is None:
+        raise ValueError("Unsupported portfolio model backtest strategy: " + strategy_key)
+    bundle, metadata = read_market_data_snapshot(
+        snapshot_id,
+        storage_dir=market_snapshot_dir,
+    )
+    result = run_portfolio_model_full_period_backtest(
+        closes=bundle["closes"],
+        volumes=bundle["volumes"],
+        portfolio_model=portfolio_model,
+        strategy_key=strategy_key,
+        initial_capital=initial_capital,
+        transaction_cost=transaction_cost,
+        bars_per_year=bars_per_year,
+        rebalance_schedule=rebalance_schedule,
+    )
+    payload = {
+        "kind": payload_kind,
+        "snapshot": {
+            "snapshotId": snapshot_id,
+            "source": metadata["source"],
+            "timeframe": metadata["timeframe"],
+            "startDate": metadata["aligned_start_date"],
+            "endDate": metadata["aligned_end_date"],
+            "rowCount": metadata["row_count"],
+            "tickers": metadata["tickers"],
+        },
+        "result": {
+            "kind": result["kind"],
+            "strategyKey": strategy_key,
+            "summary": result["summary"],
+            "firstInvestedDate": result["firstInvestedDate"],
+            "finalWeights": result["weights"],
+            "seriesCount": len(result["series"]),
+            "eventCount": len(result["events"]),
+        },
+    }
+    if include_series:
+        payload["result"]["series"] = result["series"]
+    if include_events:
+        payload["result"]["events"] = result["events"]
+    return payload
+
+
+BACKTEST_STRATEGY_BUILDERS = {
+    strategy_key: (
+        build_equal_weight_backtest_payload if strategy_key.startswith("stg-fu-eq") else build_portfolio_model_backtest_payload
+    )
+    for strategy_key in BACKTEST_STRATEGY_REBALANCE_SCHEDULES
+}
 
 
 
@@ -648,15 +738,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "backtest-strategy":
-        if args.strategy_key != "stg-fu-eq":
+        build_backtest_payload = BACKTEST_STRATEGY_BUILDERS.get(args.strategy_key)
+        if build_backtest_payload is None:
             parser.error("Unsupported strategy for full-period backtest: " + args.strategy_key)
-        payload = build_equal_weight_backtest_payload(
+        rebalance_schedule = args.rebalance_schedule or BACKTEST_STRATEGY_REBALANCE_SCHEDULES[args.strategy_key]
+        payload = build_backtest_payload(
             snapshot_id=args.snapshot_id,
             market_snapshot_dir=args.market_snapshot_dir,
             initial_capital=args.initial_capital,
             transaction_cost=args.transaction_cost,
             bars_per_year=args.bars_per_year,
-            rebalance_schedule=args.rebalance_schedule,
+            rebalance_schedule=rebalance_schedule,
             include_series=args.include_series,
             include_events=args.include_events,
             payload_kind="backtest_strategy_result",

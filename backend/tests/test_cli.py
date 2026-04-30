@@ -1119,13 +1119,34 @@ def test_backtest_equal_weight_help_points_to_strategy_entrypoint() -> None:
     assert "key stg-fu-eq for strategy-level runs." in help_text
 
 
-def test_backtest_strategy_command_runs_stg_fu_eq_golden_snapshot(capsys) -> None:
+@pytest.mark.parametrize(
+    "strategy_key",
+    [
+        "stg-fu-eq",
+        "stg-fu-eq-month",
+        "stg-fu-eq-week",
+        "stg-fu-eq-day",
+        "stg-fu-rb",
+        "stg-fu-rb-month",
+        "stg-fu-rb-week",
+        "stg-fu-rb-day",
+        "stg-fu-minvar",
+        "stg-fu-minvar-month",
+        "stg-fu-minvar-week",
+        "stg-fu-minvar-day",
+        "stg-fu-hrp",
+        "stg-fu-hrp-month",
+        "stg-fu-hrp-week",
+        "stg-fu-hrp-day",
+    ],
+)
+def test_backtest_strategy_command_runs_golden_snapshot(strategy_key, capsys) -> None:
     fixture_dir = Path(__file__).parent / "fixtures" / "golden_market"
 
     exit_code = cli_module.main([
         "backtest-strategy",
         "--strategy-key",
-        "stg-fu-eq",
+        strategy_key,
         "--snapshot-id",
         "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
         "--market-snapshot-dir",
@@ -1141,7 +1162,7 @@ def test_backtest_strategy_command_runs_stg_fu_eq_golden_snapshot(capsys) -> Non
     assert payload["kind"] == "backtest_strategy_result"
     assert payload["snapshot"]["rowCount"] == 7
     assert payload["result"]["kind"] == "full_period_backtest"
-    assert payload["result"]["strategyKey"] == "stg-fu-eq"
+    assert payload["result"]["strategyKey"] == strategy_key
     assert payload["result"]["firstInvestedDate"] == "2025-01-02"
     assert payload["result"]["summary"] == {
         "totalReturnPct": 4.66,
@@ -1154,6 +1175,36 @@ def test_backtest_strategy_command_runs_stg_fu_eq_golden_snapshot(capsys) -> Non
     assert payload["result"]["eventCount"] == 1
 
 
+@pytest.mark.parametrize(
+    ("strategy_key", "event_count"),
+    [
+        ("stg-fu-eq", 1),
+        ("stg-fu-eq-month", 1),
+        ("stg-fu-eq-week", 2),
+        ("stg-fu-eq-day", 6),
+    ],
+)
+def test_backtest_strategy_command_uses_strategy_rebalance_schedule(strategy_key, event_count, capsys) -> None:
+    fixture_dir = Path(__file__).parent / "fixtures" / "golden_market"
+
+    exit_code = cli_module.main([
+        "backtest-strategy",
+        "--strategy-key",
+        strategy_key,
+        "--snapshot-id",
+        "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
+        "--market-snapshot-dir",
+        str(fixture_dir / "market_snapshots"),
+        "--transaction-cost",
+        "0",
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["result"]["strategyKey"] == strategy_key
+    assert payload["result"]["eventCount"] == event_count
+
+
 def test_backtest_strategy_command_rejects_unsupported_strategy(capsys) -> None:
     fixture_dir = Path(__file__).parent / "fixtures" / "golden_market"
 
@@ -1161,7 +1212,7 @@ def test_backtest_strategy_command_rejects_unsupported_strategy(capsys) -> None:
         cli_module.main([
             "backtest-strategy",
             "--strategy-key",
-            "stg-fu-minvar",
+            "stg-riskoff-posmom-hrp-month",
             "--snapshot-id",
             "0d1aaa50ac7a9f4c7e82ee584c7a1bb0a6ce27f9434bf1884bcaee9a4432cd88",
             "--market-snapshot-dir",
@@ -1170,7 +1221,7 @@ def test_backtest_strategy_command_rejects_unsupported_strategy(capsys) -> None:
 
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
-    assert "Unsupported strategy for full-period backtest: stg-fu-minvar" in captured.err
+    assert "Unsupported strategy for full-period backtest: stg-riskoff-posmom-hrp-month" in captured.err
 
 
 @pytest.mark.slow

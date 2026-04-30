@@ -65,6 +65,11 @@ StrategyのIDと名前は分けて扱う。
 
 ## Reviewed Strategies
 
+The table below lists the four public reviewed annual strategy definitions.
+Monthly, weekly, and daily `backtest-strategy` variants are runner-supported
+rebalance-frequency variants of these definitions; they are not yet separate
+reviewed catalog entries.
+
 | Strategy ID | Slug | Display Name | Universe | Selection | Signal | Portfolio Model | Rebalance Frequency | Overlay | Role | Tags | Key Parameters | Human Reviewed | Reviewed At | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `stg-fu-eq` | `etf-eq` | ETF Equal Weight Allocation | ETF | full_universe | none | equal_weight | annual | none | reference | `etf_universe, full_universe, equal_weight, reference_point` | `universe=ETF, selection=full_universe, signal=none, portfolio=equal_weight, rebalance_frequency=annual, overlay=none` | yes | 2026-04-25 | ETF equal-weight reference point for return and drawdown context. Strategy ID and slug are expected to change when naming is cleaned up. Proposed opaque Strategy ID: `stg-k7m4qa`. |

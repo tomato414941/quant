@@ -67,46 +67,67 @@ def fit_risk_structure_portfolio_model_result(allocation_input: PortfolioAllocat
     raw_max_weight = None
     if allocation_input.max_weight is not None:
         raw_max_weight = min(1.0, allocation_input.max_weight / allocation_input.max_investment_ratio)
+    has_insufficient_optimizer_history = len(returns.index) < max(2, asset_count)
 
     if portfolio_model.model_type == "equal_weight":
         weights = build_equal_weight_fallback(asset_count, raw_max_weight)
         fallback_metadata = None
     elif portfolio_model.model_type == "risk_budgeting":
-        try:
-            estimator = RiskBudgeting(
-                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                transaction_costs=allocation_input.transaction_cost,
-                previous_weights=allocation_input.previous_weights,
-            )
-            estimator.fit(returns)
-            weights = estimator.weights_
-            fallback_metadata = None
-        except Exception as exc:
+        if has_insufficient_optimizer_history:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
             fallback_metadata = build_allocation_fallback_metadata(
                 portfolio_model.model_type,
-                "optimizer_exception",
-                exc,
+                "insufficient_history",
             )
+        else:
+            try:
+                estimator = RiskBudgeting(
+                    max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
+                    transaction_costs=allocation_input.transaction_cost,
+                    previous_weights=allocation_input.previous_weights,
+                )
+                estimator.fit(returns)
+                weights = estimator.weights_
+                fallback_metadata = None
+            except Exception as exc:
+                weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+                fallback_metadata = build_allocation_fallback_metadata(
+                    portfolio_model.model_type,
+                    "optimizer_exception",
+                    exc,
+                )
     elif portfolio_model.model_type == "minimum_variance":
-        try:
-            estimator = MeanRisk(
-                max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
-                transaction_costs=allocation_input.transaction_cost,
-                previous_weights=allocation_input.previous_weights,
-            )
-            estimator.fit(returns)
-            weights = estimator.weights_
-            fallback_metadata = None
-        except Exception as exc:
+        if has_insufficient_optimizer_history:
             weights = build_equal_weight_fallback(asset_count, raw_max_weight)
             fallback_metadata = build_allocation_fallback_metadata(
                 portfolio_model.model_type,
-                "optimizer_exception",
-                exc,
+                "insufficient_history",
             )
+        else:
+            try:
+                estimator = MeanRisk(
+                    max_weights=raw_max_weight if raw_max_weight is not None else 1.0,
+                    transaction_costs=allocation_input.transaction_cost,
+                    previous_weights=allocation_input.previous_weights,
+                )
+                estimator.fit(returns)
+                weights = estimator.weights_
+                fallback_metadata = None
+            except Exception as exc:
+                weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+                fallback_metadata = build_allocation_fallback_metadata(
+                    portfolio_model.model_type,
+                    "optimizer_exception",
+                    exc,
+                )
     elif portfolio_model.model_type == "hierarchical_risk_parity":
-        if asset_count <= 2:
+        if has_insufficient_optimizer_history:
+            weights = build_equal_weight_fallback(asset_count, raw_max_weight)
+            fallback_metadata = build_allocation_fallback_metadata(
+                portfolio_model.model_type,
+                "insufficient_history",
+            )
+        elif asset_count <= 2:
             try:
                 estimator = RiskBudgeting(
                     max_weights=raw_max_weight if raw_max_weight is not None else 1.0,

@@ -293,6 +293,8 @@ def should_rebalance(previous_date, current_date, rebalance_schedule: str) -> bo
     current_timestamp = pd.Timestamp(current_date)
     if rebalance_schedule == "every_bar":
         return previous_timestamp.normalize() != current_timestamp.normalize()
+    if rebalance_schedule == "week_end":
+        return previous_timestamp.isocalendar()[:2] != current_timestamp.isocalendar()[:2]
     if rebalance_schedule == "month_end":
         return previous_timestamp.month != current_timestamp.month or previous_timestamp.year != current_timestamp.year
     if rebalance_schedule == "quarter_end":

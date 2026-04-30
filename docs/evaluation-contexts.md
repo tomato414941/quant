@@ -86,7 +86,9 @@ Two code paths consume these snapshots today:
   should not be described as a plain full-period backtest.
 - `backtest-strategy`: full-period backtest over one fixed market snapshot. This
   is the simpler entrypoint for asking how a supported strategy behaved across
-  the whole snapshot period. It currently supports `stg-fu-eq`.
+  the whole snapshot period. It currently supports 16 full-universe ETF variants:
+  four portfolio models across annual, monthly, weekly, and daily rebalance
+  schedules.
 
 The v1 contract records:
 

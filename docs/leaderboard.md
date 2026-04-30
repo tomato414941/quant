@@ -7,6 +7,10 @@ CLI/API機能の仕様ではない。今の段階ではコードを増やさず�
 公開リポジトリ上では、ここを「最新runの自動集計」ではなく「選んだrunを手で記録した比較表」として読む。
 再現や追加検証に進む前に、対象のEvaluation Contextと更新日を確認する。
 
+Raw matrix outputs do not belong here. Keep full generated tables under ignored
+paths such as `backend/data/`, then copy only the decision-relevant rows,
+ranking, and interpretation into this document.
+
 ## Questions This Answers
 
 - 評価済みrunをどう並べて見るか？
@@ -27,8 +31,65 @@ CLI/API機能の仕様ではない。今の段階ではコードを増やさず�
 - 手動スナップショットなので更新日を書く。
 - 自動更新ではないため、表が最新runを網羅しているとは限らない。
 - この文書は議論の入口であり、最終採用判断ではない。
+- 生成された全量表をそのまま貼らず、比較判断に必要な要約だけを載せる。
+- 次に深掘りする採用候補はここに置く。最終採用判断は将来の
+  decision note で別に記録する。
 
 ## ETF 2015-2025
+
+### Fixed-Snapshot Backtest-Strategy Matrix
+
+Last updated: 2026-04-30
+
+Source: selected rows from local generated matrix
+`backend/data/backtest-matrix-yfinance-only-etf.md`. The full matrix is an
+ignored local artifact, not a committed documentation source of truth.
+
+Snapshot:
+
+| Field | Value |
+| --- | --- |
+| Snapshot ID | `580d7527df6c22a918306b55a29b7c756bd05480094aec732dc3d67d2d48ce6a` |
+| Source | Yahoo Finance via yfinance |
+| Period | `2015-01-02` to `2025-12-31` |
+| Timeframe | `1d` |
+| Rows | `2766` |
+| Transaction cost | `0.001` |
+
+Reproduction command:
+
+```bash
+cd backend
+uv run python ../scripts/backtest_matrix.py \
+  --snapshot-id 580d7527df6c22a918306b55a29b7c756bd05480094aec732dc3d67d2d48ce6a \
+  --market-snapshot-dir data/market_snapshots_yfinance_only_etf \
+  --transaction-cost 0.001 \
+  --output data/backtest-matrix-yfinance-only-etf.md
+```
+
+Decision summary:
+
+| Role | Strategy ID | Sharpe | CAGR | Max DD | Turnover | Note |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Baseline | `stg-fu-eq` | 0.69 | 7.16% | 24.99% | 100.00% | Highest CAGR in this matrix, but largest drawdown among the selected rows. |
+| Main candidate | `stg-fu-rb-month` | 0.87 | 4.45% | 12.29% | 383.75% | Better Sharpe/drawdown balance than equal weight with moderate rebalance frequency. |
+| Main candidate | `stg-fu-rb-week` | 0.89 | 4.46% | 11.98% | 465.69% | Slightly better Sharpe/MDD than monthly, with higher turnover. |
+| Low-drawdown reference | `stg-fu-minvar-month` | 0.82 | 2.82% | 7.22% | 768.62% | Strong drawdown control, but low CAGR and high turnover. |
+| Middle reference | `stg-fu-hrp-week` | 0.79 | 3.54% | 11.50% | 1295.91% | Middle risk profile, but turnover is high. |
+
+Interpretation:
+
+- Primary candidate: `stg-fu-rb-week`.
+- Conservative candidate: `stg-fu-rb-month`.
+- `stg-fu-eq` remains the baseline because it has the highest CAGR, but its
+  drawdown is materially larger.
+- Minimum-variance variants reduce drawdown, but the return tradeoff is large in
+  this context.
+- Daily variants are not current main candidates because turnover is high:
+  `stg-fu-rb-day` 636.78%, `stg-fu-minvar-day` 1620.85%, and `stg-fu-hrp-day`
+  2174.52%.
+
+### Saved Comparison-Summary Runs
 
 Last updated: 2026-04-27
 
@@ -54,13 +115,39 @@ Fallback rate: unavailable in the saved compact metrics for this batch.
 | 3 | `stg-fu-hrp` | 1.39 | 6.04% | 4.47% | 144.06% | N/A | N/A | Run file `4e83759d5a366c7193ddb45a9d4377219911d31c48595481c8fabe3c3ed851ad.json`; market data fingerprint above. |
 | 4 | `stg-fu-eq` | 1.19 | 12.26% | 9.39% | 23.50% | N/A | N/A | Run file `22b4e8f5b7e5b4284caaf3f2f42521400339a3d0f7969fa31c842347d06e1e5b.json`; market data fingerprint above. |
 
-## ETF 2015-2025 Cost x2
+## ETF 2015-2025 Cost Sensitivity
 
-Last updated: TBD
+Last updated: 2026-04-30
 
-| Rank | Strategy ID | Sharpe | CAGR | Max DD | Turnover | Baseline Delta | Note |
-| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+Transaction cost is modeled as a flat proportional cost per traded notional. It
+is a simplified proxy for commissions, bid-ask spread, and slippage. It does not
+model ETF-specific liquidity, order size, taxes, or expense ratios.
+
+Candidate cost points:
+
+| Transaction Cost | Label | Intended Reading |
+| ---: | --- | --- |
+| `0.00025` | Low | Liquid ETF / low-slippage assumption. |
+| `0.0005` | Base | Practical baseline candidate for liquid US ETF trading. |
+| `0.001` | Conservative | Current fixed-snapshot matrix assumption. |
+| `0.002` | Stress | High-cost stress case, not a normal baseline. |
+
+| Transaction Cost | Main Candidate | Sharpe | CAGR | Max DD | Turnover | Note |
+| ---: | --- | ---: | ---: | ---: | ---: | --- |
+| `0.00025` | `stg-fu-rb-week` | 0.89 | 4.50% | 11.97% | 465.69% | `stg-fu-rb-month`: Sharpe 0.88, CAGR 4.47%, MDD 12.30%, turnover 383.75%. |
+| `0.0005` | `stg-fu-rb-week` | 0.89 | 4.49% | 11.97% | 465.69% | `stg-fu-rb-month`: Sharpe 0.88, CAGR 4.46%, MDD 12.29%, turnover 383.75%. |
+| `0.001` | `stg-fu-rb-week` | 0.89 | 4.46% | 11.98% | 465.69% | `stg-fu-rb-month`: Sharpe 0.87, CAGR 4.45%, MDD 12.29%, turnover 383.75%. |
+| `0.002` | `stg-fu-rb-week` | 0.88 | 4.42% | 12.00% | 465.69% | `stg-fu-rb-month`: Sharpe 0.86, CAGR 4.41%, MDD 12.30%, turnover 383.75%. |
+
+Interpretation:
+
+- `stg-fu-rb-week` stays slightly ahead of `stg-fu-rb-month` across the tested
+  cost range.
+- The advantage is small, while weekly turnover is consistently higher.
+- Keep `stg-fu-rb-week` as the primary candidate and `stg-fu-rb-month` as the
+  conservative candidate.
+- Run walk-forward stability only if another validation gate is needed before a
+  stronger adoption decision.
 
 ## ETF Walk-Forward 2020-2025
 

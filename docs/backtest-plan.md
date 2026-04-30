@@ -6,37 +6,40 @@
 
 ## Current State
 
-`backtest-strategy` currently supports:
+`backtest-strategy` currently supports 16 full-universe ETF variants:
 
-| Strategy | Status | Notes |
-| --- | --- | --- |
-| `stg-fu-eq` | implemented | Full-period equal-weight backtest from a fixed market snapshot. |
+| Portfolio model | Annual | Monthly | Weekly | Daily |
+| --- | --- | --- | --- | --- |
+| Equal weight | `stg-fu-eq` | `stg-fu-eq-month` | `stg-fu-eq-week` | `stg-fu-eq-day` |
+| Risk budgeting | `stg-fu-rb` | `stg-fu-rb-month` | `stg-fu-rb-week` | `stg-fu-rb-day` |
+| Minimum variance | `stg-fu-minvar` | `stg-fu-minvar-month` | `stg-fu-minvar-week` | `stg-fu-minvar-day` |
+| HRP | `stg-fu-hrp` | `stg-fu-hrp-month` | `stg-fu-hrp-week` | `stg-fu-hrp-day` |
+
+Portfolio-model strategies fall back to equal weight when rebalance history is
+insufficient.
 
 `backtest-equal-weight` remains as a lower-level compatibility/debugging entrypoint. Prefer the shared `backtest-strategy` entrypoint for future strategy-level runs.
 
-## Next Candidate
+## Last Completed Candidate
 
-The next candidate is `stg-fu-rb`.
+The latest completed step is adding monthly, weekly, and daily rebalance
+variants for the four full-universe ETF portfolio models.
 
 Reason:
 
-- It is already a public reviewed Strategy in [Strategy Catalog](./strategy-catalog.md).
-- It uses the same ETF full universe, no selection signal, annual rebalance, and no overlay as `stg-fu-eq`.
-- The main difference from `stg-fu-eq` is the portfolio model: equal-risk-contribution / risk budgeting.
-- It is simpler to reason about than minimum variance, HRP, predictor-augmented, defensive momentum, or low-vol momentum variants.
+- It keeps the universe, selection policy, and overlay fixed.
+- It isolates rebalance-frequency sensitivity across the same four portfolio
+  construction models.
+- It does not require adding momentum, predictor, or risk-regime selection logic
+  to the full-period backtest runner.
 
-Implement it only after `stg-fu-eq` remains stable under the fixed snapshot tests.
+It was added after the four annual full-universe portfolio models remained
+stable under the fixed snapshot tests.
 
 ## Dispatch Decision
 
-Keep the current direct guard while only `stg-fu-eq` is supported.
-
-When adding `stg-fu-rb`, decide between these two options at implementation time:
-
-1. Keep a direct branch if the second implementation is still a tiny wrapper.
-2. Introduce a small static dispatch map if the second implementation would otherwise duplicate CLI branching or payload construction.
-
-Use a dispatch map when the new strategy needs a different runner, input preparation, validation, or payload metadata. Avoid adding it merely to replace a single `if` branch.
+The CLI now uses a small static dispatch map because portfolio-model strategies use a
+different runner and portfolio model setup from `stg-fu-eq`.
 
 Acceptable dispatch shape:
 
@@ -44,10 +47,12 @@ Acceptable dispatch shape:
 BACKTEST_STRATEGY_RUNNERS = {
     "stg-fu-eq": run_stg_fu_eq_backtest,
     "stg-fu-rb": run_stg_fu_rb_backtest,
+    "stg-fu-minvar": run_stg_fu_minvar_backtest,
+    "stg-fu-hrp": run_stg_fu_hrp_backtest,
 }
 ```
 
-Avoid for the next step:
+Still avoid:
 
 - automatic strategy discovery
 - plugin registration
@@ -55,9 +60,10 @@ Avoid for the next step:
 - new top-level CLI commands per strategy
 - coupling `backtest-strategy` to the existing holdout comparison workflow
 
-## Verification Gate For Adding stg-fu-rb
+## Verification Gate Used For Portfolio Model Strategies
 
-Before adding `stg-fu-rb`, define the test contract first:
+`stg-fu-rb`, `stg-fu-minvar`, and `stg-fu-hrp` added the following test
+contract:
 
 - committed golden snapshot CLI test
 - exact `result.summary` values for the golden fixture
@@ -66,4 +72,4 @@ Before adding `stg-fu-rb`, define the test contract first:
 - `eventCount`
 - unsupported strategy still fails clearly
 
-Only after that should the runner implementation be added.
+Keep this gate for the next strategy added to `backtest-strategy`.

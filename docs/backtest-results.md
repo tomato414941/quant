@@ -11,7 +11,7 @@ Scope:
   `backend/data/` 配下の ignored local output として扱う。
 - 記録する場合は、snapshot ID、snapshot dir、strategy key、cost、再現コマンド、
   参照したJSON fieldを併記する。
-- 採用候補や順位付けの読み取りは `docs/leaderboard/README.md` に置く。
+- 順位付けの読み取りは `docs/leaderboard/etf-full-universe-no-signal-allocation.md` に置く。
 
 ## stg-fu-eq / ETF 2015-2025
 

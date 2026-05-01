@@ -1,4 +1,4 @@
-# Leaderboard
+# ETF Full-Universe No-Signal Allocation
 
 この文書は、評価済みrunを人間が比較するための手動スナップショットである。
 
@@ -33,8 +33,6 @@ are useful to read by hand.
 - 生成された全量出力をそのまま貼らず、人間が読む表として整える。
 
 ## ETF 2015-2025
-
-### 16 Strategy Leaderboard
 
 Last updated: 2026-04-30
 

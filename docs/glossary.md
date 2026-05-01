@@ -329,7 +329,7 @@ Strategy そのものではなく、Strategy を評価するために外側か�
 
 どの `Strategy` を、どの `Evaluation Context` で評価するかを管理する文書。
 
-このプロジェクトでは [Evaluation Plan](./evaluation-plan.md) を現在の評価作業を束ねる薄い計画文書として扱う。全Strategyは [Strategy Catalog](./strategy-catalog.md)、評価条件は [Evaluation Contexts](./evaluation-contexts.md)、評価済みrunの比較は [Leaderboard](./leaderboard/README.md) に分ける。
+このプロジェクトでは [Evaluation Plan](./evaluation-plan.md) を現在の評価作業を束ねる薄い計画文書として扱う。全Strategyは [Strategy Catalog](./strategy-catalog.md)、評価条件は [Evaluation Contexts](./evaluation-contexts.md)、評価済みrunの比較は [ETF Full-Universe No-Signal Allocation](./leaderboard/etf-full-universe-no-signal-allocation.md) に分ける。
 
 ### Strategy Catalog
 
@@ -353,7 +353,7 @@ Strategyを評価する条件の台帳。
 
 評価済みrunを人間が比較するための手動スナップショット。
 
-[Leaderboard](./leaderboard/README.md) は議論の入口であり、最終採用判断そのものではない。今の段階ではCLI/API機能仕様として扱わない。
+[ETF Full-Universe No-Signal Allocation](./leaderboard/etf-full-universe-no-signal-allocation.md) は議論の入口であり、最終採用判断そのものではない。今の段階ではCLI/API機能仕様として扱わない。
 
 ### Dataset Context
 

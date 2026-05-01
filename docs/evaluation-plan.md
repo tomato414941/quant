@@ -28,8 +28,8 @@
 | Field | Value |
 | --- | --- |
 | Evaluation Set ID | `no_signal_allocation` |
-| Purpose | signalなしのETF配分モデルを比較する |
-| Strategies | `stg-fu-eq`, `stg-fu-rb`, `stg-fu-minvar`, `stg-fu-hrp` |
+| Purpose | signalなしのETF配分モデルとrebalance frequencyを比較する |
+| Strategies | 16 full-universe variants: equal weight, risk budgeting, minimum variance, and HRP across annual, monthly, weekly, and daily schedules |
 | Evaluation Contexts | `2015_2025` |
 | Status | evaluated |
 

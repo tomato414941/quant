@@ -1,6 +1,6 @@
 # ETF Full-Universe No-Signal Allocation
 
-この文書は、評価済みrunを人間が比較するための手動スナップショットである。
+この文書は、評価済みrunを人間が比較するために手動で記録した比較表である。
 
 CLI/API機能の仕様ではない。今の段階ではコードを増やさず、比較の読み方だけをdocsで試す。
 
@@ -27,7 +27,7 @@ are useful to read by hand.
 - Evaluation Contextを混ぜて順位付けしない。
 - Sharpe単独で判断しない。
 - CAGR、max drawdown、turnover、baseline差分も見る。
-- 手動スナップショットなので更新日を書く。
+- 手動で記録した比較表なので更新日を書く。
 - 自動更新ではないため、表が最新runを網羅しているとは限らない。
 - この文書は比較メモであり、最終採用判断ではない。
 - 生成された全量出力をそのまま貼らず、人間が読む表として整える。
@@ -38,7 +38,7 @@ Last updated: 2026-04-30
 
 Source: local generated matrix
 `backend/data/backtest-matrix-yfinance-only-etf.md`. The generated file is an
-ignored local artifact; the table below is the committed manual snapshot.
+ignored local artifact; the table below is the committed comparison record.
 
 Snapshot:
 
@@ -85,7 +85,7 @@ Ranked by Sharpe:
 
 Interpretation:
 
-- `stg-fu-rb-day` has the highest Sharpe in this snapshot, but daily rebalance
+- `stg-fu-rb-day` has the highest Sharpe in this comparison, but daily rebalance
   drives high turnover and event count.
 - `stg-fu-rb-week` and `stg-fu-rb-month` are close on Sharpe/CAGR/drawdown, with
   weekly taking more turnover than monthly.

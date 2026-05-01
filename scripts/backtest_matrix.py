@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -69,26 +70,42 @@ def run_strategy(args: argparse.Namespace, strategy_key: str) -> dict[str, objec
     return json.loads(completed.stdout)
 
 
+def build_result_id(result: dict[str, object], context: dict[str, object]) -> str:
+    payload = {
+        "kind": "backtest_strategy_result",
+        "context": context,
+        "result": result,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def build_result(args: argparse.Namespace) -> dict[str, object]:
     payloads = [run_strategy(args, strategy_key) for strategy_key in STRATEGY_KEYS]
     rows = []
+    snapshot = payloads[0]["snapshot"] if payloads else {}
+    context = {
+        "snapshotId": snapshot.get("snapshotId"),
+        "transactionCost": float(args.transaction_cost),
+        "initialCapital": float(args.initial_capital),
+        "barsPerYear": float(args.bars_per_year),
+    }
     for payload in payloads:
         result = payload["result"]
         summary = result["summary"]
-        rows.append(
-            {
-                "strategyKey": result["strategyKey"],
-                "totalReturnPct": summary["totalReturnPct"],
-                "cagrPct": summary["cagrPct"],
-                "sharpeRatio": summary["sharpeRatio"],
-                "maxDrawdownPct": summary["maxDrawdownPct"],
-                "turnoverPct": summary["turnoverPct"],
-                "firstInvestedDate": result["firstInvestedDate"],
-                "seriesCount": result["seriesCount"],
-                "eventCount": result["eventCount"],
-            }
-        )
-    snapshot = payloads[0]["snapshot"] if payloads else {}
+        row = {
+            "strategyKey": result["strategyKey"],
+            "totalReturnPct": summary["totalReturnPct"],
+            "cagrPct": summary["cagrPct"],
+            "sharpeRatio": summary["sharpeRatio"],
+            "maxDrawdownPct": summary["maxDrawdownPct"],
+            "turnoverPct": summary["turnoverPct"],
+            "firstInvestedDate": result["firstInvestedDate"],
+            "seriesCount": result["seriesCount"],
+            "eventCount": result["eventCount"],
+        }
+        row["resultId"] = build_result_id(result, context)
+        rows.append(row)
     return {
         "kind": "backtest_strategy_matrix",
         "snapshot": snapshot,
@@ -112,13 +129,13 @@ def render_markdown(result: dict[str, object]) -> str:
         f"- Rows: {snapshot['rowCount']}",
         f"- Transaction cost: {result['transactionCost']}",
         "",
-        "| Strategy | Return | CAGR | Sharpe | MDD | Turnover | Events |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Result ID | Strategy | Return | CAGR | Sharpe | MDD | Turnover | Events |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in result["results"]:
         lines.append(
-            "| {strategyKey} | {totalReturnPct:.2f}% | {cagrPct:.2f}% | {sharpeRatio:.2f} | "
-            "{maxDrawdownPct:.2f}% | {turnoverPct:.2f}% | {eventCount} |".format(**row)
+            "| {resultId} | {strategyKey} | {totalReturnPct:.2f}% | {cagrPct:.2f}% | "
+            "{sharpeRatio:.2f} | {maxDrawdownPct:.2f}% | {turnoverPct:.2f}% | {eventCount} |".format(**row)
         )
     return "\n".join(lines) + "\n"
 

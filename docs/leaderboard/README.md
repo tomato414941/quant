@@ -7,14 +7,13 @@ CLI/API機能の仕様ではない。今の段階ではコードを増やさず�
 公開リポジトリ上では、ここを「最新runの自動集計」ではなく「選んだrunを手で記録した比較表」として読む。
 再現や追加検証に進む前に、対象のEvaluation Contextと更新日を確認する。
 
-Raw matrix outputs do not belong here. Keep full generated tables under ignored
-paths such as `backend/data/`, then copy only the decision-relevant rows,
-ranking, and interpretation into this document.
+Raw matrix outputs do not belong here. Keep generated files under ignored paths
+such as `backend/data/`, then copy the comparison table and source metadata that
+are useful to read by hand.
 
 ## Questions This Answers
 
 - 評価済みrunをどう並べて見るか？
-- 次に深掘りするStrategy候補はどれか？
 - 比較時にどの指標を同時に見るべきか？
 
 ## Questions This Does Not Answer
@@ -30,20 +29,18 @@ ranking, and interpretation into this document.
 - CAGR、max drawdown、turnover、baseline差分も見る。
 - 手動スナップショットなので更新日を書く。
 - 自動更新ではないため、表が最新runを網羅しているとは限らない。
-- この文書は議論の入口であり、最終採用判断ではない。
-- 生成された全量表をそのまま貼らず、比較判断に必要な要約だけを載せる。
-- 次に深掘りする採用候補はここに置く。最終採用判断は将来の
-  decision note で別に記録する。
+- この文書は比較メモであり、最終採用判断ではない。
+- 生成された全量出力をそのまま貼らず、人間が読む表として整える。
 
 ## ETF 2015-2025
 
-### Fixed-Snapshot Backtest-Strategy Matrix
+### 16 Strategy Leaderboard
 
 Last updated: 2026-04-30
 
-Source: selected rows from local generated matrix
-`backend/data/backtest-matrix-yfinance-only-etf.md`. The full matrix is an
-ignored local artifact, not a committed documentation source of truth.
+Source: local generated matrix
+`backend/data/backtest-matrix-yfinance-only-etf.md`. The generated file is an
+ignored local artifact; the table below is the committed manual snapshot.
 
 Snapshot:
 
@@ -67,27 +64,38 @@ uv run python ../scripts/backtest_matrix.py \
   --output data/backtest-matrix-yfinance-only-etf.md
 ```
 
-Decision summary:
+Ranked by Sharpe:
 
-| Role | Strategy ID | Sharpe | CAGR | Max DD | Turnover | Note |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| Baseline | `stg-fu-eq` | 0.69 | 7.16% | 24.99% | 100.00% | Highest CAGR in this matrix, but largest drawdown among the selected rows. |
-| Main candidate | `stg-fu-rb-month` | 0.87 | 4.45% | 12.29% | 383.75% | Better Sharpe/drawdown balance than equal weight with moderate rebalance frequency. |
-| Main candidate | `stg-fu-rb-week` | 0.89 | 4.46% | 11.98% | 465.69% | Slightly better Sharpe/MDD than monthly, with higher turnover. |
-| Low-drawdown reference | `stg-fu-minvar-month` | 0.82 | 2.82% | 7.22% | 768.62% | Strong drawdown control, but low CAGR and high turnover. |
-| Middle reference | `stg-fu-hrp-week` | 0.79 | 3.54% | 11.50% | 1295.91% | Middle risk profile, but turnover is high. |
+| Rank | Strategy ID | Return | CAGR | Sharpe | Max DD | Turnover | Events |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | `stg-fu-rb-day` | 62.25% | 4.51% | 0.91 | 11.83% | 636.78% | 2765 |
+| 2 | `stg-fu-rb-week` | 61.46% | 4.46% | 0.89 | 11.98% | 465.69% | 574 |
+| 3 | `stg-fu-minvar-day` | 36.41% | 2.87% | 0.88 | 6.72% | 1620.85% | 2765 |
+| 4 | `stg-fu-rb-month` | 61.17% | 4.45% | 0.87 | 12.29% | 383.75% | 132 |
+| 5 | `stg-fu-minvar-week` | 35.84% | 2.83% | 0.85 | 7.52% | 1049.83% | 574 |
+| 6 | `stg-fu-minvar-month` | 35.65% | 2.82% | 0.82 | 7.22% | 768.62% | 132 |
+| 7 | `stg-fu-hrp-week` | 46.54% | 3.54% | 0.79 | 11.50% | 1295.91% | 574 |
+| 8 | `stg-fu-hrp-day` | 46.49% | 3.54% | 0.79 | 11.19% | 2174.52% | 2765 |
+| 9 | `stg-fu-rb` | 57.99% | 4.26% | 0.75 | 14.32% | 226.10% | 11 |
+| 10 | `stg-fu-hrp-month` | 45.49% | 3.48% | 0.75 | 12.31% | 840.75% | 132 |
+| 11 | `stg-fu-eq` | 113.63% | 7.16% | 0.69 | 24.99% | 100.00% | 11 |
+| 12 | `stg-fu-eq-month` | 113.63% | 7.16% | 0.69 | 24.99% | 100.00% | 132 |
+| 13 | `stg-fu-eq-week` | 113.63% | 7.16% | 0.69 | 24.99% | 100.00% | 574 |
+| 14 | `stg-fu-eq-day` | 113.63% | 7.16% | 0.69 | 24.99% | 100.00% | 2765 |
+| 15 | `stg-fu-hrp` | 47.46% | 3.60% | 0.67 | 13.51% | 375.35% | 11 |
+| 16 | `stg-fu-minvar` | 34.65% | 2.75% | 0.64 | 12.81% | 407.18% | 11 |
 
 Interpretation:
 
-- Primary candidate: `stg-fu-rb-week`.
-- Conservative candidate: `stg-fu-rb-month`.
-- `stg-fu-eq` remains the baseline because it has the highest CAGR, but its
-  drawdown is materially larger.
+- `stg-fu-rb-day` has the highest Sharpe in this snapshot, but daily rebalance
+  drives high turnover and event count.
+- `stg-fu-rb-week` and `stg-fu-rb-month` are close on Sharpe/CAGR/drawdown, with
+  weekly taking more turnover than monthly.
+- Equal-weight variants have the highest CAGR, but materially larger drawdown.
 - Minimum-variance variants reduce drawdown, but the return tradeoff is large in
   this context.
-- Daily variants are not current main candidates because turnover is high:
-  `stg-fu-rb-day` 636.78%, `stg-fu-minvar-day` 1620.85%, and `stg-fu-hrp-day`
-  2174.52%.
+- HRP variants sit in the middle on drawdown, but turnover is high for weekly
+  and daily schedules.
 
 ### Saved Comparison-Summary Runs
 
@@ -123,16 +131,16 @@ Transaction cost is modeled as a flat proportional cost per traded notional. It
 is a simplified proxy for commissions, bid-ask spread, and slippage. It does not
 model ETF-specific liquidity, order size, taxes, or expense ratios.
 
-Candidate cost points:
+Cost points:
 
 | Transaction Cost | Label | Intended Reading |
 | ---: | --- | --- |
 | `0.00025` | Low | Liquid ETF / low-slippage assumption. |
-| `0.0005` | Base | Practical baseline candidate for liquid US ETF trading. |
+| `0.0005` | Base | Practical baseline for liquid US ETF trading. |
 | `0.001` | Conservative | Current fixed-snapshot matrix assumption. |
 | `0.002` | Stress | High-cost stress case, not a normal baseline. |
 
-| Transaction Cost | Main Candidate | Sharpe | CAGR | Max DD | Turnover | Note |
+| Transaction Cost | Risk Budgeting Weekly | Sharpe | CAGR | Max DD | Turnover | Monthly Comparison |
 | ---: | --- | ---: | ---: | ---: | ---: | --- |
 | `0.00025` | `stg-fu-rb-week` | 0.89 | 4.50% | 11.97% | 465.69% | `stg-fu-rb-month`: Sharpe 0.88, CAGR 4.47%, MDD 12.30%, turnover 383.75%. |
 | `0.0005` | `stg-fu-rb-week` | 0.89 | 4.49% | 11.97% | 465.69% | `stg-fu-rb-month`: Sharpe 0.88, CAGR 4.46%, MDD 12.29%, turnover 383.75%. |
@@ -144,15 +152,4 @@ Interpretation:
 - `stg-fu-rb-week` stays slightly ahead of `stg-fu-rb-month` across the tested
   cost range.
 - The advantage is small, while weekly turnover is consistently higher.
-- Keep `stg-fu-rb-week` as the primary candidate and `stg-fu-rb-month` as the
-  conservative candidate.
-- Run walk-forward stability only if another validation gate is needed before a
-  stronger adoption decision.
-
-## ETF Walk-Forward 2020-2025
-
-Last updated: TBD
-
-| Rank | Strategy ID | Average Sharpe | Average CAGR | Worst Max DD | Stability | Note |
-| ---: | --- | ---: | ---: | ---: | ---: | --- |
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+- This is a cost sensitivity read, not a final conclusion.

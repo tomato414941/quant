@@ -49,4 +49,4 @@ CLIはcommand wiringに寄せ、payload生成やrenderingの責務を分ける�
 
 コード側の整理は、docs上の概念が安定してから小さく進める。
 
-具体的な課題は [Issues](./issues/result-lookup.md) から小さく管理する。
+具体的な課題は [Issues](./issues/) から小さく管理する。

@@ -2,7 +2,7 @@
 
 この文書は、今回評価するStrategy setとEvaluation Contextを定義する。
 初めて読む場合は、この文書で「何を評価するか」を確認し、結果の読み方は
-[ETF Full-Universe No-Signal Allocation](./leaderboard/etf-full-universe-no-signal-allocation.md) の手動スナップショットを見る。
+[ETF Full-Universe No-Signal Allocation](./leaderboard/etf-full-universe-no-signal-allocation.md) の手動で記録した比較表を見る。
 
 ## Questions This Answers
 
@@ -41,7 +41,7 @@ and comparison summaries go to [ETF Full-Universe No-Signal Allocation](./leader
 ## Next Evaluation Order
 
 1. 追加評価が必要になった場合だけ、対象のStrategy setとEvaluation Contextを明示する。
-2. 実行結果は再現性ログか手動スナップショットとして記録する。
+2. 実行結果は再現性ログか手動で記録した比較表として記録する。
 
 Leaderboardへの記録は手動で行う。評価runの保存やhelper出力が存在しても、
 この文書で選んだEvaluation SetとContextだけを混ぜずに転記する。

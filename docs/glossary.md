@@ -351,7 +351,7 @@ Strategyを評価する条件の台帳。
 
 ### Leaderboard
 
-評価済みrunを人間が比較するための手動スナップショット。
+評価済みrunを人間が比較するために手動で記録した比較表。
 
 [ETF Full-Universe No-Signal Allocation](./leaderboard/etf-full-universe-no-signal-allocation.md) は議論の入口であり、最終採用判断そのものではない。今の段階ではCLI/API機能仕様として扱わない。
 

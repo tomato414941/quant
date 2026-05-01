@@ -39,6 +39,10 @@ Equal Weight、Equal Risk Contribution、Minimum Variance、HRPなどの配分�
 
 Strategy runの中で、selection、signal、allocation、execution decisionを後から説明できる形にする。
 
+### Result Lookup
+
+手動で記録した比較表には `resultId` を載せているが、現状はそのIDからCLI/APIで結果を引けない。必要になったら、保存済みmatrix JSONや軽いlookup helperから始める。run storeへの統合は、必要性が明確になるまで急がない。
+
 ### CLI And Services
 
 CLIはcommand wiringに寄せ、payload生成やrenderingの責務を分ける。

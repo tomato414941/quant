@@ -38,6 +38,7 @@
 | Metric | Count |
 | --- | ---: |
 | Public reviewed strategies | 4 |
+| Runner-supported evaluated variants | 16 |
 
 ## How To Read
 
@@ -67,8 +68,14 @@ StrategyのIDと名前は分けて扱う。
 
 The table below lists the four public reviewed annual strategy definitions.
 Monthly, weekly, and daily `backtest-strategy` variants are runner-supported
-rebalance-frequency variants of these definitions; they are not yet separate
+rebalance-frequency variants of these definitions; they are not separate
 reviewed catalog entries.
+
+The evaluated 16-variant set is the cross product of four portfolio models
+(`equal_weight`, `equal_risk_contribution`, `minimum_variance`, `hrp`) and four
+rebalance schedules (`annual`, `monthly`, `weekly`, `daily`). The catalog keeps
+the reviewed strategy definitions flat; schedule variants are evaluation
+variants, not additional catalog states.
 
 | Strategy ID | Slug | Display Name | Universe | Selection | Signal | Portfolio Model | Rebalance Frequency | Overlay | Role | Tags | Key Parameters | Human Reviewed | Reviewed At | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

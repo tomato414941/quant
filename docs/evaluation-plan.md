@@ -2,7 +2,7 @@
 
 この文書は、今回評価するStrategy setとEvaluation Contextを定義する。
 初めて読む場合は、この文書で「何を評価するか」を確認し、結果の読み方は
-[Leaderboard](./leaderboard.md) の手動スナップショットを見る。
+[Leaderboard](./leaderboard/README.md) の手動スナップショットを見る。
 
 ## Questions This Answers
 
@@ -21,7 +21,7 @@
 
 - 全Strategy: [Strategy Catalog](./strategy-catalog.md)
 - 評価Context: [Evaluation Contexts](./evaluation-contexts.md)
-- 評価済みrunの比較: [Leaderboard](./leaderboard.md)
+- 評価済みrunの比較: [Leaderboard](./leaderboard/README.md)
 
 ## Current Evaluation Set
 
@@ -36,7 +36,7 @@
 Generated outputs are not tracked in this document. Local matrix files and raw
 helper outputs belong under ignored paths such as `backend/data/`; selected
 reproducibility records go to [Full-Period Backtest Results](./backtest-results.md),
-and comparison summaries go to [Leaderboard](./leaderboard.md).
+and comparison summaries go to [Leaderboard](./leaderboard/README.md).
 
 ## Next Evaluation Order
 

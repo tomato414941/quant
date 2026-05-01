@@ -77,7 +77,7 @@ Start here if you are viewing the repository for the first time:
 2. [Strategy Catalog](docs/strategy-catalog.md): strategy definitions and review status.
 3. [Evaluation Contexts](docs/evaluation-contexts.md): measurement conditions used to evaluate strategies.
 4. [Evaluation Plan](docs/evaluation-plan.md): current strategy set and context selected for evaluation.
-5. [Leaderboard](docs/leaderboard.md): current manual comparison snapshot and next strategy candidates.
+5. [Leaderboard](docs/leaderboard/README.md): current manual comparison snapshot and next strategy candidates.
 6. [Full-Period Backtest Results](docs/backtest-results.md): selected reproducible fixed-snapshot backtest records.
 7. [Full-Period Backtest Plan](docs/backtest-plan.md): short-term plan for extending `backtest-strategy`.
 
@@ -86,7 +86,7 @@ human-maintained snapshot of selected evaluated runs.
 
 Documentation responsibility:
 
-- `docs/leaderboard.md` is the decision-facing summary. Keep current candidates,
+- `docs/leaderboard/README.md` is the decision-facing summary. Keep current candidates,
   ranks, and interpretation there.
 - `docs/backtest-results.md` is the reproducibility log. Record selected results
   with snapshot IDs, commands, and source fields, not every ad-hoc run.

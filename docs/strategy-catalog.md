@@ -50,7 +50,7 @@
 - `Role`: 比較上の役割。
 - `Tags`: Strategyの性質を補助的に表す。評価対象かどうか、採用可否、優先順位は表さない。
 
-この文書は評価結果を書く場所ではない。評価済みrunの比較は [Leaderboard](./leaderboard.md) に置く。
+この文書は評価結果を書く場所ではない。評価済みrunの比較は [Leaderboard](./leaderboard/README.md) に置く。
 
 ## Naming Convention
 

@@ -53,10 +53,6 @@ def fit_portfolio_model_result(allocation_input: PortfolioAllocationInput) -> Po
     return fit_risk_structure_portfolio_model_result(allocation_input)
 
 
-def fit_risk_structure_portfolio_model(allocation_input: PortfolioAllocationInput) -> np.ndarray:
-    return fit_risk_structure_portfolio_model_result(allocation_input).weights
-
-
 def fit_risk_structure_portfolio_model_result(allocation_input: PortfolioAllocationInput) -> PortfolioAllocationResult:
     returns = allocation_input.returns
     portfolio_model = allocation_input.portfolio_model

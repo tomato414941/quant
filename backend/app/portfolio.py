@@ -6,8 +6,8 @@ import pandas as pd
 from app.portfolio_allocation import (
     PortfolioAllocationInput,
     build_equal_weight_fallback,
+    compute_portfolio_weights,
     expand_weights,
-    fit_portfolio_model,
 )
 from app.portfolio_domain import *
 from app.portfolio_tilt import apply_weight_tilt
@@ -67,7 +67,6 @@ from app.portfolio_forecast import (
     build_predictor_specs,
     build_strategy_forecast_snapshot,
     compute_expected_return_proxy,
-    compute_expected_return_proxy_series,
     compute_forecast_confidence_series,
     compute_prediction_feature_frame,
     compute_prediction_supplemented_score_series,

@@ -650,13 +650,6 @@ def compute_signal_return_proxy_series(
     return pd.Series(proxy, index=returns.columns, dtype="float64")
 
 
-def compute_expected_return_proxy_series(
-    returns: pd.DataFrame,
-    aligned_scores: pd.Series,
-) -> pd.Series | None:
-    return compute_signal_return_proxy_series(returns, aligned_scores)
-
-
 def compute_forecast_confidence_series(aligned_scores: pd.Series) -> pd.Series:
     confidence = pd.Series(0.0, index=aligned_scores.index, dtype="float64")
     confidence.loc[aligned_scores.notna()] = 1.0

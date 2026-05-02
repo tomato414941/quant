@@ -12,3 +12,4 @@
 | [Portfolio Execution Forecast Coupling](./portfolio-execution-forecast-coupling.md) | portfolio executionがforecast constructionを直接呼んでいる。 |
 | [Predictor Feature Recipe Ownership](./predictor-feature-recipe-ownership.md) | `FeatureSpec` がranking-derived feature construction recipeまで持っている。 |
 | [Result Lookup](./result-lookup.md) | `resultId` からCLI/APIで結果を引けない。 |
+| [Run Index Compact Record Necessity](./run-index-compact-record-necessity.md) | run indexに`genericCompactRecord`を永続化する必要性が未確認。 |

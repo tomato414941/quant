@@ -1844,7 +1844,6 @@ from app.portfolio_serialization import (
     serialize_strategy_definition,
     serialize_alignment_policy_spec,
     serialize_ranking_source_spec,
-    serialize_selection_spec,
     serialize_candidate_set_spec,
     serialize_observation_spec,
     serialize_signal_spec,

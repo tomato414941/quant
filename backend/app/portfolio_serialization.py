@@ -21,7 +21,6 @@ from app.portfolio_domain import (
     RankingFeatureRecipeSpec,
     RankingSourceSpec,
     RiskControlsSpec,
-    SelectionSpec,
     SignalSpec,
     StrategyDefinition,
     StrategyExecutionPlanSpec,
@@ -185,10 +184,6 @@ def serialize_ranking_source_spec(ranking_source: RankingSourceSpec) -> dict:
             "label": ranking_source.fallback_rule.label,
         },
     }
-
-
-def serialize_selection_spec(selection: SelectionSpec) -> dict:
-    return serialize_ranking_source_spec(selection)
 
 
 def serialize_candidate_set_spec(candidate_set_spec: CandidateSetSpec) -> dict:
@@ -622,7 +617,6 @@ __all__ = (
     "serialize_strategy_definition",
     "serialize_alignment_policy_spec",
     "serialize_ranking_source_spec",
-    "serialize_selection_spec",
     "serialize_candidate_set_spec",
     "serialize_observation_spec",
     "serialize_signal_spec",

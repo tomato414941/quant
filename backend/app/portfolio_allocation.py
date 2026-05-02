@@ -45,15 +45,11 @@ def expand_weights(
     return np.asarray([weight_map.get(str(asset), 0.0) for asset in universe_columns], dtype="float64")
 
 
-def fit_portfolio_model(allocation_input: PortfolioAllocationInput) -> np.ndarray:
-    return fit_portfolio_model_result(allocation_input).weights
+def compute_portfolio_weights(allocation_input: PortfolioAllocationInput) -> np.ndarray:
+    return compute_portfolio_allocation_result(allocation_input).weights
 
 
-def fit_portfolio_model_result(allocation_input: PortfolioAllocationInput) -> PortfolioAllocationResult:
-    return fit_risk_structure_portfolio_model_result(allocation_input)
-
-
-def fit_risk_structure_portfolio_model_result(allocation_input: PortfolioAllocationInput) -> PortfolioAllocationResult:
+def compute_portfolio_allocation_result(allocation_input: PortfolioAllocationInput) -> PortfolioAllocationResult:
     returns = allocation_input.returns
     portfolio_model = allocation_input.portfolio_model
     asset_count = len(returns.columns)

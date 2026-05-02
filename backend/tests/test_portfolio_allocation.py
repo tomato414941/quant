@@ -7,9 +7,9 @@ from app.portfolio_allocation import (
     ForecastAllocationInput,
     PortfolioAllocationInput,
     build_equal_weight_fallback,
+    compute_portfolio_allocation_result,
+    compute_portfolio_weights,
     expand_weights,
-    fit_portfolio_model,
-    fit_portfolio_model_result,
 )
 from app.portfolio_domain import build_portfolio_model_spec
 
@@ -40,7 +40,7 @@ def test_fit_equal_weight_model_respects_max_weight_after_investment_scaling() -
             "D": [-0.01, 0.00, 0.01],
         }
     )
-    weights = fit_portfolio_model(
+    weights = compute_portfolio_weights(
         PortfolioAllocationInput(
             returns=returns,
             portfolio_model=build_portfolio_model_spec("equal_weight"),
@@ -63,7 +63,7 @@ def test_fit_equal_weight_model_preserves_cash_when_cap_prevents_full_investment
             "C": [0.00, 0.01, 0.02],
         }
     )
-    weights = fit_portfolio_model(
+    weights = compute_portfolio_weights(
         PortfolioAllocationInput(
             returns=returns,
             portfolio_model=build_portfolio_model_spec("equal_weight"),
@@ -92,7 +92,7 @@ def test_fit_mean_risk_utility_falls_back_to_equal_weight() -> None:
         risk_proxy=None,
         transaction_cost=0.0,
     )
-    weights = fit_portfolio_model(
+    weights = compute_portfolio_weights(
         PortfolioAllocationInput(
             returns=returns,
             portfolio_model=build_portfolio_model_spec("mean_risk_utility"),
@@ -106,7 +106,7 @@ def test_fit_mean_risk_utility_falls_back_to_equal_weight() -> None:
     np.testing.assert_allclose(weights, np.asarray([1 / 3, 1 / 3, 1 / 3]))
 
 
-def test_fit_portfolio_model_result_reports_uncalibrated_forecast_fallback_metadata() -> None:
+def test_compute_portfolio_allocation_result_reports_uncalibrated_forecast_fallback_metadata() -> None:
     returns = pd.DataFrame(
         {
             "A": [0.01, 0.02, -0.01],
@@ -115,7 +115,7 @@ def test_fit_portfolio_model_result_reports_uncalibrated_forecast_fallback_metad
         }
     )
 
-    result = fit_portfolio_model_result(
+    result = compute_portfolio_allocation_result(
         PortfolioAllocationInput(
             returns=returns,
             portfolio_model=build_portfolio_model_spec("mean_risk_utility"),
@@ -134,7 +134,7 @@ def test_fit_portfolio_model_result_reports_uncalibrated_forecast_fallback_metad
     }
 
 
-def test_fit_portfolio_model_result_reports_optimizer_exception_fallback_metadata() -> None:
+def test_compute_portfolio_allocation_result_reports_optimizer_exception_fallback_metadata() -> None:
     returns = pd.DataFrame(
         {
             "A": [0.01, 0.02, -0.01, 0.01],
@@ -144,7 +144,7 @@ def test_fit_portfolio_model_result_reports_optimizer_exception_fallback_metadat
     )
 
     with patch("app.portfolio_allocation.RiskBudgeting.fit", side_effect=RuntimeError("boom")):
-        result = fit_portfolio_model_result(
+        result = compute_portfolio_allocation_result(
             PortfolioAllocationInput(
                 returns=returns,
                 portfolio_model=build_portfolio_model_spec("risk_budgeting"),

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from app.portfolio_accounting import MISSING_RETURN_POLICY_REJECT_IF_HELD, resolve_accounting_returns
-from app.portfolio_allocation import PortfolioAllocationInput, fit_portfolio_model_result
+from app.portfolio_allocation import PortfolioAllocationInput, compute_portfolio_allocation_result
 from app.portfolio_costs import build_flat_cost_model, compute_trade_cost, resolve_cost_model_inputs
 from app.portfolio_domain import PortfolioModelSpec
 from app.portfolio_metrics import serialize_weights, should_rebalance, summarize_segment_from_returns
@@ -161,7 +161,7 @@ def run_portfolio_model_full_period_backtest(
 
         trade_cost = 0.0
         if should_trade:
-            allocation_result = fit_portfolio_model_result(
+            allocation_result = compute_portfolio_allocation_result(
                 PortfolioAllocationInput(
                     returns=returns.iloc[: index + 1],
                     portfolio_model=portfolio_model,

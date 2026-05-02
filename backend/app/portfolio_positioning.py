@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from app.portfolio_allocation import PortfolioAllocationInput, expand_weights, fit_portfolio_model_result
+from app.portfolio_allocation import PortfolioAllocationInput, compute_portfolio_allocation_result, expand_weights
 from app.portfolio_domain import *
 from app.portfolio_forecast import build_strategy_forecast_snapshot
 from app.portfolio_selection import (
@@ -101,7 +101,7 @@ def compute_portfolio_allocation_with_metadata(
         strategy=strategy,
         predictor_context=predictor_context,
     )
-    allocation_result = fit_portfolio_model_result(
+    allocation_result = compute_portfolio_allocation_result(
         PortfolioAllocationInput(
             returns=strategy_returns,
             portfolio_model=portfolio_model,

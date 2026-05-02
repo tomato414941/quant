@@ -78,7 +78,6 @@ from app.comparison_run_builders import (
 from app.comparison_serialization import (
     compact_predictor_run_record,
     compact_run_record,
-    compact_strategy_run_record,
     deserialize_comparison_run_spec_payload,
     serialize_comparison,
     serialize_condition_variant,

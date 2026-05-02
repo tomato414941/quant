@@ -1001,10 +1001,6 @@ def compact_run_record(record: dict) -> dict:
     }
 
 
-def compact_strategy_run_record(record: dict) -> dict:
-    return compact_run_record(record)
-
-
 def sort_predictor_run_records(records: list[dict], *, sort_by: str) -> list[dict]:
     metric_key_by_sort = {
         "test_rank_ic": "testRankIc",

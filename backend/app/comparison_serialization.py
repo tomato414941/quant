@@ -957,50 +957,6 @@ def serialize_condition_variant(condition_variant: ConditionVariant) -> dict:
     }
 
 
-def compact_run_record(record: dict) -> dict:
-    run_spec = record["runSpec"]
-    result = record["result"]
-    strategy = run_spec.get("strategy", {})
-    execution_assumptions = run_spec.get("executionAssumptions", {})
-    market_slice = run_spec.get("marketSlice", {})
-    evaluation = run_spec.get("evaluation", {})
-    fingerprints = run_spec.get("fingerprints", {})
-    summary = result.get("summary", {})
-    portfolio_summary = summary.get("portfolio", summary)
-
-    return {
-        "runKey": record["runKey"],
-        "savedAtUtc": record.get("savedAtUtc"),
-        "runKind": run_spec.get("runKind"),
-        "logicVersion": run_spec.get("logicVersion"),
-        "generationMethod": run_spec.get("generation", {}).get("method"),
-        "generationBatchKey": run_spec.get("generation", {}).get("batchKey"),
-        "strategyId": strategy.get("strategyId"),
-        "strategyVersion": strategy.get("version"),
-        "strategyLabel": strategy.get("label"),
-        "strategyHypothesis": strategy.get("hypothesis"),
-        "investmentUniverseLabel": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("label"),
-        "investmentUniverseAssetCount": strategy.get("components", {}).get("core", {}).get("investmentUniverse", {}).get("assetCount"),
-        "portfolioModelLabel": strategy.get("components", {}).get("core", {}).get("portfolioModel", {}).get("label"),
-        "executionLabel": strategy.get("components", {}).get("core", {}).get("executionPolicy", {}).get("label"),
-        "period": market_slice.get("period"),
-        "timeframe": strategy.get("components", {}).get("core", {}).get("dataResolution", {}).get("key")
-        or market_slice.get("timeframe", {}).get("key"),
-        "maxInvestmentPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxInvestmentPct"),
-        "maxWeightPct": strategy.get("components", {}).get("optional", {}).get("riskControls", {}).get("maxWeightPct"),
-        "costModelKind": execution_assumptions.get("costModel", {}).get("kind"),
-        "commissionPct": execution_assumptions.get("costModel", {}).get("parameters", {}).get("commissionPct"),
-        "capitalBase": run_spec.get("capitalBase"),
-        "splitRatioPct": evaluation.get("evaluationSettings", {}).get("splitRatioPct"),
-        "strategyDefinitionFingerprint": fingerprints.get("strategyDefinition"),
-        "marketDataFingerprint": fingerprints.get("marketData"),
-        "evaluationFingerprint": fingerprints.get("evaluation"),
-        "sharpeRatio": portfolio_summary.get("sharpeRatio"),
-        "totalReturnPct": portfolio_summary.get("totalReturnPct"),
-        "maxDrawdownPct": portfolio_summary.get("maxDrawdownPct"),
-    }
-
-
 def sort_predictor_run_records(records: list[dict], *, sort_by: str) -> list[dict]:
     metric_key_by_sort = {
         "test_rank_ic": "testRankIc",
